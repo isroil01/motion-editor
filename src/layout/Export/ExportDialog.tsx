@@ -16,7 +16,7 @@ import { ExportForm, useExportModel } from './ExportForm';
 import styles from './ExportDialog.module.css';
 
 function ExportDialogFooter({ duration, fps, onClose }: { duration: number; fps: number; onClose: () => void }): JSX.Element {
-  const { busy, showQueue, outputName, activePreset, doExport, queueJob } = useExportModel(duration, fps);
+  const { busy, showQueue, outputName, activePreset, doExport, queueJob, serverRender } = useExportModel(duration, fps);
   return (
     <DialogFooter
       note={
@@ -26,21 +26,42 @@ function ExportDialogFooter({ duration, fps, onClose }: { duration: number; fps:
         </span>
       }
       secondary={
-        showQueue ? (
-          <Button
-            variant="secondary"
-            size="md"
-            leftIcon={<Icon name="queue" size="sm" />}
-            onClick={() => {
-              // Close the modal: it used to open the Render Queue panel
-              // BEHIND itself and toast about a panel the user could not see.
-              if (queueJob()) onClose();
-            }}
-            disabled={busy}
-            title="Queue this render in the Render Queue (F6) instead of exporting now"
-          >
-            Add to Queue
-          </Button>
+        showQueue || serverRender ? (
+          <>
+            {serverRender ? (
+              <Button
+                variant="secondary"
+                size="md"
+                leftIcon={<Icon name="upload" size="sm" />}
+                onClick={() => {
+                  // The render runs on the server from the cloud copy of the
+                  // project; the job tray follows it. Nothing left to show here.
+                  void serverRender.run();
+                  onClose();
+                }}
+                disabled={busy}
+                title="Render this composition on the server from its cloud copy — keeps going after you close the app"
+              >
+                {serverRender.label}
+              </Button>
+            ) : null}
+            {showQueue ? (
+              <Button
+                variant="secondary"
+                size="md"
+                leftIcon={<Icon name="queue" size="sm" />}
+                onClick={() => {
+                  // Close the modal: it used to open the Render Queue panel
+                  // BEHIND itself and toast about a panel the user could not see.
+                  if (queueJob()) onClose();
+                }}
+                disabled={busy}
+                title="Queue this render in the Render Queue (F6) instead of exporting now"
+              >
+                Add to Queue
+              </Button>
+            ) : null}
+          </>
         ) : undefined
       }
       primary={

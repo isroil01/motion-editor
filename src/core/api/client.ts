@@ -200,7 +200,19 @@ export interface ImportedAssetDto {
   type: 'image' | 'video' | 'audio';
   src: string;
   size: number;
-  metadata?: { width?: number; height?: number; duration?: number };
+  /** Server-made poster frame for video (≤480 px) — the Assets panel tile. */
+  thumbSrc?: string;
+  /** Peak values in 0–1 across the audio track, probed at upload. */
+  waveform?: number[];
+  metadata?: {
+    width?: number;
+    height?: number;
+    duration?: number;
+    fps?: number;
+    hasAudioTrack?: boolean;
+    hasAlpha?: boolean;
+    codec?: string;
+  };
 }
 
 /** The containers the server can write. `png`/`json`/`lottie` exist on historical rows only. */
