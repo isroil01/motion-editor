@@ -203,17 +203,37 @@ export interface ImportedAssetDto {
   metadata?: { width?: number; height?: number; duration?: number };
 }
 
+/** The containers the server can write. `png`/`json`/`lottie` exist on historical rows only. */
+export type RenderContainer = 'mp4' | 'mov' | 'webm' | 'gif';
+export type RenderCodec = 'h264' | 'h265' | 'prores4444' | 'vp9' | 'gif';
+export type RenderQuality = 'draft' | 'standard' | 'high' | 'max';
+/** `frames`: this editor rasterizes and uploads. `document`: the server renders the project itself. */
+export type RenderSource = 'frames' | 'document';
+
 export interface RenderJobDto {
   id: string;
-  /** Only mp4 is created now; the others exist on historical rows. */
-  format: 'webm' | 'png' | 'json' | 'lottie' | 'mp4';
+  format: RenderContainer | 'png' | 'json' | 'lottie';
   status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
   progress: number;
   projectId: string | null;
+  source: RenderSource;
+  codec: RenderCodec;
+  quality: RenderQuality;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
   resultUrl: string | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** What a deployment can render — drives the export dialog's server options. */
+export interface RenderCapabilities {
+  containers: Record<RenderContainer, RenderCodec[]>;
+  alpha: RenderCodec[];
+  qualities: RenderQuality[];
+  sources: { frames: boolean; document: boolean };
 }
 
 /** API key row for the dashboard. The secret is never returned after creation. */
@@ -938,7 +958,11 @@ export const api = {
    * entirely client-side (see core/export/exportManager) and never come here.
    */
   createRender: (payload: {
-    format: 'mp4';
+    format: RenderContainer;
+    codec?: RenderCodec;
+    quality?: RenderQuality;
+    /** `document` needs a `projectId` and a deployment with a render worker; see `getRenderCapabilities`. */
+    source?: RenderSource;
     projectId?: string;
     fps?: number;
     duration?: number;
@@ -949,6 +973,9 @@ export const api = {
     request<RenderJobDto>('/render', { method: 'POST', body: JSON.stringify(payload) }).then(
       tap(['renders']),
     ),
+  /** Cached for the session: a deployment's codecs and sources do not change under a client. */
+  getRenderCapabilities: () =>
+    cachedGet<RenderCapabilities>('/render/capabilities', { tags: ['render-capabilities'], ttlMs: 3_600_000 }),
   /**
    * Hand the server the rasterized frames. Answers 202 as soon as the archive
    * is on disk; the mux runs after the response. Poll `getRender(id)` for
