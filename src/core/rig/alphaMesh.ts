@@ -14,7 +14,7 @@
  * drags a square neighbourhood of the bounding box, so the torso smears when a
  * hand moves (measured on the reproduction character in
  * `puppetCharacterTear.test.ts`: 11.9px of torso travel per 40px hand drag on
- * the plain bbox grid, 4.1px once the grid is alpha-culled, 1.4px with the
+ * the plain bbox grid, 4.1px once the grid is alpha-culled, 3.2px with the
  * outline mesh below).
  *
  * There WAS an outline path for images — `silhouetteFromCoverage` in puppet.ts —
@@ -29,7 +29,8 @@
  *      as their own loops, and `extractAlphaContours` already resolves saddles
  *      and returns a canonical start vertex, so this stays deterministic);
  *   2. Douglas–Peucker → the staircase collapses to real edges;
- *   3. outward offset by Mesh Expansion (AE's "Expansion", in px);
+ *   3. outward offset by Mesh Expansion (AE's "Expansion", in px) PLUS the
+ *      simplification tolerance, so step 2 can never crop an opaque pixel;
  *   4. boundary resampled at the density spacing + a hexagonal lattice of
  *      interior Steiner points, Delaunay-triangulated (Bowyer–Watson) and
  *      clipped back to the region.
@@ -300,11 +301,20 @@ export function alphaOutlineRegions(
     if (best >= 0) regions[best]!.holes.push(orientPositive(rings[i]!.points));
   }
 
-  if (expansion !== 0) {
+  // Grow by the user's Expansion PLUS the simplification tolerance. The traced
+  // ring runs along coverage-cell boundaries, so it encloses every opaque pixel;
+  // Douglas–Peucker then straightens the staircase and, on a diagonal run, cuts
+  // up to `tol` INTO the artwork. The renderer draws only what the mesh covers,
+  // so at Expansion 0 that sliver of the character simply disappeared along
+  // every slanted edge. Offsetting by `tol` restores the containment guarantee:
+  // the mesh may overhang transparent pixels (harmless) but never crops opaque
+  // ones. Holes shrink by the same amount, which is the same rule from inside.
+  const grow = expansion + tol;
+  if (grow !== 0) {
     for (const r of regions) {
-      r.outer = dedupe(offsetRing(r.outer, expansion), eps);
+      r.outer = dedupe(offsetRing(r.outer, grow), eps);
       r.holes = r.holes
-        .map((h) => dedupe(offsetRing(h, -expansion), eps))
+        .map((h) => dedupe(offsetRing(h, -grow), eps))
         .filter((h) => h.length >= 3 && Math.abs(signedArea(h)) >= minArea);
     }
   }
@@ -342,6 +352,19 @@ function distSqToSegment(px: number, py: number, ax: number, ay: number, bx: num
   const qx = ax + dx * t;
   const qy = ay + dy * t;
   return (px - qx) * (px - qx) + (py - qy) * (py - qy);
+}
+
+/**
+ * How far (as a fraction of the midpoint-to-centroid distance) a triangle's
+ * edge probe is pulled inward before the region test. See `triangulateRegion`.
+ */
+const EDGE_PROBE_INSET = 0.05;
+
+/** The midpoint of edge ab, nudged toward the triangle's centroid. */
+function edgeProbe(a: Pt2, b: Pt2, centroid: Pt2): Pt2 {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  return { x: mx + (centroid.x - mx) * EDGE_PROBE_INSET, y: my + (centroid.y - my) * EDGE_PROBE_INSET };
 }
 
 function insideRegion(p: Pt2, region: AlphaRegion): boolean {
@@ -575,9 +598,22 @@ function triangulateRegion(
     if (Math.abs(cross2(a.x, a.y, b.x, b.y, c.x, c.y)) / 2 < minTriArea) continue;
     const centroid = { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3 };
     if (!insideRegion(centroid, region)) continue;
-    if (!insideRegion({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, region)) continue;
-    if (!insideRegion({ x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 }, region)) continue;
-    if (!insideRegion({ x: (c.x + a.x) / 2, y: (c.y + a.y) / 2 }, region)) continue;
+    // Edge probes sit a little INSIDE the triangle, not on the edge itself.
+    //
+    // A triangle along the outline has an edge that lies exactly on a ring
+    // segment (its two vertices ARE boundary samples), so the raw midpoint is on
+    // the boundary, where an even-odd ray cast is a coin toss — and a biased one:
+    // the +x ray counts a point on a left-hand edge as inside and one on a
+    // right-hand edge as outside. Every boundary triangle down the right side of
+    // a character was rejected, and the layer rendered with wedge-shaped holes
+    // along its torso, arm and leg (the "sliced" PNG report).
+    //
+    // Pulling each probe a few percent toward the centroid puts it strictly
+    // inside a legitimate triangle while a triangle bridging a concavity (the
+    // case these probes exist for) still lands its probe out in the gap.
+    if (!insideRegion(edgeProbe(a, b, centroid), region)) continue;
+    if (!insideRegion(edgeProbe(b, c, centroid), region)) continue;
+    if (!insideRegion(edgeProbe(c, a, centroid), region)) continue;
     tris.push(idx[t]!, idx[t + 1]!, idx[t + 2]!);
   }
   return tris.length >= 3 ? { pts, tris } : null;

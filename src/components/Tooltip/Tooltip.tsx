@@ -9,6 +9,7 @@
 
 import * as RTooltip from '@radix-ui/react-tooltip';
 import { type ReactElement, type ReactNode } from 'react';
+import { Kbd } from '@components/Kbd';
 import styles from './Tooltip.module.css';
 
 export type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
@@ -19,6 +20,12 @@ export interface TooltipProps {
   /** The trigger element. */
   children: ReactElement;
   className?: string;
+  /**
+   * A keyboard chord ("Ctrl+Shift+P", or `formatChord()` output) drawn as
+   * keycaps after the label. Optional: most tooltips have no shortcut, and a
+   * tooltip that shows one should show it the same way everywhere.
+   */
+  shortcut?: string;
 }
 
 /** One provider near the app root controls delay/skip behaviour for all tooltips. */
@@ -30,7 +37,7 @@ export function TooltipProvider({ children }: { children: ReactNode }): JSX.Elem
   );
 }
 
-export function Tooltip({ label, placement = 'top', children, className }: TooltipProps): ReactElement {
+export function Tooltip({ label, placement = 'top', children, className, shortcut }: TooltipProps): ReactElement {
   if (label === null || label === undefined || label === '') return children;
   return (
     <RTooltip.Root>
@@ -42,7 +49,8 @@ export function Tooltip({ label, placement = 'top', children, className }: Toolt
           sideOffset={6}
           collisionPadding={8}
         >
-          {label}
+          <span className={styles.label}>{label}</span>
+          {shortcut ? <Kbd chord={shortcut} size="sm" className={styles.shortcut} /> : null}
           <RTooltip.Arrow className={styles.arrow} />
         </RTooltip.Content>
       </RTooltip.Portal>

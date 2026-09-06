@@ -61,10 +61,41 @@ export function cacheWorkAreaNow(): void {
   }
   requestPreviewCache();
   const missing = stats.total - stats.cached;
-  toast(
-    `Caching ${missing} frame${missing === 1 ? '' : 's'} of the ${stats.workArea ? 'work area' : 'composition'}…`,
-    'info',
-  );
+  const what = stats.workArea ? 'work area' : 'composition';
+  // A JOB, not a timed toast: the pass runs on for as long as the work area is
+  // long, and a notice that disappeared after three seconds told the user
+  // nothing about whether it finished. The cache reports no callback, so the
+  // job follows `previewCacheStats()` at 2 Hz until every frame is in — or
+  // until the count stops moving (the pass stands down on interaction, and a
+  // job that never ends is worse than one that says "paused").
+  const JOB_ID = 'cache-work-area';
+  const ui = useUIStore.getState();
+  ui.startJob({ id: JOB_ID, label: `Caching ${missing} frame${missing === 1 ? '' : 's'} of the ${what}…`, progress: stats.cached / stats.total });
+  let lastCached = stats.cached;
+  let stalledTicks = 0;
+  const timer = window.setInterval(() => {
+    const now = previewCacheStats();
+    const done = now.total === 0 || now.cached >= now.total;
+    if (done) {
+      window.clearInterval(timer);
+      useUIStore.getState().finishJob(JOB_ID, { status: 'done', message: `Cached the ${what} — ${now.cached} frames` });
+      return;
+    }
+    stalledTicks = now.cached === lastCached ? stalledTicks + 1 : 0;
+    lastCached = now.cached;
+    useUIStore.getState().updateJob(JOB_ID, {
+      progress: now.cached / now.total,
+      label: `Caching the ${what}… ${now.cached} / ${now.total} frames`,
+    });
+    // Ten seconds without a new frame: the pass has stood down.
+    if (stalledTicks >= 20) {
+      window.clearInterval(timer);
+      useUIStore.getState().finishJob(JOB_ID, {
+        status: 'cancelled',
+        message: `Caching paused at ${now.cached} / ${now.total} frames — it resumes when the editor is idle`,
+      });
+    }
+  }, 500);
 }
 
 export function purgeRamPreview(): void {

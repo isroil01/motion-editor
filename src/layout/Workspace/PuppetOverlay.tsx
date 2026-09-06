@@ -8,7 +8,7 @@ import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { defaultAnimation } from '@motion/animation';
 import { getWorkspaceController } from '@core/workspace/WorkspaceController';
 import { readGeometry } from '@core/workspace/geometry';
-import { readNodePuppet, deform, draftPin, pinKindOf, pinColor, pinHasTransformGizmo } from '@core/rig/puppet';
+import { readNodePuppet, deform, draftPin, pinKindOf, pinColor, pinHasTransformGizmo, restPointFromDeformed } from '@core/rig/puppet';
 import { resolveLivePins } from '@core/rig/livePins';
 import { resolveActiveIkTargets } from '@core/rig/liveIkTargets';
 import { nodeRestMesh } from '@core/rig/rigMeshInputs';
@@ -218,6 +218,10 @@ export function PuppetOverlay(): JSX.Element | null {
   let deformedVertices = deform(
     animatedPins, restMesh, puppetRig?.solver ?? 'arap', puppetRig?.maxRotationDeg,
   );
+  // The puppet solve alone, BEFORE any skeleton skinning: the space a pointer
+  // lands in once `toRestSpace` has undone the skeleton, and therefore the
+  // space a new pin's click has to be inverted from (see `onClickOverlay`).
+  const puppetDeformed = deformedVertices;
 
   // Skeleton composition preview — mirror buildSnapshot exactly: when the layer
   // also carries a skeleton, the puppet solve stays in REST space and the
@@ -586,14 +590,28 @@ export function PuppetOverlay(): JSX.Element | null {
     // placed in the same millisecond used to collide and share one set of
     // animation tracks.
     const pinId = nextRigId('pin_', usedRigIds(pins));
+    // `localCoords` is where the click landed on the artwork AS DRAWN — the
+    // puppet-deformed mesh. A pin's anchor is a REST-space point, so map the
+    // click back through the current deformation; the clicked point itself
+    // becomes the pin's live position (a keyframe at the current time) so the
+    // picture does not move when the pin lands. Identity while no pin has
+    // moved: the inverse is the click and no keyframe is written.
+    const restPoint = restPointFromDeformed(localCoords, restMesh, puppetDeformed) ?? localCoords;
     const newPin = draftPin(
       puppetPinKind,
       pinId,
       `Pin ${pins.length + 1}`,
-      localCoords.x,
-      localCoords.y,
+      restPoint.x,
+      restPoint.y,
     );
-    addPuppetPin(node.id, newPin);
+    const displaced = Math.hypot(restPoint.x - localCoords.x, restPoint.y - localCoords.y) > 1e-3;
+    addPuppetPin(
+      node.id,
+      newPin,
+      displaced && puppetPinKind !== 'bend'
+        ? { t: layerT, x: localCoords.x, y: localCoords.y }
+        : undefined,
+    );
     setSelectedPinId(pinId);
   };
 

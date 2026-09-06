@@ -32,15 +32,15 @@
 }
 
 .groupLabel {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-uppercase);
   text-transform: uppercase;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .status {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-uppercase);
   text-transform: uppercase;

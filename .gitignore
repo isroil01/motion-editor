@@ -78,3 +78,6 @@ skills-lock.json
 # (which folders someone happens to have open together), not project config —
 # one of them had been sitting untracked inside src/ for a while.
 *.code-workspace
+
+# Local micro-benchmarks, never shipped.
+src/__scratch__/

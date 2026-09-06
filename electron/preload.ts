@@ -114,6 +114,14 @@ const bridge = {
     read: (hash: string) => ipcRenderer.invoke('thumb:read', hash),
   },
 
+  /** Disk-facing verbs for the Assets panel — see electron/ipc/reveal.ts. */
+  shell: {
+    revealInFolder: (filePath: string) => ipcRenderer.invoke('shell:revealInFolder', filePath),
+    pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+    pickFiles: () => ipcRenderer.invoke('dialog:pickFiles'),
+    listDir: (dir: string) => ipcRenderer.invoke('fs:listDir', dir),
+  },
+
   popout: {
     spawnWindow: (panelId: string) => ipcRenderer.invoke('popout:spawnWindow', panelId),
   },
@@ -315,6 +323,12 @@ const bridge = {
     ipcRenderer.on('menu:command', listener);
     return () => ipcRenderer.removeListener('menu:command', listener);
   },
+
+  /**
+   * The renderer's serialised menu model — main rebuilds the native menu from
+   * it (see `electron/nativeMenu.ts`). Plain data only; main validates it.
+   */
+  setMenuTemplate: (template: unknown) => ipcRenderer.invoke('menu:setTemplate', template),
 
   /**
    * Auto-update, as the renderer sees it.

@@ -86,3 +86,8 @@
 /* When collapsed, the splitter stays a thin visible line. */
 .root[data-collapsed] .splitterH { width: 2px; }
 .root[data-collapsed] .splitterV { height: 2px; }
+
+/* A collapsible divider hints that it does more than resize. */
+.splitter[data-collapsible]:hover {
+  background: var(--color-selection-hover);
+}

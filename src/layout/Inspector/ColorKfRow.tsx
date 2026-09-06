@@ -15,7 +15,7 @@ import { resolveChannelColor } from '@core/effects/effects';
 import { InspectorRow } from '@components/Inspector';
 import { ColorPicker } from '@components/ColorPicker';
 import styles from './TransformSection.module.css';
-import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 
 export interface ColorKfRowProps {
   nodeId: string;
@@ -113,11 +113,16 @@ export function ColorKfRow({
     <InspectorRow label={label} align="center">
       <div className={styles.control} onContextMenu={onContextMenu}>
         <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-          <Checkbox 
-            checked={animated} 
-            onChange={toggle} 
-            title="Toggle Animation"
-            style={{ width: 14, height: 14 }}
+          <AnimToggle
+            nodeId={nodeId}
+            tracks={[rProp, gProp, bProp, aProp]}
+            label={label}
+            animated={animated}
+            onToggle={toggle}
+            values={() => {
+              const c = Color.fromHex(displayColor);
+              return [c.r, c.g, c.b, c.a ?? 1];
+            }}
           />
         </div>
         <div className={styles.field}>

@@ -59,17 +59,12 @@ describe('track-header column model', () => {
 });
 
 describe('TRACK_HEADER_MIN_WIDTH', () => {
-  it('is the min-width `.searchBarCol` holds itself to', () => {
-    // The sub-header's left column and the track-header column share one
-    // vertical line down the panel. If the drag can go narrower than the row
-    // above will shrink, that line breaks mid-drag.
-    const css = readFileSync(
-      join(__dirname, '..', 'BottomTimeline', 'BottomTimeline.module.css'),
-      'utf8',
-    );
-    const block = css.slice(css.indexOf('.searchBarCol {'));
-    const decl = block.slice(0, block.indexOf('}'));
-    expect(decl).toContain(`min-width: ${TRACK_HEADER_MIN_WIDTH}px;`);
+  it('is wide enough for the name column and the switch block', () => {
+    // The panel's toolbar used to mirror this as `.searchBarCol { min-width }`
+    // so the two shared one vertical line; the toolbar is one flat row now,
+    // so the floor is the header column's own: below this the name column
+    // and the seven switches overlap.
+    expect(TRACK_HEADER_MIN_WIDTH).toBeGreaterThanOrEqual(8 + 88 + 4 + 120);
   });
 });
 

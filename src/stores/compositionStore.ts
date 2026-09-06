@@ -29,7 +29,7 @@ function paintColor(p: FillPaint): string {
 /** Render/cache key — changes whenever anything that affects pixels changes.
  *  The gradient paint is serialized so the viewport repaints on any stop/angle
  *  edit (a flat `background` string alone would miss gradient changes). */
-function compKeyFor(c: CompositionSettings): string {
+export function compKeyFor(c: CompositionSettings): string {
   const paint = c.backgroundPaint ? JSON.stringify(c.backgroundPaint) : '';
   // The global light MUST be in this key: it is the only thing that makes a
   // style-bound shadow move, and a key without it means dragging the light
@@ -93,6 +93,20 @@ export function sanitize(patch: Partial<CompositionSettings>): Partial<Compositi
       : DEFAULT_COMPOSITION.durationSeconds;
   }
   if (patch.startFrame !== undefined) out.startFrame = clampInt(patch.startFrame, 0, 24 * 3600 * 240, 0);
+  // The COMPOSITION's pixel aspect (preview only — see the field's note in
+  // projectStore). Bounded rather than merely finite: a 0 or a negative would
+  // collapse or mirror the stage, and past 10:1 there is no delivery format
+  // left to author for, only a mistake. `undefined` passes straight through and
+  // CLEARS the key, so a comp that never opted in keeps writing no field at all
+  // and its document round-trips byte-identically.
+  // Rounded to 4dp, which is the precision the preset catalog is stated at: a
+  // scrub that lands on 0.9090999999999999 must still read back as D1/DV NTSC
+  // and must not write seventeen digits into the document.
+  if (patch.pixelAspect !== undefined) {
+    out.pixelAspect = Number.isFinite(patch.pixelAspect)
+      ? Math.round(Math.max(0.1, Math.min(10, patch.pixelAspect)) * 1e4) / 1e4
+      : 1;
+  }
   // The light angle is deliberately NOT wrapped to 0-360: it is authored with
   // the same unbounded dial as layer rotation, and wrapping would break a
   // sweep that crosses 0.
@@ -154,12 +168,15 @@ export const useCompositionStore = function <T>(selector?: (state: CompositionSt
   // consumers stay mounted would otherwise change the hook count and crash.
   //
   // Subscribe to the tab's compositionId (a STRING), never to the tab object.
-  // The tab is re-created by immer on every `setTime`, i.e. 60×/s during playback,
-  // and because this is a plain hook rather than a real zustand store the selector
-  // runs AFTER the subscription — so `useCompositionStore(s => s.fps)` gave zero
-  // granularity and re-rendered all ~39 call sites across 17 components on every
-  // playback frame (TitleBar, ViewportHeader, inspector sections, ExportDialog…),
-  // none of which care about time. A scalar id is stable across those writes.
+  // The tab used to be re-created by immer on every `setTime`, i.e. 60×/s
+  // during playback, and because this is a plain hook rather than a real
+  // zustand store the selector runs AFTER the subscription — so
+  // `useCompositionStore(s => s.fps)` gave zero granularity and re-rendered
+  // all ~39 call sites across 17 components on every playback frame (TitleBar,
+  // ViewportHeader, inspector sections, ExportDialog…), none of which care
+  // about time. The live playhead has since moved to `playbackClockStore` and
+  // the tab record is only mirrored at ≤4Hz during playback, but the record
+  // still changes on every paused seek — a scalar id stays the right key.
   const compId = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.compositionId : undefined));
   const compData = useProjectStore(s => (compId ? s.comps[compId] : undefined)) ?? DEFAULT_COMPOSITION;
   const updateComp = useProjectStore(s => s.actions.updateComp);

@@ -100,37 +100,24 @@
   cursor: pointer;
 }
 
-.footer {
-  padding: 12px 16px;
+/* The buttons are DialogFooter's; this is only the strip they sit in. */
+.footerRow {
+  padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--color-border-strong);
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
-.cancelBtn, .okBtn {
-  padding: 6px 12px;
-  border-radius: 4px;
+/* The template row's Save… / Reset / Delete — small quiet verbs beside the
+   select, not dialog actions. */
+.cancelBtn {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  border: 1px solid transparent;
-}
-
-.cancelBtn {
   background: transparent;
   color: var(--color-text-primary);
-  border-color: var(--color-border-strong);
+  border: 1px solid var(--color-border-strong);
 }
 
 .cancelBtn:hover {
   background: var(--color-surface-3);
-}
-
-.okBtn {
-  background: var(--color-primary);
-  color: var(--color-primary-foreground);
-}
-
-.okBtn:hover {
-  background: var(--color-primary-hover);
 }

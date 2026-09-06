@@ -149,14 +149,14 @@ export function LibraryBrowser<T extends BrowsableItem>({
         </button>
       </div>
 
-      <div className={styles.libTabs} role="tablist" aria-label={`${noun} categories`}>
+      <div className={styles.libCategoryStrip} role="tablist" aria-label={`${noun} categories`}>
         {['all', ...categories].map((c) => (
           <button
             key={c}
             type="button"
             role="tab"
             aria-selected={cat === c}
-            className={cat === c ? styles.libTabActive : styles.libTab}
+            className={cat === c ? styles.libCategoryChipActive : styles.libCategoryChip}
             onClick={() => setCat(c)}
           >
             {c === 'all' ? 'All' : (categoryLabel?.(c) ?? titleCase(c))}

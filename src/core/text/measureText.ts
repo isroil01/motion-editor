@@ -160,6 +160,52 @@ export interface MeasuredTextStyle {
   letterSpacing: number;
   lineHeight: number;
   paragraphSpacing: number;
+  /** Character-panel case: 'none' | 'uppercase' | 'lowercase' | 'capitalize'. */
+  textTransform?: string;
+  /** 'normal' | 'small-caps'. */
+  fontVariant?: string;
+  /** 'baseline' | 'super' | 'sub' — superscript/subscript for the whole layer. */
+  verticalAlign?: string;
+  /** Percent; 100 = unscaled. */
+  verticalScale?: number;
+  horizontalScale?: number;
+  /** Px, positive raises the type. */
+  baselineShift?: number;
+}
+
+/** AE's superscript/subscript: the glyphs shrink to this fraction of the size… */
+export const SUPER_SUB_SCALE = 0.65;
+/** …and move by this fraction of the font size (up for super, down for sub). */
+export const SUPER_SHIFT = 0.35;
+export const SUB_SHIFT = 0.15;
+
+/** The Character panel's case transform, applied to the drawn string. */
+export function applyTextCase(text: string, mode: string | undefined): string {
+  switch (mode) {
+    case 'uppercase': return text.toUpperCase();
+    case 'lowercase': return text.toLowerCase();
+    case 'capitalize': return text.replace(/(^|\s)(\S)/g, (_m, sp: string, ch: string) => sp + ch.toUpperCase());
+    default: return text;
+  }
+}
+
+/**
+ * The whole-layer glyph transform the Character panel's scale, baseline
+ * shift and super/subscript buttons amount to: an x/y scale about the box
+ * centre and a vertical offset in px (positive = down, canvas convention).
+ * One function, read by measurement AND the rasterizer, so the box a text
+ * layer reports is the box its pixels fill.
+ */
+export function textStyleTransform(
+  s: Pick<MeasuredTextStyle, 'fontSize' | 'verticalAlign' | 'verticalScale' | 'horizontalScale' | 'baselineShift'>,
+): { sx: number; sy: number; dy: number } {
+  const va = s.verticalAlign === 'super' || s.verticalAlign === 'sub' ? SUPER_SUB_SCALE : 1;
+  const sx = ((typeof s.horizontalScale === 'number' && s.horizontalScale > 0 ? s.horizontalScale : 100) / 100) * va;
+  const sy = ((typeof s.verticalScale === 'number' && s.verticalScale > 0 ? s.verticalScale : 100) / 100) * va;
+  let dy = -(typeof s.baselineShift === 'number' && Number.isFinite(s.baselineShift) ? s.baselineShift : 0);
+  if (s.verticalAlign === 'super') dy -= s.fontSize * SUPER_SHIFT;
+  else if (s.verticalAlign === 'sub') dy += s.fontSize * SUB_SHIFT;
+  return { sx, sy, dy };
 }
 
 /** Pull the style fields that affect measurement off a text node (with optional evaluated props override). */
@@ -175,8 +221,23 @@ export function readMeasuredTextStyle(node: SceneNode, overrideProps?: Record<st
   let boxWidth: number | undefined;
   let fontWidth: number | undefined;
   let fontSlant: number | undefined;
+  let textTransform: string | undefined;
+  let fontVariant: string | undefined;
+  let verticalAlign: string | undefined;
+  let verticalScale: number | undefined;
+  let horizontalScale: number | undefined;
+  let baselineShift: number | undefined;
+  const readExtras = (p: Record<string, unknown>): void => {
+    if (typeof p.textTransform === 'string') textTransform = p.textTransform;
+    if (typeof p.fontVariant === 'string') fontVariant = p.fontVariant;
+    if (typeof p.verticalAlign === 'string') verticalAlign = p.verticalAlign;
+    if (typeof p.verticalScale === 'number') verticalScale = p.verticalScale;
+    if (typeof p.horizontalScale === 'number') horizontalScale = p.horizontalScale;
+    if (typeof p.baselineShift === 'number') baselineShift = p.baselineShift;
+  };
   for (const c of node.components) {
     const p = c.props as Record<string, unknown>;
+    readExtras(p);
     if (typeof p.content === 'string') content = p.content;
     if (typeof p.fontSize === 'number') fontSize = p.fontSize;
     if (typeof p.fontFamily === 'string') fontFamily = p.fontFamily;
@@ -191,6 +252,7 @@ export function readMeasuredTextStyle(node: SceneNode, overrideProps?: Record<st
     if (typeof p.boxWidth === 'number') boxWidth = p.boxWidth;
   }
   if (overrideProps) {
+    readExtras(overrideProps);
     if (typeof overrideProps.content === 'string') content = overrideProps.content;
     if (typeof overrideProps.fontSize === 'number') fontSize = overrideProps.fontSize;
     if (typeof overrideProps.fontFamily === 'string') fontFamily = overrideProps.fontFamily;
@@ -210,6 +272,12 @@ export function readMeasuredTextStyle(node: SceneNode, overrideProps?: Record<st
     ...(typeof fontWidth === 'number' ? { fontWidth } : {}),
     ...(typeof fontSlant === 'number' ? { fontSlant } : {}),
     ...(typeof boxWidth === 'number' && boxWidth > 0 ? { boxWidth } : {}),
+    ...(textTransform && textTransform !== 'none' ? { textTransform } : {}),
+    ...(fontVariant && fontVariant !== 'normal' ? { fontVariant } : {}),
+    ...(verticalAlign && verticalAlign !== 'baseline' ? { verticalAlign } : {}),
+    ...(typeof verticalScale === 'number' && verticalScale !== 100 ? { verticalScale } : {}),
+    ...(typeof horizontalScale === 'number' && horizontalScale !== 100 ? { horizontalScale } : {}),
+    ...(typeof baselineShift === 'number' && baselineShift !== 0 ? { baselineShift } : {}),
   };
   // Wrapping happens HERE, once, so measurement and rendering cannot disagree
   // about where the lines break — the wrapped text is just text with newlines
@@ -276,7 +344,8 @@ export function applyFontVariations(g: CanvasRenderingContext2D, s: MeasuredText
 }
 
 function keyOf(s: MeasuredTextStyle, strokeWidth: number): string {
-  return `${s.content}|${s.fontSize}|${s.fontFamily}|${s.fontWeight}|${s.fontStyle}|${s.fontWidth ?? ''}|${s.fontSlant ?? ''}|${s.letterSpacing}|${s.lineHeight}|${s.paragraphSpacing}|${strokeWidth}|${s.boxWidth ?? ''}`;
+  return `${s.content}|${s.fontSize}|${s.fontFamily}|${s.fontWeight}|${s.fontStyle}|${s.fontWidth ?? ''}|${s.fontSlant ?? ''}|${s.letterSpacing}|${s.lineHeight}|${s.paragraphSpacing}|${strokeWidth}|${s.boxWidth ?? ''}`
+    + `|${s.textTransform ?? ''}|${s.fontVariant ?? ''}|${s.verticalAlign ?? ''}|${s.verticalScale ?? ''}|${s.horizontalScale ?? ''}|${s.baselineShift ?? ''}`;
 }
 
 function box(top: number, bottom: number, halfWidth: number): TextBox {
@@ -416,7 +485,8 @@ export function measureTextSize(input: MeasuredTextStyle): { w: number; h: numbe
   const hit = renderCache.get(key);
   if (hit) return hit;
 
-  const boxes = measureTextBoxes(s, 0);
+  // Measured on the CASED string — "wide" and "WIDE" are different widths.
+  const boxes = measureTextBoxes(s.textTransform ? { ...s, content: applyTextCase(s.content, s.textTransform) } : s, 0);
   const lines = s.content.split('\n');
   const lineHeightPx = s.fontSize * (s.lineHeight || DEFAULT_LINE_HEIGHT);
   const lineBlock = lineHeightPx * lines.length + s.paragraphSpacing * Math.max(0, lines.length - 1);
@@ -429,10 +499,13 @@ export function measureTextSize(input: MeasuredTextStyle): { w: number; h: numbe
   // deeper side by the offset. Measured at 320px/lineHeight 0.7: band 310px,
   // but the deeper half reaches 157px, so 314px is the smallest box that
   // contains it — a 310px box clipped the last row of the descenders.
-  const halfW = boxes ? Math.max(boxes.advance / 2, -boxes.ink.left, boxes.ink.right) : 0;
-  const halfH = boxes ? Math.max(-boxes.ink.top, boxes.ink.bottom) : 0;
+  // Scaled, shifted glyphs (Character panel: T-, IT, A_, super/sub) need a
+  // box that fits what is actually drawn, or the layer clips its own type.
+  const tr = textStyleTransform(s);
+  const halfW = (boxes ? Math.max(boxes.advance / 2, -boxes.ink.left, boxes.ink.right) : 0) * tr.sx;
+  const halfH = (boxes ? Math.max(-boxes.ink.top, boxes.ink.bottom) : 0) * tr.sy + Math.abs(tr.dy);
   const width = halfW * 2;
-  const height = Math.max(lineBlock, halfH * 2);
+  const height = Math.max(lineBlock * tr.sy + Math.abs(tr.dy) * 2, halfH * 2);
 
   const out = {
     // Paragraph text's width is AUTHORED, not measured — that is what makes a

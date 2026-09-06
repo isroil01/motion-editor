@@ -20,12 +20,23 @@ import { Checkbox } from '@components/Checkbox';
 import { PIN_KIND_CATALOG, PUPPET_PIN_ICONS } from './puppetPinTools';
 import { pinColor } from '@core/rig/puppet';
 import { Icon } from '@components/Icon';
+import { Badge } from '@components/Badge';
+import { useViewportDisplayStore } from '@stores/viewportDisplayStore';
+import { useRotoBrushStore } from '@stores/rotoBrushStore';
+import { propagateRotoForward } from '@core/workspace/rotoBrushTool';
+import { getTimelineController } from '@core/timeline/TimelineController';
 import styles from './ToolOptionsBar.module.css';
 
+/** The two things a roto stroke can mean, and how to say so. */
+const ROTO_STROKE_KINDS = [
+  { kind: 'fg', label: 'Foreground', hint: 'Paint over the subject to keep it.' },
+  { kind: 'bg', label: 'Background', hint: 'Paint what to cut out. Alt while painting does this too.' },
+] as const;
+
 const BONE_MODES = [
-  { id: 'draw', label: 'Draw', icon: 'bone', hint: 'Draw connected bones and branches.', color: '#f97316' },
-  { id: 'pose', label: 'Pose', icon: 'move', hint: 'Pose bones, IK goals, poles, and controllers.', color: '#38bdf8' },
-  { id: 'weights', label: 'Weights', icon: 'brush', hint: 'Bind artwork by painting bone influence.', color: '#ec4899' },
+  { id: 'draw', label: 'Draw', icon: 'bone', hint: 'Draw connected bones and branches.' },
+  { id: 'pose', label: 'Pose', icon: 'move', hint: 'Pose bones, IK goals, poles, and controllers.' },
+  { id: 'weights', label: 'Weights', icon: 'brush', hint: 'Bind artwork by painting bone influence.' },
 ] as const;
 
 function Row({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
@@ -39,6 +50,10 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
 
 export function ToolOptionsBar(): JSX.Element | null {
   const activeTool = useUIStore((s) => s.activeTool);
+  // Snap-to-pixel is a VIEWPORT mode, not a tool option, which is exactly
+  // why its indicator belongs on the tool bar: it changes what every drag in
+  // every tool produces.
+  const snapToPixel = useViewportDisplayStore((s) => s.snapToPixel);
   const puppetPinKind = useUIStore((s) => s.puppetPinKind);
   const setPuppetPinKind = useUIStore((s) => s.setPuppetPinKind);
   const boneRigMode = useUIStore((s) => s.boneRigMode);
@@ -242,7 +257,6 @@ export function ToolOptionsBar(): JSX.Element | null {
                   className={boneWeightMode === tool.id ? styles.kindActive : styles.kind}
                   aria-pressed={boneWeightMode === tool.id}
                   onClick={() => setBoneWeightMode(tool.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                 >
                   <Icon name={tool.icon} size="sm" />
                   <span>{tool.label}</span>
@@ -277,7 +291,7 @@ export function ToolOptionsBar(): JSX.Element | null {
               : 'Click to place mask points. Close the path to finish.'}
         </span>
         {!ok && (
-          <span className={styles.hint} style={{ color: 'var(--color-warning, #ffb703)' }}>
+          <span className={`${styles.hint} ${styles.hintWarning}`}>
             Select exactly one layer — mask tools need a target.
           </span>
         )}
@@ -288,13 +302,118 @@ export function ToolOptionsBar(): JSX.Element | null {
         )}
       </>
     );
+  } else if (activeTool === 'roto') {
+    // ── VIEWPORT-ROTO-OPTIONS (unique anchor) ──────────────────────────
+    content = <RotoOptions />;
   }
 
-  if (!content) return null;
+  // The bar shows even with no per-tool content when snap-to-pixel is on: the
+  // badge is a MODE indicator, and a mode that silently rounds every drag has
+  // to be visible from the canvas, not only from a menu.
+  if (!content && !snapToPixel) return null;
   return (
     <div className={styles.bar} role="toolbar" aria-label="Tool options">
       {content}
+      {/* ── VIEWPORT-SNAP-BADGE (unique anchor) ─────────────────────────
+          Pushed to the far end so it never moves as tool options change
+          width — a mode light that jumps around is one you stop trusting. */}
+      {snapToPixel && (
+        <>
+          <span className={styles.snapSpacer} />
+          <Badge
+            variant="info"
+            size="sm"
+            title="Positions and sizes round to whole pixels while dragging or nudging (Ctrl+Alt+Shift+P)"
+          >
+            <Icon name="magnet" size="sm" />
+            Snap to Pixel
+          </Badge>
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * Roto Brush options: which side the brush paints, its width, the matte's
+ * feather, and "propagate forward" — the tracker pass that carries the matte
+ * from the playhead to the end of the work area.
+ *
+ * The strokes themselves are `Workspace/RotoBrushOverlay`; this is the row of
+ * numbers that gesture needs and cannot hold.
+ */
+function RotoOptions(): JSX.Element {
+  const kind = useRotoBrushStore((s) => s.kind);
+  const setKind = useRotoBrushStore((s) => s.setKind);
+  const size = useRotoBrushStore((s) => s.size);
+  const featherPx = useRotoBrushStore((s) => s.featherPx);
+  const strokes = useRotoBrushStore((s) => s.strokes);
+  const busy = useRotoBrushStore((s) => s.busy);
+  const progress = useRotoBrushStore((s) => s.progress);
+  const nodeId = useRotoBrushStore((s) => s.nodeId);
+
+  const canPropagate = !!nodeId && strokes.some((s) => s.kind === 'fg') && !busy;
+
+  const propagate = (): void => {
+    if (!nodeId) return;
+    const store = useRotoBrushStore.getState();
+    const controller = getTimelineController();
+    const from = controller.currentSeconds;
+    const wa = controller.getWorkArea();
+    const to = wa ? wa.end : controller.durationSeconds;
+    if (!(to > from)) {
+      store.setStatus('Nothing ahead of the playhead to propagate into.');
+      return;
+    }
+    store.setBusy(true, 0);
+    store.setStatus('Propagating forward…');
+    propagateRotoForward(nodeId, store.strokes, from, to, controller.fps, store.featherPx, (f) => {
+      useRotoBrushStore.getState().setBusy(true, f);
+    })
+      .then(() => {
+        useRotoBrushStore.getState().setStatus(null);
+      })
+      .catch((err: unknown) => {
+        useRotoBrushStore.getState().setStatus(err instanceof Error ? err.message : 'Propagation failed.');
+      })
+      .finally(() => useRotoBrushStore.getState().setBusy(false));
+  };
+
+  return (
+    <>
+      <span className={styles.optLabel}>Roto</span>
+      <div className={styles.kinds} role="group" aria-label="Roto brush stroke">
+        {ROTO_STROKE_KINDS.map(({ kind: k, label, hint }) => (
+          <button
+            key={k}
+            type="button"
+            className={kind === k ? styles.kindActive : styles.kind}
+            title={hint}
+            aria-label={label}
+            aria-pressed={kind === k}
+            onClick={() => setKind(k)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <Row label="Size">
+        <ValueField value={size} unit="px" min={2} max={200} precision={0} onChange={(v) => useRotoBrushStore.getState().setSize(Number(v))} />
+      </Row>
+      <Row label="Feather">
+        <ValueField value={featherPx} unit="px" min={0} max={64} precision={0} onChange={(v) => useRotoBrushStore.getState().setFeather(Number(v))} />
+      </Row>
+      <button
+        type="button"
+        className={styles.kind}
+        disabled={!canPropagate}
+        title="Track the matte forward from the playhead to the end of the work area"
+        onClick={propagate}
+      >
+        <Icon name="skip-forward" size="sm" />
+        {busy ? `Propagating ${Math.round(progress * 100)}%` : 'Propagate Forward'}
+      </button>
+    </>
   );
 }
 

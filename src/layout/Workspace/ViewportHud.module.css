@@ -1,0 +1,39 @@
+/*
+ * The in-viewport HUD. Top-left of the stage, over the picture, and
+ * ABSOLUTELY not clickable — a readout that swallows a click on the layer
+ * behind it is worse than no readout.
+ */
+.hud {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 4;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-overlay-panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-overlay-panel-bg);
+  box-shadow: var(--color-overlay-panel-shadow);
+  color: var(--color-overlay-text);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+.key {
+  opacity: 0.6;
+}
+
+.value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A number that has crossed into "this is why it feels slow" territory. */
+.warn {
+  color: var(--color-warning);
+}

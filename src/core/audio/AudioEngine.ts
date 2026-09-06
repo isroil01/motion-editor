@@ -140,6 +140,19 @@ class AudioEngine {
   // and `master` also feeds a splitter → per-channel analysers so the VU meter
   // reads the full stereo mix. Built lazily with the context.
   private master: GainNode | null = null;
+  /** Preview mute — the master gain at 0. Voices keep running so unmuting is
+   *  instant and stays in sync; nothing about the layers' own mute changes. */
+  private masterMuted = false;
+
+  /** Mute or unmute everything the engine plays (the Preview panel's switch). */
+  setMasterMuted(muted: boolean): void {
+    this.masterMuted = muted;
+    if (this.master) this.master.gain.value = muted ? 0 : 1;
+  }
+
+  isMasterMuted(): boolean {
+    return this.masterMuted;
+  }
   private analyserL: AnalyserNode | null = null;
   private analyserR: AnalyserNode | null = null;
   private meterBufL: Float32Array<ArrayBuffer> | null = null;
@@ -161,6 +174,7 @@ class AudioEngine {
    *  VU meter. Voices connect to `master` (see startVoice). */
   private buildMasterChain(ctx: AudioContext): void {
     const master = ctx.createGain();
+    master.gain.value = this.masterMuted ? 0 : 1;
     master.connect(ctx.destination);
     try {
       const splitter = ctx.createChannelSplitter(2);

@@ -15,6 +15,124 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 
+// ── Design-system rules (local plugin) ──────────────────────────────────
+//
+// Two rules, both WARNINGS, both scoped to src/layout. They exist so the
+// token layer stops leaking: a hex literal in a layout file is a colour the
+// theme can never reach, and a `.button`/`.btn` class defined outside
+// src/components is a fourth copy of Button waiting to drift. Neither is an
+// error today — there are ~180 of them — so `--max-warnings` in package.json
+// is the ratchet: it may only go DOWN.
+//
+// CSS has no parser here, so a PROCESSOR turns each stylesheet into a JS
+// block with one line per source line and a string literal per hex found on
+// that line. Line numbers survive; the rule below then sees ordinary
+// `Literal` nodes and the report lands on the right line of the .css file.
+
+const HEX_RE = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![0-9a-zA-Z_-])/g;
+
+const cssHexProcessor = {
+  meta: { name: 'design-system/css-hex', version: '1.0.0' },
+  preprocess(text) {
+    const lines = text.split('\n').map((line) => {
+      // Strip a trailing block comment on the line, so a documented literal
+      // ("was #1e1e1e") does not count. Multi-line comments are still seen —
+      // that is acceptable noise for a warning.
+      const code = line.replace(/\/\*.*?\*\//g, '');
+      const hexes = code.match(HEX_RE);
+      return hexes ? `void [${hexes.map((h) => JSON.stringify(h)).join(', ')}];` : '';
+    });
+    return [{ text: lines.join('\n'), filename: 'hex.js' }];
+  },
+  postprocess(messages) {
+    return messages.flat();
+  },
+  supportsAutofix: false,
+};
+
+const designSystemPlugin = {
+  meta: { name: 'design-system', version: '1.0.0' },
+  processors: { 'css-hex': cssHexProcessor },
+  rules: {
+    'no-hex-color': {
+      meta: {
+        type: 'suggestion',
+        docs: { description: 'Colour literals belong in src/tokens; use a var(--color-*) token.' },
+        schema: [],
+        messages: {
+          hex: 'Hex colour {{hex}} in a layout file — the theme can never reach it. Use a --color-* token (see src/tokens/colors.css, domain.css).',
+        },
+      },
+      create(context) {
+        const check = (node, value) => {
+          if (typeof value !== 'string') return;
+          const m = value.match(HEX_RE);
+          if (m) context.report({ node, messageId: 'hex', data: { hex: m[0] } });
+        };
+        return {
+          Literal: (node) => check(node, node.value),
+          TemplateElement: (node) => check(node, node.value.cooked),
+        };
+      },
+    },
+    'no-local-button-class': {
+      meta: {
+        type: 'suggestion',
+        docs: { description: 'Buttons come from @components/Button; a local .button/.btn class is a fork of it.' },
+        schema: [],
+        messages: {
+          local: 'className "{{name}}" looks like a locally styled button. Use <Button> / <IconButton> from @components so size, focus ring and density stay on the system.',
+        },
+      },
+      create(context) {
+        const BUTTONISH = /button|btn/i;
+        const report = (node, name) => context.report({ node, messageId: 'local', data: { name } });
+        const walk = (node) => {
+          if (!node) return;
+          switch (node.type) {
+            case 'Literal':
+              if (typeof node.value === 'string' && BUTTONISH.test(node.value)) report(node, node.value);
+              break;
+            case 'TemplateLiteral':
+              for (const q of node.quasis) if (BUTTONISH.test(q.value.cooked ?? '')) report(q, q.value.cooked);
+              for (const e of node.expressions) walk(e);
+              break;
+            case 'MemberExpression':
+              // styles.saveButton / styles['btn']
+              if (!node.computed && node.property.type === 'Identifier' && BUTTONISH.test(node.property.name)) report(node.property, node.property.name);
+              else if (node.computed) walk(node.property);
+              break;
+            case 'CallExpression':
+              for (const a of node.arguments) walk(a);
+              break;
+            case 'LogicalExpression':
+            case 'BinaryExpression':
+              walk(node.left); walk(node.right);
+              break;
+            case 'ConditionalExpression':
+              walk(node.consequent); walk(node.alternate);
+              break;
+            case 'JSXExpressionContainer':
+              walk(node.expression);
+              break;
+            case 'ArrayExpression':
+              for (const el of node.elements) walk(el);
+              break;
+            default:
+              break;
+          }
+        };
+        return {
+          JSXAttribute(node) {
+            if (node.name?.name !== 'className' || !node.value) return;
+            walk(node.value);
+          },
+        };
+      },
+    },
+  },
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -156,6 +274,35 @@ export default tseslint.config(
         { object: 'window', property: 'alert', message: 'F-dialog: use customAlert() from @components/Modal/Dialogs.' },
         { object: 'window', property: 'confirm', message: 'F-dialog: use customConfirm() from @components/Modal/Dialogs.' },
       ],
+    },
+  },
+  {
+    // ── Design system: no colour literals in layout code ────────────────
+    // Canvas overlays draw with the 2D context and legitimately hold colour
+    // literals for things that are not chrome (marching ants, snap guides).
+    files: ['src/layout/**/*.tsx'],
+    ignores: ['src/layout/Workspace/*Overlay.tsx', '**/*.test.{ts,tsx}'],
+    plugins: { 'design-system': designSystemPlugin },
+    rules: {
+      'design-system/no-hex-color': 'warn',
+      'design-system/no-local-button-class': 'warn',
+    },
+  },
+  {
+    // The same hex rule for stylesheets, via the processor (see the header).
+    files: ['src/layout/**/*.css'],
+    plugins: { 'design-system': designSystemPlugin },
+    processor: 'design-system/css-hex',
+  },
+  {
+    // The virtual JS blocks the processor emits out of each stylesheet.
+    files: ['src/layout/**/*.css/*.js'],
+    plugins: { 'design-system': designSystemPlugin },
+    languageOptions: { sourceType: 'module' },
+    rules: {
+      'design-system/no-hex-color': 'warn',
+      // The block is `void ["#abc"];` per line — nothing else applies.
+      'no-unused-expressions': 'off',
     },
   },
   {

@@ -19,28 +19,25 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { cn } from '@utils/cn';
 import { CacheBars } from './CacheBars';
 import { Icon, type IconName } from '@components/Icon';
-import { StopwatchButton, KeyframeNavigator } from '@components/PropertyRow';
-import { PickWhip } from '@components/PickWhip';
-import { keyframeShapes, keyframePaths, describeShapes } from './keyframeShape';
-import { snapKeyframeGroup, type SnapTarget } from './keyframeSnap';
-import { collectClipSnapTargets, snapClipEdges, snapClipTime, type ClipSnapTarget } from './clipSnap';
+import { ROW_HEIGHT_PRESETS, ROW_HEIGHT_MIN, ROW_HEIGHT_MAX, rowHeightFromDrag } from './rowHeightDrag';
+import { collectClipSnapTargets, snapClipTime } from './clipSnap';
 import { collectClipCuts, findClipCutNear, type ClipCut } from './clipCuts';
 import { useTimelineEditModeStore } from './timelineEditMode';
-import { TimelineTools } from './TimelineTools';
-import { TransitionPalette, readTransitionDrag, isTransitionDrag } from './transitionPalette';
+import { readTransitionDrag, isTransitionDrag } from './transitionPalette';
 import {
   layoutTransitions,
   durationFromEdgeDrag,
@@ -61,190 +58,63 @@ import {
   TRANSITION_LABEL,
 } from '@core/timeline/transitions';
 import { getTimelineController } from '@core/timeline/TimelineController';
-import { registerTimelineScroll, setTimelineViewportWidth } from './timelineViewport';
-import { scaleSelection, scaleGrip } from './keyframeTimeScale';
-import { ValueField } from '@components/ValueField';
+import { registerTimelineScroll, setTimelineLaneGeometry, setTimelineViewportWidth } from './timelineViewport';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import { useResizeObserver } from '@hooks/useResizeObserver';
 import { clamp } from '@utils/lang';
-import type {
-  TimelineModel,
-  TimelineTrack,
-  TimelineKeyframeRef,
-  TimelinePropertyTrack,
-  TimelineClip,
-} from './TimelineModel';
-import { Dropdown } from '@components/Dropdown';
+import type { TimelineModel, TimelinePropertyTrack, TimelineClip } from './TimelineModel';
 import { type LayerBlendMode } from '@core/effects/blendMode';
-import { blendDropdownItems, blendModeLabel } from '@layout/Inspector/blendMenu';
-import { eligibleParents, parentOfNode, parentOptionsFor } from '@core/scene/parenting';
-import type { MenuSelectModifiers } from '@components/Menu';
-import { useKeyframeSelectionStore } from '@stores/keyframeSelectionStore';
-import {
-  combineMarqueeSelection,
-  exceedsDragThreshold,
-  marqueeHitKeyframeIds,
-  normalizeMarqueeRect,
-  type MarqueeRect,
-  type MarqueeRow,
-} from './marqueeSelection';
-import { audioEngine } from '@core/audio/AudioEngine';
-import { waveformPath, peaksInRange } from '@core/audio/waveform';
+import { OPEN_WINDOW, cullTicks, pagedTimeWindow, sameWindow, timeInWindow, type TimeWindow } from './visibleWindow';
+import { kfPreviewForRow, previewsForRow } from './dragOverlay';
+import { createEdgeAutoScroller, followScrollLeft } from './playheadFollow';
+import { installTimelineExpandCommands, recursiveTogglePlan, expandAllPlan, collapseAllPlan, registerTimelineExpansion } from './expandCollapse';
+import { registerTimelineFitSource } from './fitSelection';
+import { installTimelineSnapCommands, toggleTimelineSnap } from './snapCommands';
+import { TIMELINE_EXTRA_COLUMNS, parseExtraColumns, type TimelineExtraColumn } from './timelineColumns';
 import styles from './Timeline.module.css';
-import { ColorPicker } from '@components/ColorPicker';
-import { MATTE_OPTIONS, MATTE_SHORT_LABEL, matteOptionId, applyMatteOption } from '@components/MatteControl/matteMenu';
-import { TIMELINE_GROUP_ORDER, type TimelineGroupKey } from '@core/timeline/propertyTree';
 import { useUIStore } from '@stores/uiStore';
+import { MarkerLane } from './MarkerLane';
+import { MARKER_LANE_HEIGHT } from './markerGeometry';
+import { TranscriptLane } from './TranscriptLane';
+import { TRANSCRIPT_LANE_HEIGHT } from './transcriptGeometry';
+import { HeatLane } from './HeatLane';
+import { addCompMarkerAtPlayhead, addLayerMarkersAtPlayhead, installTimelineMarkerCommands } from './markerCommands';
+import { installTimelineClipEditCommands, rippleDeleteSelection } from './clipEditCommands';
+import { stickyCategoryFor } from './stickyCategory';
+import { activeCompRootId } from '@core/scene/activeComp';
+import {
+  RULER_HEIGHT_DEFAULT,
+  TRACK_HEIGHT_DEFAULT,
+  TIMELINE_LEFT_OFFSET,
+  CUT_GRAB_PX,
+  CUT_ZONE_PX,
+  TRACK_HEADER_MIN_WIDTH,
+  headerWidthFor,
+  resolveTrackHeaderWidth,
+  TIMELINE_TOP_PADDING,
+  cutKeyOf,
+  TIMELINE_BOTTOM_PADDING,
+  getPropertyCategory,
+  type Row,
+} from './timelineShared';
+import { DragHud, type DragHudState } from './DragHudOverlay';
+import { Minimap, Ruler, generateRulerTicks } from './RulerStack';
+import { TrackHeader, PropertyHeader, TrackCategoryHeader } from './TrackHeaderColumn';
+import { TrackContent, LaneRow } from './Lanes';
+import { Keyframes } from './KeyframeLayer';
+import { useClipDrag } from './useClipDrag';
+import { useKeyframeDrag } from './useKeyframeDrag';
+import { useMarquee } from './useMarquee';
 
-/**
- * The column-head / ruler strip.
- *
- * 26, not 36. Everything in it is a 22px control or a 12px label, so ten of
- * those 36 pixels were padding — a header band half again as tall as the rows
- * it labels, which made the track list look like it started a third of the way
- * down the panel.
- */
-const RULER_HEIGHT_DEFAULT = 26;
-const TRACK_HEIGHT_DEFAULT = 36;
-/**
- * The edit-tool row above the ruler. One `--control-height-md` button plus the
- * air around it; kept as a constant because the lanes' filler height is derived
- * from the panel height minus the chrome above them, and a row that exists in
- * the DOM but not in that sum leaves the last track clipped.
- */
-const TIMELINE_TOOLS_HEIGHT = 30;
-/**
- * How near a cut the pointer must be, in SCREEN pixels, to start a roll.
- *
- * Pixels rather than frames so the grab feels the same at every zoom — a
- * frame-based radius would be unhittable zoomed out and would swallow whole
- * clips zoomed in, which is the same reasoning `clipSnap` gives for its own
- * threshold.
- */
-const ROLL_GRAB_PX = 6;
-/**
- * How near a cut a chip has to be dropped, in pixels.
- *
- * Wider than the roll's grab radius on purpose: a roll is an edit that must not
- * fire by accident, while a drop is a deliberate act with a visible target
- * lighting up before the release — so the drop can afford to be forgiving.
- */
-const CUT_GRAB_PX = 14;
-/** The width of the strip drawn at a cut while a chip hovers it. */
-const CUT_ZONE_PX = 12;
-/**
- * The track-header column model, in pixels — the TypeScript half of the one in
- * Timeline.module.css. Both halves have to agree.
- *
- * These are FIXED widths: a header narrower than their sum does not squeeze the
- * columns, it hides the right-hand ones behind the lanes. That is how Mode,
- * TrkMat and Parent & Link came to be unreachable — the stored default was
- * 460px against the ~576px the mode columns need — so `headerWidthFor` below
- * turns the sum into a floor instead of leaving it to chance.
- */
-const TL_COLUMN_WIDTHS = {
-  /** `.colHeads` / `.trackHeader` horizontal padding, both edges. */
-  padding: 8,
-  /** `--tl-col-gap`, between every pair of columns. */
-  gap: 4,
-  /** A divider rule's margin + padding, on the one side that draws it. */
-  rule: 16,
-  preInfo: 72,
-  name: 190,
-  switches: 178,
-  mode: 70,
-  matte: 58,
-  parent: 120,
-} as const;
+// The names other files import from here — kept on this module after the
+// split so no importer moves.
+export { TIMELINE_LEFT_OFFSET, TRACK_HEADER_MIN_WIDTH, headerWidthFor } from './timelineShared';
+export { PropertyHeader } from './TrackHeaderColumn';
+export { areRowPropsEqual } from './rowMemo';
 
-/**
- * The narrowest the header column may be dragged.
- *
- * Not a limit on the COLUMNS — those keep their widths and scroll. It is the
- * width the sub-header row above needs: the timecode, the filter field and the
- * eight toggles share that strip, and below this they stop being a row and
- * start overlapping. Mirrored by `.searchBarCol`'s `min-width`, so the vertical
- * line those two share cannot break at any drag position.
- */
-export const TRACK_HEADER_MIN_WIDTH = 260;
-
-/** Width the header needs for `columns` — see `TL_COLUMN_WIDTHS`. */
-export function headerWidthFor(columns: 'switches' | 'modes' | 'both'): number {
-  const W = TL_COLUMN_WIDTHS;
-  // A/V gutter (ruled) + gap + name. Always present.
-  let total = W.padding + (W.preInfo + W.rule) + W.gap + W.name;
-  if (columns !== 'modes') total += W.gap + W.switches + W.rule;
-  if (columns !== 'switches') {
-    total += W.gap + W.mode + W.rule;
-    total += W.gap + W.matte + W.rule;
-    total += W.gap + W.parent + W.rule;
-  }
-  return total;
-}
-
-const TIMELINE_TOP_PADDING = 6;
-
-/** A stable identity for a cut — it has no id of its own, being emergent. */
-const cutKeyOf = (cut: ClipCut): string => `${cut.leftClipId}|${cut.rightClipId}`;
-const TIMELINE_BOTTOM_PADDING = 12;
-
-/** A virtualized row is either a track summary row, a category accordion row, or a property sub-row. */
-type Row =
-  | { type: 'track'; track: TimelineTrack; expanded: boolean; hasProps: boolean }
-  | { type: 'category'; track: TimelineTrack; categoryKey: string; label: string; icon: IconName; expanded: boolean; count: number }
-  | { type: 'prop'; track: TimelineTrack; prop: TimelinePropertyTrack; categoryKey: string };
-
-/**
- * The heading each section gets, in AE's own twirl order.
- *
- * The ORDER lives in the model (`TIMELINE_GROUP_ORDER`) because it is a fact
- * about the layer's structure, not about this view; only the words and the
- * glyph are decided here.
- */
-const GROUP_HEADING: Readonly<Record<TimelineGroupKey, { label: string; icon: IconName }>> = {
-  text: { label: 'Text', icon: 'type' },
-  contents: { label: 'Contents', icon: 'shape' },
-  masks: { label: 'Masks', icon: 'mask-square' },
-  effects: { label: 'Effects', icon: 'sparkles' },
-  transform: { label: 'Transform', icon: 'sliders-h' },
-  styles: { label: 'Layer Styles', icon: 'palette' },
-  material: { label: 'Material Options', icon: 'cube' },
-  audio: { label: 'Audio', icon: 'audio' },
-  time: { label: 'Time', icon: 'clock' },
-};
-
-/**
- * Which heading a property row sits under.
- *
- * The model states it (`prop.group`). The substring guess below survives only
- * for rows built before it did — it reads the label for words like "blur", so
- * it filed a text animator's Blur under Effects and could not tell a layer
- * style from the effect it compiles to.
- */
-function getPropertyCategory(prop: TimelinePropertyTrack): { key: string; label: string; icon: IconName; order: number } {
-  if (prop.group) {
-    const heading = GROUP_HEADING[prop.group];
-    return { key: prop.group, ...heading, order: TIMELINE_GROUP_ORDER[prop.group] };
-  }
-
-  const p = prop.prop.toLowerCase();
-  const label = (prop.label || '').toLowerCase();
-  if (
-    p.includes('anchor') || p.includes('position') || p === 'x' || p === 'y' || p === 'z' ||
-    p.includes('scale') || p.includes('rotation') || p.includes('orientation') || p.includes('opacity') ||
-    label.includes('anchor') || label.includes('position') || label.includes('scale') ||
-    label.includes('rotation') || label.includes('opacity')
-  ) {
-    return { key: 'transform', ...GROUP_HEADING.transform, order: TIMELINE_GROUP_ORDER.transform };
-  }
-  if (
-    p.includes('effect') || p.includes('blur') || p.includes('shadow') || p.includes('glow') ||
-    p.includes('filter') || label.includes('effect') || label.includes('blur') || label.includes('shadow')
-  ) {
-    return { key: 'effects', ...GROUP_HEADING.effects, order: TIMELINE_GROUP_ORDER.effects };
-  }
-  return { key: 'contents', ...GROUP_HEADING.contents, order: TIMELINE_GROUP_ORDER.contents };
-}
+// Row-height presets and grip bounds live in `rowHeightDrag.ts`; re-exported
+// so the sub-header's cycle button keeps its import.
+export { ROW_HEIGHT_PRESETS, ROW_HEIGHT_MIN, ROW_HEIGHT_MAX };
 
 export interface TimelineProps {
   model: TimelineModel;
@@ -349,45 +219,6 @@ export interface TimelineProps {
   playheadTime?: number;
 }
 
-/**
- * The drag read-out for slip / slide / roll, in FRAMES.
- *
- * Frames, not seconds or timecode: these are edits you make one or two frames
- * at a time, and "+0.067s" is not a quantity anyone cuts with. The second line
- * is the resulting in/out — the actual question a slip answers ("which part of
- * the shot am I on now?"), which the delta alone cannot tell you.
- *
- * Pure and module-level so it is not rebuilt on every pointermove, and so the
- * arithmetic is readable apart from the DOM work around it.
- */
-function hudLines(
-  d: {
-    mode: 'move' | 'start' | 'end' | 'slip' | 'slide' | 'roll';
-    start: number;
-    duration: number;
-    sourceInSec: number;
-    live: { start: number; duration: number; sourceInSec: number };
-    roll?: { deltaSec: number; left: { duration: number }; right: { start: number; duration: number } };
-  },
-  fps: number,
-): string[] {
-  const f = (sec: number): number => Math.round(sec * fps);
-  const signed = (frames: number): string => `${frames > 0 ? '+' : ''}${frames}`;
-  if (d.mode === 'roll' && d.roll) {
-    const delta = f(d.roll.deltaSec);
-    const cut = d.roll.right.start + d.roll.deltaSec;
-    return [`Roll ${signed(delta)}f`, `cut @ ${f(cut)}f`];
-  }
-  if (d.mode === 'slip') {
-    const delta = f(d.live.sourceInSec - d.sourceInSec);
-    const inF = f(d.live.sourceInSec);
-    return [`Slip ${signed(delta)}f`, `src ${inF} → ${inF + f(d.live.duration)}`];
-  }
-  const delta = f(d.live.start - d.start);
-  const startF = f(d.live.start);
-  return [`Slide ${signed(delta)}f`, `${startF} → ${startF + f(d.live.duration)}`];
-}
-
 function Timeline({
   model,
   onScrub,
@@ -439,6 +270,22 @@ function Timeline({
   const showSwitches = columns !== 'modes';
   const showModes = columns !== 'switches';
   const rulerHeight = model.rulerHeight ?? RULER_HEIGHT_DEFAULT;
+  /**
+   * The optional lanes that ride WITH the ruler: markers above it, the
+   * transcript below it. They are part of the sticky chrome rather than of the
+   * scrolling rows, because both answer "what is at this TIME" and an answer
+   * that scrolls away with the layers is no answer at all.
+   *
+   * `rulerStackHeight` is the number every layout below has to agree on — the
+   * header column's own band, the row list's offset, the minimap's viewport.
+   * A single derived constant, because the failure mode of getting one of them
+   * wrong is that the track headers stop lining up with their own lanes, which
+   * is only visible if you look for it.
+   */
+  const transcriptLaneOn = useUIStore((s) => s.timelineTranscriptLane);
+  const heatSource = useUIStore((s) => s.timelineHeatSource);
+  const rulerChromeHeight = MARKER_LANE_HEIGHT + (transcriptLaneOn ? TRANSCRIPT_LANE_HEIGHT : 0);
+  const rulerStackHeight = rulerHeight + rulerChromeHeight;
   const trackHeight = model.trackHeight ?? TRACK_HEIGHT_DEFAULT;
   // The header column is user-resizable: property names + their value fields
   // need very different room depending on what's open, and a fixed column
@@ -451,8 +298,20 @@ function Timeline({
   // narrowing it hides columns behind an edge you can scroll back — which is
   // the AE behaviour, and does not force the panel to a width the user did not
   // ask for. See `.colHeads` / `.trackHeaderScroller`.
-  const minHeaderWidth = headerWidthFor(columns);
-  const headerWidth = model.trackHeaderWidth ?? prefHeaderWidth ?? minHeaderWidth;
+  // ── Optional In / Out / Duration columns ───────────────────────
+  const extraColumnPref = usePreferenceStore((s) => s.timelineExtraColumns);
+  const extraColumns = useMemo<TimelineExtraColumn[]>(
+    // Stretch is offered only when there is a time-stretch API to drive it;
+    // there is none today (see the report), so it is filtered out rather than
+    // shipped as a column that shows 100% and refuses every edit.
+    () => parseExtraColumns(extraColumnPref).filter((c) => c !== 'stretch'),
+    [extraColumnPref],
+  );
+
+  const minHeaderWidth = headerWidthFor(columns, extraColumns.length);
+  // The same resolution the panel's toolbar makes for its left column — see
+  // `resolveTrackHeaderWidth` — so the two edges are one edge.
+  const headerWidth = resolveTrackHeaderWidth(model.trackHeaderWidth, prefHeaderWidth, columns, extraColumns.length);
 
   // Playhead is the one value that changes 60×/s during playback. We accept
   // it as a separate prop so the model can stay referentially stable and the
@@ -462,6 +321,8 @@ function Timeline({
 
   const lanesRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
+  /** The row minimap, when it is showing — it overlays the lanes' right edge. */
+  const minimapRef = useRef<HTMLDivElement | null>(null);
   /**
    * The column-head strip, kept in step with the rows' horizontal scroll.
    *
@@ -481,21 +342,30 @@ function Timeline({
   const [scrollLeft, setScrollLeft] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
 
-  const [, forceUpdate] = useState({});
-  useEffect(() => {
-    return audioEngine.onChange(() => forceUpdate({}));
-  }, []);
-
   // ── Publish the lane viewport, for out-of-panel zoom actions ────
   // "Fit composition" lives in the status bar and cannot measure this: the lane
   // width is whatever is left after the user-resizable header column, which is
   // known here and nowhere else. Written to a module store rather than lifted
   // through props — the timeline's host does not connect the two panels, and
   // this fires on every frame of a divider drag.
+  //
+  // The panel's toolbar reads the same record to put the time navigator over
+  // the lanes: the left edge (client space — the row subtracts its own) and
+  // the width the minimap covers at the right, when it is showing.
+  const publishLanes = useCallback((): void => {
+    const el = lanesRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const minimap = minimapRef.current;
+    const gutter = minimap
+      ? Math.max(0, rect.left + el.clientWidth - minimap.getBoundingClientRect().left)
+      : 0;
+    setTimelineLaneGeometry({ width: el.clientWidth, left: rect.left, gutter });
+  }, []);
   useEffect(() => {
     const el = lanesRef.current;
     if (!el) return;
-    const publish = (): void => setTimelineViewportWidth(el.clientWidth);
+    const publish = publishLanes;
     publish();
     const ro = new ResizeObserver(publish);
     ro.observe(el);
@@ -510,7 +380,7 @@ function Timeline({
       // took over in the meantime — React mounts the new one before this runs.
       if (unregister()) setTimelineViewportWidth(0);
     };
-  }, []);
+  }, [publishLanes]);
 
   // ── Header column: resize + scroll ─────────────────────────────
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -534,6 +404,41 @@ function Timeline({
       clamp(st.startW + (e.clientX - st.startX), TRACK_HEADER_MIN_WIDTH, 900),
     );
   }, [setPref]);
+
+  // ── Row height: drag the grip on the column seam ────────────────
+  const rowHeightRef = useRef<{ startY: number; startH: number } | null>(null);
+  const onRowHeightDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    // Stopped, or the same press also starts the COLUMN-WIDTH drag this grip
+    // is nested inside, and the header jumps sideways as the rows grow.
+    e.stopPropagation();
+    rowHeightRef.current = { startY: e.clientY, startH: trackHeight };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  }, [trackHeight]);
+
+  const onRowHeightMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const st = rowHeightRef.current;
+    if (!st) return;
+    e.stopPropagation();
+    // Rate and clamp are `rowHeightFromDrag`'s — see that module for why half
+    // a pixel of row per pixel of drag.
+    setPref('timelineRowHeight', rowHeightFromDrag(st.startH, e.clientY - st.startY));
+  }, [setPref]);
+
+  const onRowHeightUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!rowHeightRef.current) return;
+    e.stopPropagation();
+    rowHeightRef.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* capture is best-effort */
+    }
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
 
   const onHeaderResizeUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     resizeRef.current = null;
@@ -577,6 +482,88 @@ function Timeline({
 
   // ── Flatten tracks + expanded property sub-rows into a uniform row list ──
   const expanded = useMemo(() => new Set(expandedTrackIds ?? []), [expandedTrackIds]);
+
+  /**
+   * Expand / collapse ALL, and the recursive twirl.
+   *
+   * Expansion is the HOST's state (`expandedTrackIds` + `onTrackToggleExpand`),
+   * so the timeline cannot set it — it can only toggle ids one at a time.
+   * `expandCollapse.ts` therefore hands back a PLAN and this replays it. Held
+   * in a ref so the commands, which are registered once, always read the
+   * current tracks rather than the ones present when they were built.
+   */
+  const expandPlanRef = useRef({ tracks: model.tracks, expanded, toggle: onTrackToggleExpand });
+  expandPlanRef.current = { tracks: model.tracks, expanded, toggle: onTrackToggleExpand };
+  const runExpandPlan = useCallback((ids: readonly string[]) => {
+    const { toggle } = expandPlanRef.current;
+    for (const id of ids) toggle?.(id);
+  }, []);
+  useEffect(() => installTimelineExpandCommands(), []);
+  useEffect(
+    () =>
+      registerTimelineExpansion({
+        expandAll: () => {
+          const { tracks, expanded: open } = expandPlanRef.current;
+          runExpandPlan(expandAllPlan(tracks, open));
+        },
+        collapseAll: () => {
+          const { tracks, expanded: open } = expandPlanRef.current;
+          runExpandPlan(collapseAllPlan(tracks, open));
+        },
+      }),
+    [runExpandPlan],
+  );
+  /** Alt+click a disclosure: the track and everything under it go the same way. */
+  const toggleExpandRow = useCallback(
+    (trackId: string, recursive: boolean) => {
+      if (!recursive) {
+        onTrackToggleExpand?.(trackId);
+        return;
+      }
+      const { tracks, expanded: open } = expandPlanRef.current;
+      runExpandPlan(recursiveTogglePlan(tracks, open, trackId).toggle);
+    },
+    [onTrackToggleExpand, runExpandPlan],
+  );
+
+  // The fit-selection command (Shift+;) runs from a chord or a menu, outside
+  // this component, and needs the geometry only the mounted timeline has.
+  const fitSourceRef = useRef({ tracks: model.tracks, selectedTrackIds: selectedTrackIds ?? [] });
+  fitSourceRef.current = { tracks: model.tracks, selectedTrackIds: selectedTrackIds ?? [] };
+  useEffect(() => registerTimelineFitSource(() => fitSourceRef.current), []);
+
+  // ── Snap ───────────────────────────────────────────────────────
+  // A switch, not only a held key. `S` is claimed by the root below, so the
+  // global `S` (reveal Scale) keeps working everywhere outside this panel.
+  const snapOn = usePreferenceStore((s) => s.timelineSnap);
+  /**
+   * The seven AE switches at rest.
+   *
+   * Hidden until hover by default (`timelineSwitchesOnHover`), because the
+   * switch block is seven glyphs per row that are OFF on almost every layer
+   * and read as noise at a glance — while the three things you actually scan a
+   * track list for (the eye, the solo dot, the lock) live in the gutter on the
+   * left and are always there. Hovering a row brings them back, and a row you
+   * are working on can PIN them through its own control; the global escape
+   * hatch is the Switches/Modes cycle button, which stays exactly as it was.
+   */
+  const switchesOnHover = usePreferenceStore((s) => s.timelineSwitchesOnHover);
+  /**
+   * Rows that have pinned their switches open. Session state, not a
+   * preference: it is a scratch note about the layer being worked on right
+   * now, and layer ids are not stable across a reload anyway.
+   */
+  const [pinnedSwitchRows, setPinnedSwitchRows] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleSwitchPin = useCallback((trackId: string) => {
+    setPinnedSwitchRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(trackId)) next.delete(trackId);
+      else next.add(trackId);
+      return next;
+    });
+  }, []);
+  useEffect(() => installTimelineSnapCommands(), []);
+
   const revealSet = useMemo(
     () => (revealProps ? new Set(revealProps) : null),
     [revealProps],
@@ -746,8 +733,108 @@ function Timeline({
   // ships as one unit and nothing else has to be edited to add a kind.
   useEffect(() => installTransitionCommands(), []);
 
-  // Left margin offset so 0s indicator & playhead head stand clear of header border
-  const TIMELINE_LEFT_OFFSET = 8;
+  /**
+   * Roving tabindex over the layer rows.
+   *
+   * `activeTrackId` is the one row in the tab order; the arrows move it, and
+   * an effect focuses whatever the id resolves to after the move (the rows are
+   * virtualized, so the destination may not have existed when the key was
+   * pressed). `null` means "the first row", which is what a listbox entered
+   * with Tab should land on.
+   */
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  /** Where an untouched list puts its tab stop: the first layer row. */
+  const firstTrackRowIndex = rows.findIndex((r) => r.type === 'track');
+  const pendingFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = pendingFocusRef.current;
+    if (id === null) return;
+    pendingFocusRef.current = null;
+    const el = headerRef.current?.querySelector(`[data-track-id="${CSS.escape(id)}"]`);
+    if (el instanceof HTMLElement) el.focus();
+  });
+
+  /**
+   * The listbox's keyboard contract.
+   *
+   *   ↑ / ↓        move the active row
+   *   Home / End   first / last
+   *   Shift+↑/↓    extend the selection over the rows crossed
+   *   Enter        open / close the layer's property tree
+   *   Space        toggle its visibility
+   *
+   * Arrow keys are consumed only while a row has focus, so the keyframe nudge
+   * and the viewport's own nudge keep them everywhere else. Enter is the
+   * disclosure rather than "select" because the row is already selected by the
+   * time you can press it — moving here selects, which is the listbox rule.
+   */
+  const onRowListKey = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+      const target = e.target as HTMLElement | null;
+      // Only the ROW itself. A key pressed on a switch, a dropdown or the name
+      // field inside the row belongs to that control — Space on the eye button
+      // is the button's own activation, and handling it here as well would
+      // toggle visibility twice and land back where it started.
+      if (!target || !target.matches?.('[data-track-id]')) return;
+      const row = target;
+      const here = row.getAttribute('data-track-id');
+      if (!here) return;
+      const ids = rows.filter((r) => r.type === 'track').map((r) => r.track.id as string);
+      const at = ids.indexOf(here);
+      if (at < 0) return;
+
+      const move = (to: number): void => {
+        const id = ids[Math.min(ids.length - 1, Math.max(0, to))];
+        if (id === undefined || id === here) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setActiveTrackId(id);
+        pendingFocusRef.current = id;
+        // Virtualized: bring the destination into view or it will not exist to
+        // be focused. The lanes own the scroll; the header column follows it.
+        const index = rows.findIndex((r) => r.type === 'track' && r.track.id === id);
+        const lanes = lanesRef.current;
+        if (lanes && index >= 0) {
+          const top = TIMELINE_TOP_PADDING + index * trackHeight;
+          if (top < lanes.scrollTop) lanes.scrollTop = top;
+          else if (top + trackHeight > lanes.scrollTop + lanes.clientHeight) {
+            lanes.scrollTop = top + trackHeight - lanes.clientHeight;
+          }
+        }
+        // Shift extends; a plain move replaces, the way a file list does.
+        onTrackSelect?.(id, e.shiftKey);
+      };
+
+      switch (e.key) {
+        case 'ArrowDown':
+          move(at + 1);
+          return;
+        case 'ArrowUp':
+          move(at - 1);
+          return;
+        case 'Home':
+          move(0);
+          return;
+        case 'End':
+          move(ids.length - 1);
+          return;
+        case 'Enter': {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleExpandRow(here, e.altKey);
+          return;
+        }
+        case ' ': {
+          e.preventDefault();
+          e.stopPropagation();
+          onTrackToggleVisible?.(here);
+          return;
+        }
+        default:
+      }
+    },
+    [rows, trackHeight, onTrackSelect, onTrackToggleVisible, toggleExpandRow],
+  );
 
   // ── Derived geometry ───────────────────────────────────────────
   const totalSeconds = Math.max(model.duration, 1);
@@ -763,13 +850,35 @@ function Timeline({
   }, [model.tracks, totalSeconds]);
   const laneWidth = TIMELINE_LEFT_OFFSET + (contentSeconds + 1) * pps;
   const totalLanesHeight = TIMELINE_TOP_PADDING + rows.length * trackHeight + TIMELINE_BOTTOM_PADDING;
-  const effectiveLanesHeight = Math.max(totalLanesHeight, Math.max(0, size.height - rulerHeight - TIMELINE_TOOLS_HEIGHT));
+  const effectiveLanesHeight = Math.max(totalLanesHeight, Math.max(0, size.height - rulerStackHeight));
+  /** The row minimap shows only when the rows overflow one screen. */
+  const minimapShown = size.height > 0 && totalLanesHeight > size.height - rulerStackHeight;
+  // The minimap is an overlay, so the lanes do not resize when it appears —
+  // the ResizeObserver above would not notice. Re-publish on the toggle, after
+  // the minimap has laid out.
+  useLayoutEffect(() => {
+    publishLanes();
+  }, [minimapShown, publishLanes]);
 
   // ── Vertical virtualization (rows) ─────────────────────────────
   const visibleRowCount = Math.ceil(size.height / trackHeight) + 8;
   const startRow = Math.max(0, Math.floor(Math.max(0, scrollTop - TIMELINE_TOP_PADDING) / trackHeight) - 4);
   const endRow = Math.min(rows.length, startRow + visibleRowCount);
   const visibleRows = useMemo(() => rows.slice(startRow, endRow), [rows, startRow, endRow]);
+
+  // ── Horizontal culling ─────────────────────────────────────────
+  // The stretch of the comp worth painting: the visible screen plus one either
+  // side, snapped to page boundaries so it changes only when the scroll
+  // crosses one (see `visibleWindow.ts`). Held by identity across scrolls
+  // that stay inside the page, so the rows' memo sees the same object.
+  const lanesWidth = Math.max(0, size.width - headerWidth);
+  const timeWindowRef = useRef<TimeWindow>(OPEN_WINDOW);
+  const timeWindow = useMemo(() => {
+    const next = pagedTimeWindow({ scrollLeft, viewportWidth: lanesWidth, pixelsPerSecond: pps, leftOffset: TIMELINE_LEFT_OFFSET });
+    if (sameWindow(timeWindowRef.current, next)) return timeWindowRef.current;
+    timeWindowRef.current = next;
+    return next;
+  }, [scrollLeft, lanesWidth, pps]);
 
   // ── Horizontal scrolling sync (header follows lanes) ──────────
   const onLanesScroll = useCallback(
@@ -789,6 +898,37 @@ function Timeline({
     if (scrollLeftSync === undefined || !el) return;
     if (Math.abs(el.scrollLeft - scrollLeftSync) > 0.5) el.scrollLeft = scrollLeftSync;
   }, [scrollLeftSync]);
+
+  /**
+   * Playhead auto-follow.
+   *
+   * Written straight to the scroller, not through `setScrollLeft` — the DOM
+   * scroll event that the write provokes updates the state for us, and driving
+   * it from here as well would mean two writers for one number. Suspended
+   * while a drag holds the lanes: an edge auto-scroll and a follow pulling in
+   * opposite directions is a scroller that vibrates.
+   */
+  /** True while a drag owns the lanes' scroll (see the edge auto-scroller). */
+  const dragScrollBusyRef = useRef(false);
+  const edgeScrollerRef = useRef<ReturnType<typeof createEdgeAutoScroller> | null>(null);
+  /** The last pointermove of the running drag, replayed after each edge step. */
+  const lastDragEventRef = useRef<PointerEvent | null>(null);
+  useEffect(() => () => edgeScrollerRef.current?.stop(), []);
+
+  const followMode = usePreferenceStore((s) => s.timelineFollowMode);
+  useEffect(() => {
+    const el = lanesRef.current;
+    if (!el || followMode === 'off' || dragScrollBusyRef.current) return;
+    const next = followScrollLeft({
+      mode: followMode,
+      playheadX: TIMELINE_LEFT_OFFSET + currentTime * pps,
+      scrollLeft: el.scrollLeft,
+      viewportWidth: el.clientWidth,
+      contentWidth: el.scrollWidth,
+      leftOffset: TIMELINE_LEFT_OFFSET,
+    });
+    if (next !== null) el.scrollLeft = next;
+  }, [followMode, currentTime, pps]);
 
   // ── Wheel zoom (Ctrl + Wheel) ──────────────────────────────────
   const onWheel = useCallback(
@@ -823,7 +963,7 @@ function Timeline({
     onScrub?.(time);
     document.body.style.cursor = 'ew-resize';
     document.body.style.userSelect = 'none';
-  }, [lanesRef, pps, totalSeconds, onScrub, TIMELINE_LEFT_OFFSET]);
+  }, [lanesRef, pps, totalSeconds, onScrub]);
   useEffect(() => {
     const onMove = (e: PointerEvent): void => {
       if (!draggingRef.current || !lanesRef.current) return;
@@ -851,7 +991,7 @@ function Timeline({
         document.body.style.userSelect = '';
       }
     };
-  }, [pps, scrollLeft, totalSeconds, onScrub, TIMELINE_LEFT_OFFSET]);
+  }, [pps, scrollLeft, totalSeconds, onScrub]);
 
   // ── Work-area band drag (edge handles resize in/out; body moves) ──
   const waDrag = useRef<null | { mode: 'in' | 'out' | 'move'; startX: number; s: number; e: number }>(null);
@@ -963,58 +1103,8 @@ function Timeline({
   };
 
   // ── Clip drag (body = move; Alt+body = slip; Shift+Alt = slide; edges = trim) ──
-  // Live geometry lives on the ref (survives without a render); a preview state
-  // drives the visual; the engine is only told the final value on release.
-  const clipDrag = useRef<
-    null | {
-      id: string;
-      /** Scene node behind the bar — the unit selection actually addresses. */
-      trackId: string;
-      /** Set when pointer-down landed on an ALREADY-selected bar: the
-       *  selection collapses to it on release, but only if no drag happened. */
-      collapseSelectionOnUp: boolean;
-      /** Client-space pointer-down origin, for the click-vs-drag threshold. */
-      downX: number;
-      downY: number;
-      /** Set once the pointer travels past the drag threshold. */
-      moved: boolean;
-      mode: 'move' | 'start' | 'end' | 'slip' | 'slide' | 'roll';
-      ripple: boolean;
-      startX: number;
-      start: number;
-      duration: number;
-      sourceInSec: number;
-      live: { start: number; duration: number; sourceInSec: number };
-      /**
-       * ROLL only — the cut being dragged and how far it may travel.
-       *
-       * The limits come from the ENGINE at pointer-down (`rollLimitsFor`), not
-       * from the view model, because only the engine knows the source handles:
-       * a bar's `sourceInSec`/`sourceOutSec` say where its window is but not how
-       * much media lies outside it. Clamping the preview to anything else means
-       * the bars move under the pointer and then snap back on release, which
-       * reads as a bug rather than as a limit.
-       */
-      roll?: {
-        cut: ClipCut;
-        /** Frames, converted to seconds at the comp rate. */
-        minSec: number;
-        maxSec: number;
-        left: { start: number; duration: number; sourceInSec: number };
-        right: { start: number; duration: number; sourceInSec: number };
-        /** Applied delta in seconds, updated as the pointer moves. */
-        deltaSec: number;
-      };
-      /**
-       * What this drag may latch onto, snapshotted at pointer-DOWN.
-       *
-       * The list cannot change mid-gesture (no clip but this one is moving, and
-       * markers/work area are not editable during a drag), and rebuilding it on
-       * every pointermove would walk every clip on every track at pointer rate.
-       */
-      snapTargets: readonly ClipSnapTarget[];
-    }
-  >(null);
+  // The gesture lives in `useClipDrag`; only the snap context it shares with
+  // the razor stays here (the razor reads it too).
   /**
    * Everything a clip drag needs to build its snap targets, refreshed each
    * render. A ref rather than a dependency so the drag listeners below are not
@@ -1023,24 +1113,6 @@ function Timeline({
    */
   const clipSnapCtx = useRef({ tracks: model.tracks, markers: model.markers, workArea: model.workArea, currentTime, duration: model.duration });
   clipSnapCtx.current = { tracks: model.tracks, markers: model.markers, workArea: model.workArea, currentTime, duration: model.duration };
-  /** What the in-flight clip drag is latched onto — drives the guide line. */
-  const [clipSnap, setClipSnap] = useState<ClipSnapTarget | null>(null);
-  /** Mirror of `clipSnap`, so pointermove can skip a re-render when the latch
-   *  has not actually changed — this runs at pointer rate. */
-  const clipSnapShown = useRef<ClipSnapTarget | null>(null);
-  /**
-   * The in-flight drag's bars, drawn instead of the model's until release.
-   *
-   * A LIST, not one bar: a roll moves two of them at once, and previewing only
-   * the one under the pointer would show the cut opening a gap that the commit
-   * then does not produce. Every other gesture pushes a single entry.
-   */
-  const [clipPreviews, setClipPreviews] = useState<null | ReadonlyArray<{
-    id: string;
-    start: number;
-    duration: number;
-    sourceInSec?: number;
-  }>>(null);
 
   // ── Edit modes (select / razor / slip / slide / roll) ──────────────
   /**
@@ -1066,7 +1138,16 @@ function Timeline({
    * rendered at the panel root, so it follows the pointer over the ruler and
    * the header column too.
    */
-  const [dragHud, setDragHud] = useState<null | { x: number; y: number; lines: string[] }>(null);
+  const [dragHud, setDragHud] = useState<DragHudState | null>(null);
+
+  // The marker and ripple/lift/extract commands are installed by the panel
+  // that owns their behaviour, not by a provider: a command in the palette
+  // whose only handler lives in an unmounted file is the failure this codebase
+  // keeps finding. Both installers are idempotent.
+  useEffect(() => {
+    installTimelineMarkerCommands();
+    installTimelineClipEditCommands();
+  }, []);
 
   const fpsRef = useRef(model.frameRate || 30);
   fpsRef.current = model.frameRate || 30;
@@ -1079,7 +1160,7 @@ function Timeline({
       const rect = lanes.getBoundingClientRect();
       return (clientX - rect.left + lanes.scrollLeft - TIMELINE_LEFT_OFFSET) / pps;
     },
-    [pps, TIMELINE_LEFT_OFFSET],
+    [pps],
   );
 
   /**
@@ -1192,13 +1273,13 @@ function Timeline({
       const time = lanesTimeAt(clientX);
       if (time === null) return null;
       const rect = lanes.getBoundingClientRect();
-      const y = clientY - rect.top + lanes.scrollTop - rulerHeight - TIMELINE_TOP_PADDING;
+      const y = clientY - rect.top + lanes.scrollTop - rulerStackHeight - TIMELINE_TOP_PADDING;
       const rowIndex = Math.floor(y / trackHeight);
       const row = rowIndex >= 0 ? rows[rowIndex] : undefined;
       const trackId = row ? row.track.id : null;
       return findClipCutNear(clipCutsRef.current, time, pps > 0 ? CUT_GRAB_PX / pps : 0, trackId);
     },
-    [lanesTimeAt, rulerHeight, trackHeight, rows, pps],
+    [lanesTimeAt, rulerStackHeight, trackHeight, rows, pps],
   );
 
   /**
@@ -1374,318 +1455,30 @@ function Timeline({
     if (editMode !== 'razor') setRazorAt(null);
   }, [editMode]);
 
-  const onClipDown = useCallback(
-    (clip: TimelineClip, mode: 'move' | 'start' | 'end', e: ReactPointerEvent<HTMLDivElement>) => {
-      // Selection happens even when no clip-edit handler is wired: clicking a
-      // bar in the lanes is how most people reach for a layer, and requiring
-      // them to travel back to the name column for it was the single most
-      // repeated complaint about the timeline. Runs BEFORE the drag guard so
-      // a read-only timeline still selects.
-      //
-      // Deferred-collapse rules (standard for draggable rows):
-      //   • additive modifier      → add to the selection now
-      //   • bar not yet selected   → select it now, so the drag moves the
-      //                              thing under the cursor
-      //   • bar already selected   → wait for pointer-up: collapsing a
-      //                              multi-selection on pointer-DOWN would
-      //                              make a group impossible to drag
-      // RAZOR intercepts the press entirely: it is a click, not a drag, and it
-      // must not also select or start a move on the bar it is about to destroy.
-      if (editMode === 'razor') {
-        e.stopPropagation();
-        e.preventDefault();
-        const raw = lanesTimeAt(e.clientX);
-        if (raw === null) return;
-        razorAtTime(snapRazorTime(raw), e.shiftKey, clip.id);
-        return;
-      }
-
-      const additive = e.ctrlKey || e.metaKey || e.shiftKey;
-      const alreadySelected = selectedTrackIds?.includes(clip.trackId) ?? false;
-      let collapseSelectionOnUp = false;
-      if (onTrackSelect) {
-        if (additive || !alreadySelected) onTrackSelect(clip.trackId, additive);
-        else collapseSelectionOnUp = true;
-      }
-
-      if ((!onClipMove && !onClipTrim && !onClipSlip && !onClipSlide) || !lanesRef.current) {
-        e.stopPropagation();
-        return;
-      }
-      e.stopPropagation();
-      // What this press means, in priority order:
-      //   • an armed TOOL (slip / slide / roll), for a press on the body;
-      //   • otherwise the modifiers, unchanged: Alt = slip, Alt+Shift = slide.
-      // Edge presses stay trims in every mode — an edge handle has exactly one
-      // meaning, and hijacking it would leave trim unreachable while a tool is
-      // armed for no gain.
-      let actualMode: 'move' | 'start' | 'end' | 'slip' | 'slide' | 'roll' = mode;
-      let rollState: NonNullable<NonNullable<typeof clipDrag.current>['roll']> | undefined;
-      if (mode === 'move' && editMode === 'slip' && onClipSlip) actualMode = 'slip';
-      else if (mode === 'move' && editMode === 'slide' && onClipSlide) actualMode = 'slide';
-      else if (mode === 'move' && editMode === 'roll') {
-        // A roll needs a CUT, not a clip: the press only counts when it lands
-        // within a few pixels of one. Anywhere else on the bar there is nothing
-        // to roll, so the gesture is refused rather than silently downgraded to
-        // a move the user did not ask for.
-        const raw = lanesTimeAt(e.clientX);
-        const cut =
-          raw === null
-            ? null
-            : findClipCutNear(
-                clipCutsRef.current,
-                raw,
-                pps > 0 ? ROLL_GRAB_PX / pps : 0,
-                clip.trackId,
-              );
-        if (!cut) return;
-        const limits = getTimelineController().rollLimitsFor(cut.leftNodeId, cut.rightNodeId);
-        if (!limits) return;
-        const fps = model.frameRate || 30;
-        const bars = new Map<string, TimelineClip>();
-        for (const t of model.tracks) for (const c of t.clips ?? []) bars.set(c.id, c);
-        const leftBar = bars.get(cut.leftClipId);
-        const rightBar = bars.get(cut.rightClipId);
-        if (!leftBar || !rightBar) return;
-        actualMode = 'roll';
-        rollState = {
-          cut,
-          minSec: limits.min / fps,
-          maxSec: limits.max / fps,
-          left: { start: leftBar.start, duration: leftBar.duration, sourceInSec: leftBar.sourceInSec ?? 0 },
-          right: { start: rightBar.start, duration: rightBar.duration, sourceInSec: rightBar.sourceInSec ?? 0 },
-          deltaSec: 0,
-        };
-      } else if (mode === 'move' && e.altKey && e.shiftKey && onClipSlide) actualMode = 'slide';
-      else if (mode === 'move' && e.altKey && onClipSlip) actualMode = 'slip';
-      const lanesRect = lanesRef.current.getBoundingClientRect();
-      const sourceInSec = clip.sourceInSec ?? 0;
-      clipDrag.current = {
-        id: clip.id,
-        trackId: clip.trackId,
-        collapseSelectionOnUp,
-        downX: e.clientX,
-        downY: e.clientY,
-        moved: false,
-        mode: actualMode,
-        // Ctrl/Cmd on an edge → ripple trim (in or out).
-        ripple: (actualMode === 'start' || actualMode === 'end') && (e.ctrlKey || e.metaKey),
-        startX: e.clientX - lanesRect.left + lanesRef.current.scrollLeft,
-        start: clip.start,
-        duration: clip.duration,
-        sourceInSec,
-        live: { start: clip.start, duration: clip.duration, sourceInSec },
-        ...(rollState ? { roll: rollState } : {}),
-        // The dragged bar is excluded from its own target list — otherwise its
-        // start would pull it straight back to where it began and the bar would
-        // be immovable inside one snap radius.
-        snapTargets: collectClipSnapTargets({
-          tracks: clipSnapCtx.current.tracks,
-          excludeClipIds: [clip.id],
-          playheadTime: clipSnapCtx.current.currentTime,
-          markers: clipSnapCtx.current.markers,
-          workArea: clipSnapCtx.current.workArea ?? null,
-          compDuration: clipSnapCtx.current.duration,
-        }),
-      };
-      setClipPreviews(
-        rollState
-          ? [
-            { id: rollState.cut.leftClipId, ...rollState.left },
-            { id: rollState.cut.rightClipId, ...rollState.right },
-          ]
-          : [{ id: clip.id, start: clip.start, duration: clip.duration, sourceInSec }],
-      );
-      try {
-        lanesRef.current.setPointerCapture(e.pointerId);
-      } catch {
-        /* best-effort capture */
-      }
-      document.body.style.userSelect = 'none';
-      // `col-resize` for a roll and `ew-resize` for the other two: a roll moves
-      // a BOUNDARY between two things, which is the one cursor the platform
-      // already has a glyph for, and the difference is what tells you at a
-      // glance which of the two you have hold of.
-      document.body.style.cursor =
-        actualMode === 'roll'
-          ? 'col-resize'
-          : actualMode === 'slip' || actualMode === 'slide'
-            ? 'ew-resize'
-            : '';
-    },
-    [
-      onClipMove, onClipTrim, onClipSlip, onClipSlide, onTrackSelect, selectedTrackIds,
-      editMode, lanesTimeAt, razorAtTime, snapRazorTime, model.tracks, model.frameRate, pps,
-    ],
-  );
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent): void => {
-      const d = clipDrag.current;
-      if (!d || !lanesRef.current) return;
-      // Threshold, not "any pointermove": trackpads and high-DPI mice emit
-      // sub-pixel moves during an ordinary click, and treating those as a drag
-      // swallowed the collapse-selection-on-release case below.
-      if (!d.moved && exceedsDragThreshold(e.clientX - d.downX, e.clientY - d.downY)) d.moved = true;
-      const lanesRect = lanesRef.current.getBoundingClientRect();
-      const currentScrollLeft = lanesRef.current.scrollLeft;
-      const deltaSec = (e.clientX - lanesRect.left + currentScrollLeft - d.startX) / pps;
-      const frameDur = 1 / (model.frameRate || 30);
-      const minGap = frameDur;
-      // Snapping. The frame grid is the LAST resort inside `snapClipEdges`, so
-      // a drag that latches onto nothing still quantizes exactly as it always
-      // did (the engine stores whole frames, so an unsnapped preview visibly
-      // jumped on release) — but a bar that comes within a few pixels of a
-      // neighbour's edge, the playhead, a marker or a work-area bound now lands
-      // on it exactly, which is the alignment people were doing by eye.
-      //
-      // Alt frees a move/trim entirely. Slip and slide always snap, because Alt
-      // is the modifier that CHOSE those modes and cannot also mean "no snap".
-      const snapDisabled = d.mode !== 'slip' && d.mode !== 'slide' && d.mode !== 'roll' && e.altKey;
-      const snapOpts = { pixelsPerSecond: pps, frameDuration: frameDur, disabled: snapDisabled };
-      const snapToFrame = (v: number): number =>
-        snapDisabled || frameDur <= 0 ? v : Math.round(v / frameDur) * frameDur;
-      // Boxed so TypeScript keeps the declared type: a plain `let` written only
-      // from inside `snapBody` narrows to `never` at the read site below.
-      const hit: { target: ClipSnapTarget | null } = { target: null };
-      /** Snap a set of MOVING edges as one body; returns the offset to apply. */
-      const snapBody = (edges: readonly number[]): number => {
-        const { delta, target } = snapClipEdges(edges, d.snapTargets, snapOpts);
-        // No guide line for the frame grid: it is quantization, not an
-        // alignment the user was aiming at, and a line on every drag would be
-        // noise. Same rule as the keyframe snapper's indicator.
-        hit.target = target && target.kind !== 'frame' ? target : null;
-        return delta;
-      };
-      let start = d.start;
-      let duration = d.duration;
-      let sourceInSec = d.sourceInSec;
-      // AE semantics: clip bars may OVERHANG the composition end freely (the
-      // render simply stops at the comp bound) — only the left edge pins at 0.
-      // Clamping to totalSeconds made full-comp clips immovable and turned
-      // every "expand" gesture into a shrink.
-      if (d.mode === 'slip') {
-        // Drag right → later into the source (positive sourceIn), matching AE.
-        // Frame grid only: slip does not move the BAR, so there is no edge to
-        // align with anything on the timeline axis.
-        sourceInSec = snapToFrame(Math.max(0, d.sourceInSec + deltaSec));
-      } else if (d.mode === 'move' || d.mode === 'slide') {
-        const rawStart = Math.max(0, d.start + deltaSec);
-        // Both edges are candidates — a bar is just as often butted up by its
-        // tail as by its head, and only trying the head would make the common
-        // "snap the out-point to the playhead" gesture impossible.
-        start = Math.max(0, rawStart + snapBody([rawStart, rawStart + d.duration]));
-      } else if (d.mode === 'start') {
-        const end = d.start + d.duration;
-        const raw = clamp(d.start + deltaSec, 0, end - minGap);
-        start = clamp(raw + snapBody([raw]), 0, end - minGap);
-        duration = end - start;
-      } else if (d.mode === 'end') {
-        const raw = Math.max(d.start + minGap, d.start + d.duration + deltaSec);
-        const end = Math.max(d.start + minGap, raw + snapBody([raw]));
-        duration = Math.max(minGap, end - d.start);
-      }
-      // A ROLL deliberately falls through all of these. It was reaching the
-      // final branch back when that branch was a bare `else`, which trimmed the
-      // dragged bar's tail AND lit the snap guide for an edge that was never
-      // moving — the roll's own geometry, computed below, then overwrote the
-      // preview and hid the damage until release.
-      // Only while the gesture is a real drag: a guide flashing under a plain
-      // click on a bar would be feedback for an edit that never happened.
-      const nextSnap = d.moved ? hit.target : null;
-      if ((nextSnap?.time ?? null) !== (clipSnapShown.current?.time ?? null) ||
-          (nextSnap?.kind ?? null) !== (clipSnapShown.current?.kind ?? null)) {
-        clipSnapShown.current = nextSnap;
-        setClipSnap(nextSnap);
-      }
-      if (d.mode === 'roll' && d.roll) {
-        // Clamped to the ENGINE's limits, so the two bars stop exactly where
-        // the commit will stop them. Snapped to the frame grid only: a cut has
-        // no free edge to align against — both of its sides are moving, and the
-        // things it could latch onto are the very bars it is made of.
-        const r = d.roll;
-        const wanted = clamp(snapToFrame(deltaSec), r.minSec, r.maxSec);
-        r.deltaSec = wanted;
-        setClipPreviews([
-          { id: r.cut.leftClipId, start: r.left.start, duration: r.left.duration + wanted, sourceInSec: r.left.sourceInSec },
-          {
-            id: r.cut.rightClipId,
-            start: r.right.start + wanted,
-            duration: r.right.duration - wanted,
-            sourceInSec: r.right.sourceInSec + wanted,
-          },
-        ]);
-      } else {
-        d.live = { start, duration, sourceInSec };
-        setClipPreviews([{ id: d.id, start, duration, sourceInSec }]);
-      }
-
-      // The read-out. Only for the three edits whose effect is otherwise
-      // invisible, and only once the gesture is a real drag — a badge under a
-      // plain click would be feedback for an edit that never happened.
-      if (d.moved && (d.mode === 'slip' || d.mode === 'slide' || d.mode === 'roll')) {
-        setDragHud({ x: e.clientX, y: e.clientY, lines: hudLines(d, fpsRef.current) });
-      }
-    };
-    const onUp = (): void => {
-      const d = clipDrag.current;
-      if (!d) return;
-      if (clipSnapShown.current) {
-        clipSnapShown.current = null;
-        setClipSnap(null);
-      }
-      // A click that never became a drag on an already-selected bar collapses
-      // the selection down to it (the deferred half of the rule in onClipDown).
-      if (d.collapseSelectionOnUp && !d.moved) onTrackSelect?.(d.trackId, false);
-      const { start, duration, sourceInSec } = d.live;
-      // Below the drag threshold this was a SELECT, not an edit. Committing
-      // anyway pushed an identity move onto the undo stack, so every click on
-      // a bar cost the user one Ctrl+Z before their real edit.
-      if (!d.moved) {
-        clipDrag.current = null;
-        setClipPreviews(null);
-        setDragHud(null);
-        document.body.style.userSelect = '';
-        document.body.style.cursor = '';
-        return;
-      }
-      if (d.mode === 'roll') {
-        // Straight to the controller, like the razor and for the same reason:
-        // a roll is one edit over TWO bars on two different scene nodes, which
-        // none of this component's per-clip callbacks can express.
-        if (d.roll && d.roll.deltaSec !== 0) {
-          getTimelineController().rollEditSeconds(
-            d.roll.cut.leftNodeId,
-            d.roll.cut.rightNodeId,
-            d.roll.deltaSec,
-          );
-        }
-      } else if (d.mode === 'slip') onClipSlip?.(d.id, sourceInSec);
-      else if (d.mode === 'slide') onClipSlide?.(d.id, start);
-      else if (d.mode === 'move') onClipMove?.(d.id, start);
-      else if (d.mode === 'start') onClipTrim?.(d.id, 'start', start, { ripple: d.ripple });
-      else onClipTrim?.(d.id, 'end', start + duration, { ripple: d.ripple });
-      clipDrag.current = null;
-      setClipPreviews(null);
-      setDragHud(null);
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      if (clipDrag.current) {
-        clipDrag.current = null;
-        clipSnapShown.current = null;
-        setClipSnap(null);
-        setDragHud(null);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      }
-    };
-  }, [pps, totalSeconds, onClipMove, onClipTrim, onClipSlip, onClipSlide, onTrackSelect, model.frameRate]);
+  const { clipSnap, clipPreviews, onClipDown } = useClipDrag({
+    model,
+    pps,
+    totalSeconds,
+    snapOn,
+    editMode,
+    lanesRef,
+    lanesTimeAt,
+    razorAtTime,
+    snapRazorTime,
+    clipCutsRef,
+    clipSnapCtx,
+    fpsRef,
+    dragScrollBusyRef,
+    edgeScrollerRef,
+    lastDragEventRef,
+    setDragHud,
+    selectedTrackIds,
+    onTrackSelect,
+    onClipMove,
+    onClipTrim,
+    onClipSlip,
+    onClipSlide,
+  });
 
   // ── Playhead keyboard nudge (role="slider" must be operable) ──
   // Arrow keys step one frame; Shift steps one second; Home/End jump to bounds.
@@ -1756,276 +1549,37 @@ function Timeline({
     };
   }, [rows, trackHeight, rowDragOver, onTrackReorder]);
 
-  // ── Multi-keyframe selection ────────────────────────────────────────────────
-  // Shared with GraphEditor / F9 / easing pills — store is the source of truth
-  // (not a one-way mirror from local state, which would wipe graph selections).
-  const selectedKfIds = useKeyframeSelectionStore((s) => s.ids);
-  const setSelectedKfIds = useKeyframeSelectionStore((s) => s.set);
-  const activeKf = useRef<{
-    ids: string[];
-    times: Map<string, number>;
-    startX: number;
-    moved: boolean;
-    /** Which keyframe the pointer went down on — the grip for Alt time-scaling. */
-    grabbedId: string;
-  } | null>(null);
-  const [kfPreview, setKfPreview] = useState<Map<string, number>>(new Map());
-  const kfPreviewRef = useRef<Map<string, number>>(new Map());
-
-  // Build a lookup from keyframe id → time across all visible tracks
-  const kfTimeById = useMemo<Map<string, number>>(() => {
-    const m = new Map<string, number>();
-    for (const track of model.tracks) {
-      for (const kf of track.keyframes ?? []) m.set(kf.id, kf.time);
-      for (const prop of track.properties ?? []) {
-        for (const kf of prop.keyframes) m.set(kf.id, kf.time);
-      }
-    }
-    return m;
-  }, [model.tracks]);
-  const kfDragLive = useRef({ currentTime, kfTimeById, frameRate: model.frameRate });
-  kfDragLive.current = { currentTime, kfTimeById, frameRate: model.frameRate };
-
-  const onKeyframeDown = useCallback((kf: TimelineKeyframeRef, e: ReactPointerEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-
-    // Compute next selection synchronously to avoid stale closure in drag start
-    const nextSel = new Set(selectedKfIds);
-    if (e.shiftKey) {
-      if (nextSel.has(kf.id)) nextSel.delete(kf.id);
-      else nextSel.add(kf.id);
-    } else {
-      if (!nextSel.has(kf.id)) { nextSel.clear(); nextSel.add(kf.id); }
-    }
-    setSelectedKfIds(nextSel);
-
-    const times = new Map<string, number>();
-    for (const id of nextSel) {
-      const t = id === kf.id ? kf.time : (kfTimeById.get(id) ?? 0);
-      times.set(id, t);
-    }
-    activeKf.current = { ids: [...nextSel], times, startX: e.clientX, moved: false, grabbedId: kf.id };
-
-    const emptyPreview = new Map<string, number>();
-    kfPreviewRef.current = emptyPreview;
-    setKfPreview(emptyPreview);
-  }, [selectedKfIds, kfTimeById, setSelectedKfIds]);
-
-  /**
-   * Which selected keyframes are an END of the selection, and so act as the
-   * grip for Alt time-scaling. Computed once over the whole selection because
-   * a row only sees its own keyframes and the selection spans rows.
-   */
-  const scaleGripIds = useMemo<Set<string>>(() => {
-    const out = new Set<string>();
-    if (selectedKfIds.size < 2) return out;
-    const times = new Map<string, number>();
-    for (const id of selectedKfIds) {
-      const t = kfTimeById.get(id);
-      if (t !== undefined) times.set(id, t);
-    }
-    for (const id of times.keys()) if (scaleGrip(times, id)) out.add(id);
-    return out;
-  }, [selectedKfIds, kfTimeById]);
-
-  /** What the in-flight drag is snapped to — drives the indicator line. */
-  const [kfSnap, setKfSnap] = useState<SnapTarget | null>(null);
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent): void => {
-      const d = activeKf.current;
-      if (!d || !lanesRef.current) return;
-      const dx = e.clientX - d.startX;
-      if (!d.moved && Math.abs(dx) < 3) return;
-      d.moved = true;
-      const dtSec = dx / pps;
-      const live = kfDragLive.current;
-      const frameDur = 1 / (live.frameRate || 30);
-
-      // Alt on an END of a multi-selection is AE's time-scale gesture: the
-      // group stretches about its opposite end instead of sliding. Everywhere
-      // else — a single keyframe, or an interior one — Alt keeps its existing
-      // meaning of "free the drag from snapping", because there is no span to
-      // scale in those cases and the two readings can never both apply.
-      if (e.altKey) {
-        const scaled = scaleSelection(d.times, d.grabbedId, dtSec, frameDur);
-        if (scaled) {
-          setKfSnap(null);
-          kfPreviewRef.current = scaled;
-          setKfPreview(scaled);
-          return;
-        }
-      }
-
-      // Snap to the playhead, then to other keyframes, then to the frame grid.
-      // Alt frees the drag entirely. The dragged keys are excluded from the
-      // target list — a keyframe must not snap to itself.
-      const dragging = new Set(d.ids);
-      const others: number[] = [];
-      for (const [id, t] of live.kfTimeById) if (!dragging.has(id)) others.push(t);
-
-      const moved = [...d.times.values()].map((t) => t + dtSec);
-      const { delta, target } = snapKeyframeGroup(moved, {
-        pixelsPerSecond: pps,
-        frameDuration: frameDur,
-        // The RESOLVED playhead (separate prop first): model.currentTime is a
-        // non-reactive snapshot when the host splits the playhead out, and
-        // snapping to a stale snapshot missed the real playhead position.
-        playheadTime: live.currentTime,
-        keyframeTimes: others,
-        disabled: e.altKey,
-      });
-      setKfSnap(target);
-
-      const newPreview = new Map<string, number>();
-      for (const [id, origTime] of d.times) {
-        newPreview.set(id, Math.max(0, origTime + dtSec + delta));
-      }
-      kfPreviewRef.current = newPreview;
-      setKfPreview(newPreview);
-    };
-    const onUp = (): void => {
-      const d = activeKf.current;
-      if (!d) return;
-      activeKf.current = null;
-      setKfSnap(null);
-      if (d.moved) {
-        // Commit moves for all dragged keyframes
-        for (const [id, origTime] of d.times) {
-          const dtSec = (kfPreviewRef.current.get(id) ?? origTime) - origTime;
-          onKeyframeMove?.(id, Math.max(0, origTime + dtSec));
-        }
-      } else {
-        // Click without move → seek
-        const singleId = d.ids[0];
-        if (singleId) onKeyframeSeek?.(singleId);
-      }
-      const emptyPreview = new Map<string, number>();
-      kfPreviewRef.current = emptyPreview;
-      setKfPreview(emptyPreview);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-  }, [pps, scrollLeft, totalSeconds, onKeyframeMove, onKeyframeSeek]);
+  // ── Multi-keyframe selection + drag ────────────────────────────
+  // Lives in `useKeyframeDrag`; the store-backed selection comes back out
+  // because the marquee and the keyboard shortcuts below share it.
+  const { selectedKfIds, setSelectedKfIds, kfPreview, onKeyframeDown, scaleGripIds, kfSnap } = useKeyframeDrag({
+    model,
+    currentTime,
+    pps,
+    scrollLeft,
+    totalSeconds,
+    snapOn,
+    lanesRef,
+    setDragHud,
+    onKeyframeMove,
+    onKeyframeSeek,
+  });
 
   // ── Marquee (rubber-band) keyframe selection ──────────────────
-  // Pointer-down on EMPTY lane space (not a keyframe, clip, playhead, marker
-  // flag — those either stopPropagation or are guarded below) starts a drag
-  // that draws a translucent rect and live-selects every keyframe it touches.
-  // Shift at drag START adds to the existing selection; a plain click with no
-  // movement clears it. Rows list is the FULL flattened list (not just the
-  // virtualized window), so the rect selects across offscreen rows too.
-  const marqueeRows = useMemo<ReadonlyArray<MarqueeRow>>(
-    () =>
-      rows.map((row) =>
-        row.type === 'prop'
-          ? { keyframes: row.prop.keyframes }
-          : // Collapsed summary rows stand in for their property keyframes
-          // (track.keyframes is the flat union, same ids); expanded rows
-          // defer to the property sub-rows that follow them.
-          { keyframes: row.expanded ? [] : (row.track.keyframes ?? []) },
-      ),
-    [rows],
-  );
-  const marqueeDrag = useRef<
-    null | { x0: number; y0: number; additive: boolean; base: Set<string>; moved: boolean }
-  >(null);
-  const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null);
-
-  /** Pointer position → lane content coords (x from t=0, y from first row). */
-  const lanesPoint = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
-      const lanes = lanesRef.current;
-      if (!lanes) return null;
-      const rect = lanes.getBoundingClientRect();
-      return {
-        x: Math.max(0, clientX - rect.left + lanes.scrollLeft - TIMELINE_LEFT_OFFSET),
-        y: clamp(clientY - rect.top + lanes.scrollTop - rulerHeight - TIMELINE_TOP_PADDING, 0, effectiveLanesHeight),
-      };
-    },
-    [rulerHeight, effectiveLanesHeight, TIMELINE_LEFT_OFFSET],
-  );
-
-  const onLanesPointerDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (e.button !== 0) return;
-      // Keyframes and clips stopPropagation in their own handlers; the
-      // playhead and marker flags do not, so guard them (and re-guard the
-      // others defensively) before claiming the gesture.
-      const target = e.target as HTMLElement;
-      if (
-        target.closest(`.${styles.playhead}`) ||
-        target.closest(`.${styles.keyframe}`) ||
-        target.closest(`.${styles.clip}`) ||
-        target.closest(`.${styles.markerFlag}`)
-      ) {
-        return;
-      }
-      // The razor works on the lane BACKGROUND too, which is the only way to
-      // reach Shift+click's "cut every track at this frame" at a time where the
-      // row under the pointer happens to be empty. A bare click here finds no
-      // bar and correctly does nothing.
-      if (editMode === 'razor') {
-        const raw = lanesTimeAt(e.clientX);
-        if (raw !== null) razorAtTime(snapRazorTime(raw), e.shiftKey);
-        return;
-      }
-      const p = lanesPoint(e.clientX, e.clientY);
-      if (!p) return;
-      marqueeDrag.current = {
-        x0: p.x,
-        y0: p.y,
-        additive: e.shiftKey,
-        base: new Set(selectedKfIds),
-        moved: false,
-      };
-      document.body.style.userSelect = 'none';
-    },
-    [lanesPoint, selectedKfIds, editMode, lanesTimeAt, razorAtTime, snapRazorTime],
-  );
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent): void => {
-      const d = marqueeDrag.current;
-      if (!d) return;
-      const p = lanesPoint(e.clientX, e.clientY);
-      if (!p) return;
-      if (!d.moved && !exceedsDragThreshold(p.x - d.x0, p.y - d.y0)) return;
-      d.moved = true;
-      const rect = normalizeMarqueeRect(d.x0, d.y0, p.x, p.y);
-      setMarqueeRect(rect);
-      const hits = marqueeHitKeyframeIds(marqueeRows, rect, {
-        pixelsPerSecond: pps,
-        trackHeight,
-      });
-      setSelectedKfIds(combineMarqueeSelection(d.base, hits, d.additive));
-    };
-    const onUp = (): void => {
-      const d = marqueeDrag.current;
-      if (!d) return;
-      marqueeDrag.current = null;
-      setMarqueeRect(null);
-      document.body.style.userSelect = '';
-      // Marquee selection was applied live — release just clears the rect.
-      // A plain click (no movement) on empty space clears the selection;
-      // Shift+click on empty space leaves it untouched.
-      if (!d.moved && !d.additive) setSelectedKfIds(new Set());
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      if (marqueeDrag.current) {
-        marqueeDrag.current = null;
-        document.body.style.userSelect = '';
-      }
-    };
-  }, [lanesPoint, marqueeRows, pps, trackHeight, setSelectedKfIds]);
+  const { marqueeRect, onLanesPointerDown } = useMarquee({
+    rows,
+    lanesRef,
+    rulerStackHeight,
+    effectiveLanesHeight,
+    editMode,
+    lanesTimeAt,
+    razorAtTime,
+    snapRazorTime,
+    selectedKfIds,
+    setSelectedKfIds,
+    pps,
+    trackHeight,
+  });
 
   // ── Keyframe selection keyboard shortcuts ──────────────────────
   useEffect(() => {
@@ -2066,16 +1620,32 @@ function Timeline({
   }, [selectedKfIds, model.tracks, onKeyframeMove, onKeyframesDelete, setSelectedKfIds]);
 
   // ── Ruler ticks ────────────────────────────────────────────────
-  const ticks = useMemo(
+  const allTicks = useMemo(
     () => generateRulerTicks(totalSeconds, pps, model.frameRate, (model.startFrame ?? 0) / (model.frameRate || 30), TIMELINE_LEFT_OFFSET),
-    [totalSeconds, pps, model.frameRate, model.startFrame, TIMELINE_LEFT_OFFSET],
+    [totalSeconds, pps, model.frameRate, model.startFrame],
   );
+  // Only the ticks on screen (plus a page either side) reach the DOM: a long
+  // comp zoomed in is thousands of ticks, almost all of them off-screen.
+  const ticks = useMemo(() => cullTicks(allTicks, timeWindow, pps, TIMELINE_LEFT_OFFSET), [allTicks, timeWindow, pps]);
 
   // Layer number column (AE-style) — index within the track order.
   const trackIndexById = useMemo(
     () => new Map(model.tracks.map((t, i) => [t.id, i + 1])),
     [model.tracks],
   );
+
+  /**
+   * The category heading to pin while scrolled inside an expanded layer.
+   *
+   * `scrollTop` is measured from the top of the row list, so the padding above
+   * the first row has to come off before it means "which row is at the top".
+   */
+  const stickyCategory = useMemo(() => {
+    const found = stickyCategoryFor(rows, scrollTop - TIMELINE_TOP_PADDING, trackHeight);
+    if (!found) return null;
+    const row = rows[found.index];
+    return row && row.type === 'category' ? { row, offset: found.offset } : null;
+  }, [rows, scrollTop, trackHeight]);
 
   const playheadX = TIMELINE_LEFT_OFFSET + currentTime * pps;
 
@@ -2090,18 +1660,51 @@ function Timeline({
       ref={containerRef}
       className={cn(styles.root, className)}
       onWheel={onWheel}
-      data-shortcut-claim="delete backspace Ctrl+a Meta+a"
+      /* `s` is claimed so the snap switch can take it WITH THE TIMELINE
+         FOCUSED while the global `S` (reveal Scale) keeps working everywhere
+         else — ShortcutManager listens in the capture phase and skips a chord
+         an ancestor of the focused element has claimed. */
+      data-shortcut-claim="delete backspace shift+delete Ctrl+a Meta+a s m alt+m"
+      data-tour="timeline"
       data-edit-mode={editMode}
+      onKeyDown={(e) => {
+        if (e.ctrlKey || e.metaKey) return;
+        const t = e.target as HTMLElement | null;
+        if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.isContentEditable) return;
+        // `S` — the snap switch, panel-scoped so the global `S` (reveal Scale)
+        // keeps working everywhere else. See `snapCommands`.
+        if ((e.key === 's' || e.key === 'S') && !e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleTimelineSnap();
+          return;
+        }
+        // `M` — a comp marker at the playhead; `Alt+M` — a layer marker on
+        // each selected layer. Claimed rather than registered globally for the
+        // same reason `S` is: a bare letter taken globally is taken from every
+        // other panel forever.
+        if (e.key === 'm' || e.key === 'M') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.altKey) addLayerMarkersAtPlayhead();
+          else addCompMarkerAtPlayhead();
+          return;
+        }
+        // `Shift+Delete` — ripple delete: the layers go AND the gap closes.
+        // Guarded on a keyframe selection being empty, because plain Delete on
+        // this panel means "delete the selected keyframes" and Shift must not
+        // silently escalate that to deleting their layers.
+        if (e.shiftKey && e.key === 'Delete' && selectedKfIds.size === 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          rippleDeleteSelection();
+        }
+      }}
     >
-      {/* The edit-tool row, spanning the panel above both columns. */}
-      <div className={styles.toolRow} style={{ height: TIMELINE_TOOLS_HEIGHT }}>
-        <TimelineTools />
-        {/* The transition chips sit in the SAME strip as the edit tools: both
-            are about what an edit at a cut means, and separating them would put
-            the razor that makes a cut and the dissolve that softens it in two
-            different places. */}
-        <TransitionPalette />
-      </div>
+      {/* No tool row of this component's own. The edit tools, the transition
+          chips, snap and follow render in the timeline PANEL's toolbar row
+          (`BottomTimeline` sub-header), the one row between the comp tabs and
+          the tracks — so the panel has one header, not three. */}
 
       {/* A refusal, spelled out. Dismissed by clicking it or by the next
           successful transition; deliberately not a modal, because the fix
@@ -2123,26 +1726,20 @@ function Timeline({
           ruler, the header column and out of the panel entirely, and a badge
           positioned inside the scrolling lanes would be left behind by its own
           scroll offset the moment the drag auto-scrolled. */}
-      {dragHud && (
-        <div
-          className={styles.dragHud}
-          style={{ left: dragHud.x + 14, top: dragHud.y + 16 }}
-          aria-hidden
-        >
-          {dragHud.lines.map((line) => (
-            <div key={line}>{line}</div>
-          ))}
-        </div>
-      )}
+      <DragHud hud={dragHud} />
 
       <div
         className={styles.headerCol}
         style={{ width: headerWidth, height: '100%' }}
         onWheel={onHeaderWheel}
       >
-        <div className={styles.ruler} style={{ height: rulerHeight }}>
+        {/* The header column's band matches the lanes' whole sticky stack —
+            ruler PLUS the marker and transcript lanes — or the track headers
+            stop lining up with the lanes they name. The legend itself is
+            pinned to the bottom `rulerHeight` of it, beside the real ruler. */}
+        <div className={styles.ruler} style={{ height: rulerStackHeight }}>
           {/* Column heads for the switches and modes (AE layout). */}
-          <div ref={colHeadsRef} className={styles.colHeads}>
+          <div ref={colHeadsRef} className={styles.colHeads} style={{ top: rulerChromeHeight }}>
             {/* A/V toggles come FIRST, as they do in AE — the eye / solo / lock
                 gutter is the left edge of the panel there, not something that
                 trails the layer name. `.trackHeader` below is ordered to
@@ -2192,18 +1789,40 @@ function Timeline({
                 <span className={styles.colHeadParent}>Parent &amp; Link</span>
               </>
             )}
+            {extraColumns.map((id) => {
+              const def = TIMELINE_EXTRA_COLUMNS.find((c) => c.id === id)!;
+              return (
+                <span key={id} className={styles.colHeadExtra} title={def.description}>
+                  {def.label}
+                </span>
+              );
+            })}
           </div>
         </div>
         <div
           ref={headerRef}
           className={styles.trackHeaderScroller}
-          style={{ height: `calc(100% - ${rulerHeight}px)` }}
+          style={{ height: `calc(100% - ${rulerStackHeight}px)` }}
           onScroll={(e) => {
             const x = (e.currentTarget as HTMLDivElement).scrollLeft;
             if (colHeadsRef.current) colHeadsRef.current.style.transform = `translateX(${-x}px)`;
           }}
         >
-          <div style={{ height: effectiveLanesHeight, position: 'relative' }}>
+          {/*
+            A LISTBOX, and the arrow keys that come with one.
+
+            Every row was `tabIndex={0}`, so reaching the tenth layer from the
+            top of the panel cost ten tabs — and Tab is how you leave a control,
+            not how you move within a list. One tab stop plus Up/Down is the
+            listbox contract, and it is what the layer list already looked like.
+          */}
+          <div
+            role="listbox"
+            aria-label="Timeline layers"
+            aria-multiselectable="true"
+            style={{ height: effectiveLanesHeight, position: 'relative' }}
+            onKeyDown={onRowListKey}
+          >
             {visibleRows.map((row, i) => {
               const realIndex = startRow + i;
               const rowStyle: CSSProperties = {
@@ -2222,7 +1841,7 @@ function Timeline({
                     selected={selectedTrackIds?.includes(row.track.id) ?? false}
                     expanded={row.expanded}
                     hasProps={row.hasProps}
-                    onToggleExpand={() => onTrackToggleExpand?.(row.track.id)}
+                    onToggleExpand={(recursive) => toggleExpandRow(row.track.id, recursive)}
                     onActivate={() => onTrackActivate?.(row.track.id)}
                     onClick={(additive) => onTrackSelect?.(row.track.id, additive)}
                     onToggleVisible={() => onTrackToggleVisible?.(row.track.id)}
@@ -2234,9 +1853,21 @@ function Timeline({
                     onToggleFlag={(flag) => onTrackToggleFlag?.(row.track.id, flag)}
                     onRename={(name) => onTrackRename?.(row.track.id, name)}
                     onTrackColorChange={onTrackColorChange}
+                    switchesOnHover={switchesOnHover}
+                    switchesPinned={pinnedSwitchRows.has(row.track.id)}
+                    onToggleSwitchPin={() => toggleSwitchPin(row.track.id)}
                     showSwitches={showSwitches}
                     showModes={showModes}
+                    extraColumns={extraColumns}
+                    frameRate={fps}
+                    active={
+                      activeTrackId === null
+                        ? realIndex === firstTrackRowIndex
+                        : activeTrackId === row.track.id
+                    }
+                    onRowFocus={() => setActiveTrackId(row.track.id)}
                     onReorderStart={(e) => {
+                      if (row.track.locked) return;
                       rowDrag.current = { id: row.track.id, startY: e.clientY, currentIndex: realIndex };
                       document.body.style.userSelect = 'none';
                     }}
@@ -2324,6 +1955,36 @@ function Timeline({
                 />
               );
             })}
+            {/* ── The pinned category heading ─────────────────────────
+                Scroll into a layer's forty effect parameters and the "Effects"
+                heading is the first thing off the top of the panel; what is
+                left is forty rows called "Radius" and "Amount" with nothing
+                saying what they belong to. `position: sticky` cannot do this —
+                the rows are absolutely positioned AND virtualized, so the real
+                heading is unmounted at exactly the moment it would need to
+                stick — so one extra copy is drawn, pinned, and pushed up by
+                the next section as it arrives. See `stickyCategory.ts`. */}
+            {stickyCategory ? (
+              <TrackCategoryHeader
+                label={stickyCategory.row.label}
+                icon={stickyCategory.row.icon}
+                expanded={stickyCategory.row.expanded}
+                count={stickyCategory.row.count}
+                sticky
+                style={{
+                  position: 'absolute',
+                  top: scrollTop + stickyCategory.offset,
+                  left: 0,
+                  right: 0,
+                  height: trackHeight,
+                  zIndex: 3,
+                }}
+                onToggle={() =>
+                  toggleCategory(stickyCategory.row.track.id, stickyCategory.row.categoryKey)
+                }
+              />
+            ) : null}
+
             {/* Drop indicator — horizontal line showing insertion target during row drag */}
             {rowDragOver !== null && (
               <div
@@ -2347,7 +2008,39 @@ function Timeline({
         onPointerUp={onHeaderResizeUp}
         onDoubleClick={() => setPref('timelineHeaderWidth', minHeaderWidth)}
         title="Drag to resize · double-click to reset"
-      />
+      >
+        {/* ── Row height ──────────────────────────────────────────────
+            A grip where the header column meets the lanes, dragged VERTICALLY.
+            The three presets already existed behind a button in the sub-header
+            that cycles them, and a cycle is the wrong control for a continuous
+            quantity: you press it three times to find out what the sizes are
+            and then live with whichever was closest. Dragging answers "as tall
+            as THIS" directly. Double-click returns to the compact default,
+            which is the one preset anybody wants back.
+
+            It sits INSIDE the column resizer so the two size gestures share
+            one seam, and stops propagation so a vertical drag is never also a
+            column-width drag. */}
+        <div
+          className={styles.rowHeightGrip}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Row height"
+          aria-valuemin={ROW_HEIGHT_MIN}
+          aria-valuemax={ROW_HEIGHT_MAX}
+          aria-valuenow={trackHeight}
+          title={`Row height ${trackHeight}px — drag up/down · double-click to reset`}
+          onPointerDown={onRowHeightDown}
+          onPointerMove={onRowHeightMove}
+          onPointerUp={onRowHeightUp}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            setPref('timelineRowHeight', ROW_HEIGHT_PRESETS[0]);
+          }}
+        >
+          <Icon name="grip-horizontal" size="sm" />
+        </div>
+      </div>
       {/* The razor's pointer tracking is bound ONLY while the razor is armed:
           it fires at pointer rate over the busiest element in the panel, and a
           handler that spends every one of those calls deciding it has nothing
@@ -2355,6 +2048,7 @@ function Timeline({
       <div
         ref={lanesRef}
         className={styles.lanes}
+        data-timeline-lanes=""
         onScroll={onLanesScroll}
         onPointerMove={editMode === 'razor' ? onRazorPointerMove : undefined}
         onPointerLeave={editMode === 'razor' ? clearRazorAt : undefined}
@@ -2363,7 +2057,7 @@ function Timeline({
           style={{
             width: laneWidth,
             minWidth: '100%',
-            height: rulerHeight + effectiveLanesHeight,
+            height: rulerStackHeight + effectiveLanesHeight,
             position: 'relative',
           }}
         >
@@ -2374,6 +2068,25 @@ function Timeline({
               scrolled away with the rows and every frame change meant
               scrolling back up first. The composition-duration handle stays
               OUTSIDE the stack — it spans ruler + lanes, so it cannot stick. */}
+          <div className={styles.stickyChrome} style={{ height: rulerStackHeight }}>
+            {/* ── Marker lane ─────────────────────────────────────────
+                ABOVE the ruler, not in it. A marker chip inside the ruler
+                competes with the two gestures that band already owns —
+                scrubbing and the work-area drag — for the same 26 pixels; up
+                here it has a row of its own and the ruler keeps its whole
+                height for the scrub. The full-height guide is still drawn down
+                through the lanes below, and still takes no pointer events. */}
+            <MarkerLane
+              markers={model.markers}
+              pps={pps}
+              leftOffset={TIMELINE_LEFT_OFFSET}
+              width={laneWidth}
+              fps={fps}
+              duration={model.duration}
+              snap={snapOn}
+              onSeek={onScrub}
+            />
+
           <div className={styles.rulerStack} style={{ height: rulerHeight }}>
             <Ruler
               ticks={ticks}
@@ -2442,6 +2155,24 @@ function Timeline({
             </div>
           </div>
 
+            {/* ── Transcript lane ─────────────────────────────────────
+                UNDER the ruler, so the words sit between the time they are
+                spoken at and the layers that show it. Opt-in: it is only
+                meaningful for a comp that has been transcribed, and it costs
+                the tracks their height. */}
+            {transcriptLaneOn ? (
+              <TranscriptLane
+                rootId={activeCompRootId()}
+                pps={pps}
+                leftOffset={TIMELINE_LEFT_OFFSET}
+                width={laneWidth}
+                top={0}
+                window={timeWindow}
+                onSeek={onScrub}
+              />
+            ) : null}
+          </div>
+
           {/* Composition duration drag handle on the ruler */}
           {onDurationChange ? (
             <div
@@ -2449,7 +2180,7 @@ function Timeline({
               style={{
                 position: 'absolute',
                 top: 0,
-                height: rulerHeight + effectiveLanesHeight,
+                height: rulerStackHeight + effectiveLanesHeight,
                 left: TIMELINE_LEFT_OFFSET + model.duration * pps,
                 width: 8,
                 transform: 'translateX(-4px)',
@@ -2488,7 +2219,7 @@ function Timeline({
 
           <div
             className={styles.lanesInner}
-            style={{ position: 'absolute', top: rulerHeight, left: 0, right: 0, height: effectiveLanesHeight }}
+            style={{ position: 'absolute', top: rulerStackHeight, left: 0, right: 0, height: effectiveLanesHeight }}
             onPointerDown={onLanesPointerDown}
             onDragOver={onLanesDragOver}
             onDragLeave={() => {
@@ -2508,7 +2239,7 @@ function Timeline({
                   kfSnap.kind === 'playhead' && styles.kfSnapPlayhead,
                   kfSnap.kind === 'keyframe' && styles.kfSnapKeyframe,
                 )}
-                style={{ transform: `translateX(${8 + kfSnap.time * pps}px)` }}
+                style={{ transform: `translateX(${TIMELINE_LEFT_OFFSET + kfSnap.time * pps}px)` }}
                 aria-hidden
               />
             )}
@@ -2577,7 +2308,8 @@ function Timeline({
                     trackHeight={trackHeight}
                     top={top}
                     selected={selectedTrackIds?.includes(row.track.id) ?? false}
-                    clipPreviews={clipPreviews}
+                    clipPreviews={previewsForRow(clipPreviews, row.track.clips)}
+                    window={timeWindow}
                     onClipDown={onClipDown}
                     onClipContextMenu={onClipContextMenu}
                     onActivate={onTrackActivate}
@@ -2598,9 +2330,13 @@ function Timeline({
                   <Keyframes
                     keyframes={row.prop.keyframes}
                     pps={pps}
-                    kfPreview={kfPreview}
+                    fps={fps}
+                    startFrame={model.startFrame ?? 0}
+                    kfPreview={kfPreviewForRow(kfPreview, row.prop.keyframes)}
                     selectedKfIds={selectedKfIds}
                     scaleGripIds={scaleGripIds}
+                    window={timeWindow}
+                    locked={row.track.locked === true}
                     onKeyframeDown={onKeyframeDown}
                     onKeyframeContextMenu={onKeyframeContextMenu}
                   />
@@ -2730,18 +2466,38 @@ function Timeline({
               />
             ) : null}
 
-            {/* Markers */}
-            {model.markers.map((m) => (
+            {/* ── "What changed" heat ─────────────────────────────────
+                A self-subscribing, throttled leaf — the same shape as
+                `CacheBars` and for the same reason: the answer moves on every
+                edit, and carrying it in the model would replace the object the
+                panel's whole memoization story is built on. Off by default and
+                free when off. */}
+            <HeatLane
+              source={heatSource}
+              tracks={model.tracks}
+              trackRowIndex={trackRowIndex}
+              pps={pps}
+              leftOffset={TIMELINE_LEFT_OFFSET}
+              trackHeight={trackHeight}
+              topPadding={TIMELINE_TOP_PADDING}
+              window={timeWindow}
+            />
+
+            {/* Marker GUIDES — the full-height line only. The chip you grab
+                lives in `<MarkerLane>` above the ruler; this is the part that
+                has to reach down through the lanes and must therefore stay
+                click-through, or it would eat every gesture on every row it
+                crosses. */}
+            {model.markers.filter((m) => timeInWindow(m.time, timeWindow)).map((m) => (
               <div
                 key={m.id}
                 className={styles.marker}
-                style={{ transform: `translateX(${TIMELINE_LEFT_OFFSET + m.time * pps}px)` }}
+                style={{
+                  transform: `translateX(${TIMELINE_LEFT_OFFSET + m.time * pps}px)`,
+                  color: m.color ?? undefined,
+                }}
                 aria-hidden
-              >
-                <span className={styles.markerFlag} title={m.label}>
-                  <Icon name="marker" size="sm" />
-                </span>
-              </div>
+              />
             ))}
 
             {/* Marquee selection rectangle (drag on empty lane space). */}
@@ -2780,13 +2536,14 @@ function Timeline({
       </div>
 
       {/* Layer minimap — auto-appears only when layers exceed one screen. */}
-      {size.height > 0 && totalLanesHeight > size.height - rulerHeight ? (
+      {minimapShown ? (
         <Minimap
+          ref={minimapRef}
           rows={rows}
           trackHeight={trackHeight}
           totalHeight={totalLanesHeight}
-          viewportTop={rulerHeight}
-          viewportHeight={size.height - rulerHeight}
+          viewportTop={rulerStackHeight}
+          viewportHeight={size.height - rulerStackHeight}
           scrollTop={scrollTop}
           onScrollTo={onMinimapScrollTo}
         />
@@ -2808,1032 +2565,3 @@ function Timeline({
  */
 const MemoizedTimeline = memo(Timeline);
 export { MemoizedTimeline as Timeline };
-
-/** Vertical overview of all rows with a draggable viewport window.
- *
- *  Memoized for the same reason as {@link Ruler}: it draws a strip per row and
- *  none of it depends on the playhead, so it should not be rebuilt by a frame
- *  tick. Its `onScrollTo` is a useCallback at the call site — an inline arrow
- *  there would defeat this wrapper completely. */
-function MinimapImpl({
-  rows,
-  trackHeight,
-  totalHeight,
-  viewportTop,
-  viewportHeight,
-  scrollTop,
-  onScrollTo,
-}: {
-  rows: Row[];
-  trackHeight: number;
-  totalHeight: number;
-  viewportTop: number;
-  viewportHeight: number;
-  scrollTop: number;
-  onScrollTo: (top: number) => void;
-}): JSX.Element {
-  const scale = viewportHeight / totalHeight;
-  const winH = viewportHeight * scale;
-  const winTop = scrollTop * scale;
-  const dragging = useRef(false);
-  const barRef = useRef<HTMLDivElement | null>(null);
-
-  const scrollFromPointer = (clientY: number): void => {
-    const rect = barRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const y = clientY - rect.top;
-    const top = y / scale - viewportHeight / 2;
-    onScrollTo(Math.max(0, Math.min(totalHeight - viewportHeight, top)));
-  };
-
-  useEffect(() => {
-    const move = (e: PointerEvent): void => { if (dragging.current) scrollFromPointer(e.clientY); };
-    const up = (): void => { dragging.current = false; };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-  });
-
-  return (
-    <div
-      ref={barRef}
-      className={styles.minimap}
-      style={{ top: viewportTop, height: viewportHeight }}
-      onPointerDown={(e) => { dragging.current = true; scrollFromPointer(e.clientY); }}
-    >
-      {rows.map((row, i) => (
-        <div
-          key={i}
-          className={styles.minimapRow}
-          style={{
-            top: (TIMELINE_TOP_PADDING + i * trackHeight) * scale,
-            height: Math.max(1, trackHeight * scale - 1),
-            background: row.type === 'track' ? (row.track.color ?? 'var(--color-text-muted)') : 'var(--color-border-strong)',
-            opacity: row.type === 'track' ? 0.7 : 0.4,
-          }}
-        />
-      ))}
-      <div className={styles.minimapWindow} style={{ top: winTop, height: winH }} />
-    </div>
-  );
-}
-
-const Minimap = memo(MinimapImpl);
-
-// ── Subcomponents ───────────────────────────────────────────────
-
-/**
- * The frame ruler.
- *
- * Memoized, and worth it: it emits one absolutely-positioned div per tick over
- * the WHOLE composition, so at a 10-second comp and default zoom it is one of
- * the largest subtrees in the panel — and it does not depend on the playhead at
- * all. Its props are already stable across a frame tick (`ticks` is a useMemo,
- * `onPointerDown` a useCallback, the rest numbers), so without the memo it was
- * rebuilding every one of those nodes on every frame of playback purely because
- * its parent re-rendered to move the playhead.
- */
-function RulerImpl({
-  ticks,
-  height,
-  width,
-  onPointerDown,
-  currentTime = 0,
-  duration = 0,
-  pixelsPerSecond = 80,
-  leftOffset = 8,
-}: {
-  ticks: { x: number; major: boolean; label: string }[];
-  height: number;
-  width: number;
-  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  currentTime?: number;
-  duration?: number;
-  pixelsPerSecond?: number;
-  leftOffset?: number;
-}): JSX.Element {
-  const progressWidth = Math.max(0, Math.min(duration * pixelsPerSecond, currentTime * pixelsPerSecond));
-  const trackWidth = duration > 0 ? duration * pixelsPerSecond : width;
-
-  return (
-    <div className={styles.ruler} style={{ height, width }} onPointerDown={onPointerDown}>
-      {/* Background progress track */}
-      <div
-        className={styles.rulerProgressTrack}
-        style={{ left: leftOffset, width: trackWidth }}
-        aria-hidden
-      />
-
-      {/* Video progress fill with primary color as video passes */}
-      <div
-        className={styles.rulerProgressFill}
-        style={{ left: leftOffset, width: progressWidth }}
-        aria-hidden
-      />
-
-      {/* Ruler ticks and timecode labels at the top */}
-      {ticks.map((t, i) => (
-        <div
-          key={i}
-          className={cn(styles.tick, t.major && styles.tickMajor)}
-          style={{ transform: `translateX(${t.x}px)` }}
-        >
-          {t.major ? <span className={styles.tickLabel}>{t.label}</span> : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const Ruler = memo(RulerImpl);
-
-// Label colours come from the ONE palette in `core/scene/labelColor`. This file
-// used to carry its own 12 hexes, so the same layer showed a different red in the
-// timeline than in the scene tree and the canvas menu — three palettes for one
-// property. (A fourth lived in the since-removed Motion Tools panel, which also
-// wrote `node.color` directly instead of through `setNodeLabelColor`, so its
-// choice never even saved.)
-
-/*
-  `data-whip-layer` on the row makes it a pick-whip drop target. `track.id` IS
-  the scene node id — `deriveTimelineTracks` builds one track per node — so no
-  lookup is needed on the drop side. See `@core/whip/whipTarget`.
-*/
-const TrackHeader = memo(function TrackHeader({
-  track,
-  index,
-  selected,
-  expanded,
-  hasProps,
-  onToggleExpand,
-  onActivate,
-  onClick,
-  onToggleVisible,
-  onToggleLock,
-  onToggleSolo,
-  onBlendModeChange,
-  onMatteChange,
-  onParentChange,
-  onToggleFlag,
-  onRename,
-  onTrackColorChange,
-  showSwitches = true,
-  showModes = true,
-  onReorderStart,
-  style,
-}: {
-  track: TimelineTrack;
-  index: number;
-  selected: boolean;
-  expanded: boolean;
-  hasProps: boolean;
-  onToggleExpand: () => void;
-  onActivate: () => void;
-  onClick: (additive: boolean) => void;
-  onToggleVisible: () => void;
-  onToggleLock: () => void;
-  onToggleSolo: () => void;
-  onBlendModeChange?: (mode: LayerBlendMode) => void;
-  onMatteChange?: (matte: any) => void;
-  /** `options.preserveWorld: false` is the Alt variant — link without compensating. */
-  onParentChange?: (parentId: string | null, options?: { preserveWorld?: boolean }) => void;
-  onToggleFlag?: (flag: 'shy' | 'collapse' | 'fxEnabled' | 'motionBlur' | 'adjustment' | 'threeD' | 'guide' | 'preserveTransparency') => void;
-  onRename?: (newName: string) => void;
-  onTrackColorChange?: (trackId: string, color: string) => void;
-  /** AE's Toggle Switches / Modes — see `TimelineProps['columns']`. */
-  showSwitches?: boolean;
-  showModes?: boolean;
-  onReorderStart?: (e: ReactPointerEvent<HTMLDivElement>) => void;
-  style: CSSProperties;
-}): JSX.Element {
-  const hidden = track.muted === true;
-  const locked = track.locked === true;
-  const solo = track.solo === true;
-
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(track.name);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const startRename = (e: React.MouseEvent): void => {
-    e.stopPropagation();
-    setDraft(track.name);
-    setEditing(true);
-    setTimeout(() => { inputRef.current?.select(); }, 10);
-  };
-  const commitRename = (): void => {
-    setEditing(false);
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== track.name) onRename?.(trimmed);
-  };
-
-  const currentParent = parentOfNode(track.id);
-  const parentOptions = eligibleParents(track.id);
-  const currentParentName = currentParent
-    ? parentOptions.find((o) => o.id === currentParent)?.name ?? 'Parent'
-    : 'None';
-
-  // Option id + label come from the SHARED menu, not a second hardcoded copy of
-  // the four labels. This row and the inspector used to each own their own list.
-  const currentMatteOption = matteOptionId(track.matteMode);
-  const currentMatteLabel = MATTE_SHORT_LABEL[currentMatteOption] ?? 'None';
-
-  const parentItems = [
-    {
-      type: 'item' as const,
-      id: '__none__',
-      label: 'None',
-      icon: currentParent === null ? ('check' as const) : undefined,
-      onSelect: (m: MenuSelectModifiers) => onParentChange?.(null, parentOptionsFor(m)),
-    },
-    ...(parentOptions.length ? [{ type: 'separator' as const }] : []),
-    ...parentOptions.map((o) => ({
-      type: 'item' as const,
-      id: o.id,
-      label: o.name,
-      icon: o.id === currentParent ? ('check' as const) : undefined,
-      onSelect: (m: MenuSelectModifiers) => onParentChange?.(o.id, parentOptionsFor(m)),
-    })),
-  ];
-
-  return (
-    <div
-      className={cn(styles.trackHeader, selected && styles.trackHeaderSelected)}
-      style={{ ...style, '--track-color': track.color ?? 'transparent' } as CSSProperties}
-      data-track-id={track.id}
-      data-whip-layer={track.id}
-      data-hidden={hidden || undefined}
-      data-ghost={track.ghosted || undefined}
-      onClick={(e) => onClick(e.ctrlKey || e.metaKey || e.shiftKey)}
-      onDoubleClick={onActivate}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick(e.ctrlKey || e.metaKey || e.shiftKey);
-        } else if (e.key === 'F2') {
-          e.preventDefault();
-          onActivate();
-        }
-      }}
-      role="option"
-      tabIndex={0}
-      aria-selected={selected}
-      aria-label={track.name}
-      title="Enter to select · F2 to focus"
-    >
-      <div className={styles.preInfoCol}>
-        <button
-          type="button"
-          className={styles.trackAction}
-          data-kind="visible"
-          data-on={!hidden || undefined}
-          aria-label={hidden ? 'Show track' : 'Hide track'}
-          title={hidden ? 'Hide' : 'Show (Video)'}
-          onClick={(e) => { e.stopPropagation(); onToggleVisible(); }}
-        >
-          <Icon name={hidden ? 'eye-off' : 'eye'} size="sm" />
-        </button>
-        <button
-          type="button"
-          className={styles.trackAction}
-          data-kind="solo"
-          data-on={solo || undefined}
-          aria-label={solo ? 'Unsolo track' : 'Solo track'}
-          title={solo ? 'Unsolo' : 'Solo'}
-          onClick={(e) => { e.stopPropagation(); onToggleSolo(); }}
-        >
-          <Icon name="circle" size="sm" />
-        </button>
-        <button
-          type="button"
-          className={styles.trackAction}
-          data-kind="lock"
-          data-on={locked || undefined}
-          aria-label={locked ? 'Unlock track' : 'Lock track'}
-          title={locked ? 'Unlock' : 'Lock'}
-          onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
-        >
-          <Icon name="lock" size="sm" />
-        </button>
-      </div>
-
-      <div className={styles.layerInfoCol} style={{ paddingLeft: track.depth ? track.depth * 14 : undefined }}>
-        <div
-          className={styles.dragHandle}
-          title="Drag to reorder"
-          onPointerDown={onReorderStart}
-        >
-          <Icon name="grip-vertical" size="sm" />
-        </div>
-        <span className={styles.trackIndex}>{index}</span>
-        {typeof track.nodeColor === 'string' && (
-          <div onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <ColorPicker
-              value={track.nodeColor || '#5282b8'}
-              onChange={(hex) => onTrackColorChange?.(track.id, hex)}
-              compact
-              alpha={false}
-              aria-label="Layer label color"
-            />
-          </div>
-        )}
-        <button
-          type="button"
-          className={cn(styles.disclosure, !hasProps && styles.disclosureHidden)}
-          aria-label={expanded ? 'Collapse properties' : 'Reveal animated properties'}
-          aria-expanded={expanded}
-          title={expanded ? 'Collapse' : 'Reveal animated properties (U)'}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (hasProps) onToggleExpand();
-          }}
-        >
-          <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size="sm" />
-        </button>
-        <span
-          className={styles.trackIcon}
-          style={{ color: track.color ?? 'var(--color-accent)' }}
-          title={track.kind}
-        >
-          <Icon name={(track.icon as IconName) ?? 'layers'} size="sm" />
-        </span>
-        {editing ? (
-          <input
-            ref={inputRef}
-            className={styles.trackNameInput}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
-              if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
-            }}
-            onClick={(e) => e.stopPropagation()}
-            autoFocus
-          />
-        ) : (
-          <span
-            className={styles.trackName}
-            title={`${track.name} — double-click to rename`}
-            onDoubleClick={startRename}
-          >
-            {track.name}
-          </span>
-        )}
-      </div>
-
-      {showSwitches && (
-        <div className={styles.aeSwitchesCol}>
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="shy"
-            data-on={(track as any).shy || undefined}
-            title="Toggle Shy Layer"
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('shy'); }}
-          >
-            <Icon name="shy" size="sm" />
-          </button>
-
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="fx"
-            data-on={track.fxEnabled !== false || undefined}
-            title="Toggle Effects (fx)"
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('fxEnabled'); }}
-          >
-            <span className={styles.fxText}>fx</span>
-          </button>
-
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="motionBlur"
-            data-on={track.motionBlur || undefined}
-            title="Toggle Motion Blur"
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('motionBlur'); }}
-          >
-            <Icon name="motion-blur" size="sm" />
-          </button>
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="adjustment"
-            data-on={track.adjustment || undefined}
-            title="Toggle Adjustment Layer"
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('adjustment'); }}
-          >
-            <Icon name="adjustment" size="sm" />
-          </button>
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="guide"
-            data-on={track.guide || undefined}
-            aria-pressed={track.guide === true}
-            title={track.guide ? 'Guide layer — not rendered on export' : 'Make Guide Layer'}
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('guide'); }}
-          >
-            {/* NOT `eye-off`. That is the glyph the VISIBILITY switch shows when
-                a layer is hidden, so every row carried two eyes doing unrelated
-                jobs — visibility over in the pre-info column, guide-layer here —
-                and the pair read as one control duplicated. A guide layer is
-                reference framing the render skips, which is what `frame` says. */}
-            <Icon name="frame" size="sm" />
-          </button>
-          {/* Preserve Underlying Transparency — AE's "T" switch. A glyph rather
-              than an icon because that is what it is called and what AE draws;
-              the column legend carries the same T in the same position. */}
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="preserveTransparency"
-            data-on={track.preserveTransparency || undefined}
-            aria-pressed={track.preserveTransparency === true}
-            aria-label="Preserve Underlying Transparency"
-            title={track.preserveTransparency
-              ? 'Preserve Underlying Transparency — visible only where layers beneath are opaque'
-              : 'Preserve Underlying Transparency'}
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('preserveTransparency'); }}
-          >
-            <span className={styles.fxText}>T</span>
-          </button>
-          <button
-            type="button"
-            className={styles.trackAction}
-            data-kind="threeD"
-            data-on={track.threeD || undefined}
-            title="Toggle 3D Layer"
-            onClick={(e) => { e.stopPropagation(); onToggleFlag?.('threeD'); }}
-          >
-            <Icon name="3d" size="sm" />
-          </button>
-        </div>
-      )}
-
-      {showModes && (
-        <>
-        <div className={styles.modeCol} onClick={(e) => e.stopPropagation()}>
-          <Dropdown
-            placement="bottom-start"
-            trigger={
-              <button type="button" className={styles.timelineSelectTrigger} aria-label="Layer Blend Mode">
-                {blendModeLabel(track.blendMode as LayerBlendMode | undefined)}
-              </button>
-            }
-            items={blendDropdownItems(
-              track.blendMode as LayerBlendMode | undefined,
-              (m) => onBlendModeChange?.(m),
-            )}
-          />
-        </div>
-
-        <div className={styles.matteCol} onClick={(e) => e.stopPropagation()}>
-          <Dropdown
-            placement="bottom-start"
-            trigger={
-              <button type="button" className={styles.timelineSelectTrigger} aria-label="Track Matte">
-                {currentMatteLabel}
-              </button>
-            }
-            items={MATTE_OPTIONS.map((m) => ({
-              type: 'item',
-              id: m.id,
-              label: MATTE_SHORT_LABEL[m.id] ?? m.label,
-              icon: m.id === currentMatteOption ? ('check' as const) : undefined,
-              onSelect: () => onMatteChange?.(applyMatteOption(track.matteMode, m.id)),
-            }))}
-          />
-        </div>
-
-        {/*
-          "Parent & Link" — the column's name, and now both halves of it. The
-          whip is the gesture; the dropdown is for a parent that is scrolled out
-          of sight. Both call `onParentChange`, so parenting cannot mean two
-          different things depending on which control was used.
-        */}
-        <div className={styles.parentCol} onClick={(e) => e.stopPropagation()}>
-          <PickWhip
-            label="Parent pick-whip — drag onto a layer (Alt: keep values, layer jumps)"
-            accept={(target) => parentOptions.some((o) => o.id === target.nodeId)}
-            onPick={(target, m) => onParentChange?.(target.nodeId, parentOptionsFor(m))}
-          />
-          <Dropdown
-            placement="bottom-start"
-            trigger={
-              <button type="button" className={styles.timelineSelectTrigger} aria-label="Parent Layer">
-                {currentParentName}
-              </button>
-            }
-            items={parentItems}
-          />
-        </div>
-        </>
-      )}
-    </div>
-  );
-}, areRowPropsEqual);
-
-/** Times within this many seconds of the playhead count as "at" it. */
-const KEYFRAME_EPSILON = 1e-4;
-
-/**
- * A property sub-row: its name plus AE's keyframe navigator — `◀ ◆ ▶`. The
- * diamond is filled when a keyframe sits at the playhead and hollow otherwise;
- * clicking it adds or removes one *without changing the value*, which is the
- * only way to anchor a property before animating it away.
- */
-/**
- * One property row in the timeline's track header column: the name, its live
- * value field(s), and either the keyframe navigator or a stopwatch.
- *
- * Exported so its behaviour can be tested directly — driving it through the
- * whole virtualized Timeline would test the scroller, not the row.
- */
-export function PropertyHeader({
-  label,
-  style,
-  keyframes,
-  currentTime,
-  animated = true,
-  valueProps,
-  valueUnit,
-  propertyValue,
-  onValueChange,
-  onScrubStart,
-  onScrubEnd,
-  selected = false,
-  onSelect,
-  onToggleKeyframe,
-  onStopwatch,
-  onSeek,
-  whipNodeId,
-  whipProp,
-}: {
-  label: string;
-  style: CSSProperties;
-  keyframes: ReadonlyArray<TimelineKeyframeRef>;
-  currentTime: number;
-  /** False for a static placeholder row — shows the stopwatch instead of ◀◆▶. */
-  animated?: boolean;
-  /** Engine props this row edits — one value field each (Position → x, y). */
-  valueProps?: ReadonlyArray<string>;
-  valueUnit?: string;
-  propertyValue?: (prop: string) => number;
-  onValueChange?: (prop: string, value: number) => void;
-  onScrubStart?: (prop: string) => void;
-  onScrubEnd?: () => void;
-  /** This row is in the property selection (highlighted name). */
-  selected?: boolean;
-  onSelect?: (mode: 'replace' | 'toggle') => void;
-  onToggleKeyframe?: () => void;
-  /** Enable animation for a static placeholder row (create first keyframe). */
-  onStopwatch?: () => void;
-  onSeek?: (time: number) => void;
-  /** The layer and property this row edits, so a pick-whip can land on it. */
-  whipNodeId?: string;
-  whipProp?: string;
-}): JSX.Element {
-  const sorted = useMemo(() => [...keyframes].sort((a, b) => a.time - b.time), [keyframes]);
-  const at = sorted.find((k) => Math.abs(k.time - currentTime) < KEYFRAME_EPSILON);
-  const prev = [...sorted].reverse().find((k) => k.time < currentTime - KEYFRAME_EPSILON);
-  const next = sorted.find((k) => k.time > currentTime + KEYFRAME_EPSILON);
-
-  // AE puts a live, scrubbable value beside every property here, so a whole
-  // animation can be built without leaving the timeline.
-  const fields =
-    valueProps && valueProps.length > 0 && propertyValue && onValueChange ? (
-      <div className={styles.propValues}>
-        {valueProps.map((p) => (
-          <ValueField
-            key={p}
-            value={propertyValue(p)}
-            unit={valueUnit}
-            onChange={(v) => onValueChange(p, v)}
-            onScrubStart={onScrubStart ? () => onScrubStart(p) : undefined}
-            onScrubEnd={onScrubEnd}
-            aria-label={valueProps.length > 1 ? `${label} ${p}` : label}
-          />
-        ))}
-      </div>
-    ) : null;
-
-  /**
-   * The stopwatch sits on EVERY property row, left of its name, lit when the
-   * property is animated — that is where AE puts it and what it means there.
-   *
-   * It used to appear only on un-animated rows, so the timeline could turn
-   * animation ON but never OFF: removing a property's animation meant crossing
-   * to the inspector to find the same control.
-   */
-  // The SHARED stopwatch — the same component the inspector and the effect
-  // stack render, so the control that turns animation on cannot look like a
-  // checkbox in one panel and a stopwatch in another.
-  const stopwatch = onStopwatch ? (
-    <StopwatchButton animated={animated} label={label} onToggle={onStopwatch} />
-  ) : null;
-
-  // The name is the row's SELECT target — AE's property selection, on which
-  // proportional scrubbing is defined. Ctrl/Cmd-click adds to the ordered
-  // selection; a plain click replaces it.
-  const name = (
-    <span
-      className={cn(styles.propName, onSelect && styles.propNameSelectable, selected && styles.propNameSelected)}
-      title={label}
-      role={onSelect ? 'button' : undefined}
-      tabIndex={onSelect ? 0 : undefined}
-      aria-pressed={onSelect ? selected : undefined}
-      onClick={
-        onSelect
-          ? (e) => {
-              e.stopPropagation();
-              onSelect(e.ctrlKey || e.metaKey ? 'toggle' : 'replace');
-            }
-          : undefined
-      }
-      onKeyDown={
-        onSelect
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onSelect(e.ctrlKey || e.metaKey ? 'toggle' : 'replace');
-              }
-            }
-          : undefined
-      }
-    >
-      {label}
-    </span>
-  );
-
-  if (!animated) {
-    // Static placeholder: the AE property tree before any keyframes exist.
-    return (
-      <div
-        className={cn(styles.propHeader, styles.propHeaderStatic, selected && styles.propHeaderSelected)}
-        style={style}
-        data-whip-layer={whipNodeId}
-        data-whip-prop={whipProp}
-      >
-        {stopwatch}
-        {name}
-        {fields}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={cn(styles.propHeader, selected && styles.propHeaderSelected)}
-      style={style}
-      data-whip-layer={whipNodeId}
-      data-whip-prop={whipProp}
-    >
-      {stopwatch}
-      {name}
-      {fields}
-      <div className={styles.propNav}>
-        <KeyframeNavigator
-          label={label}
-          hasPrev={!!prev}
-          hasNext={!!next}
-          atKeyframe={!!at}
-          onPrev={() => prev && onSeek?.(prev.time)}
-          onNext={() => next && onSeek?.(next.time)}
-          onToggleKeyframe={() => onToggleKeyframe?.()}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** A track's lane content: the calm animation block + (collapsed) keyframes. */
-const TrackContent = memo(function TrackContent({
-  track,
-  ghosted,
-  pps,
-  trackHeight,
-  top,
-  selected,
-  clipPreviews,
-  onClipDown,
-  onClipContextMenu,
-  onActivate,
-  clipMuted,
-  onClipMuteToggle,
-}: {
-  track: TimelineTrack;
-  ghosted: boolean;
-  pps: number;
-  trackHeight: number;
-  top: number;
-  /** This layer is in the selection — the bar carries the highlight so the
-   *  lanes show what is selected without a trip back to the name column. */
-  selected: boolean;
-  clipPreviews: ReadonlyArray<{ id: string; start: number; duration: number; sourceInSec?: number }> | null;
-  onClipDown?: (clip: TimelineClip, mode: 'move' | 'start' | 'end', e: ReactPointerEvent<HTMLDivElement>) => void;
-  onClipContextMenu?: (clipId: string, clientX: number, clientY: number) => void;
-  onActivate?: (nodeId: string) => void;
-  /** Whether this layer's audio is muted, for the speaker glyph. */
-  clipMuted?: boolean;
-  /** Toggle this layer's audio mute. Absent = no speaker button. */
-  onClipMuteToggle?: (nodeId: string) => void;
-}): JSX.Element {
-  return (
-    <LaneRow top={top} trackHeight={trackHeight} ghosted={ghosted}>
-      {/* Clips — body: move / Alt-slip / Shift+Alt-slide; edges: trim. */}
-      {track.clips?.map((clip) => {
-        const view = clipPreviews?.find((p) => p.id === clip.id) ?? clip;
-        const wave = clip.assetId ? audioEngine.getWaveform(clip.assetId) : undefined;
-        const width = Math.max(2, view.duration * pps);
-        const height = trackHeight - 6;
-        // Slice to the bar's own window onto the source. Drawing `wave.peaks`
-        // whole — which this did — squeezed the entire file into the bar, so
-        // the peaks under the playhead were not the audio you would hear there
-        // and trimming or slipping changed nothing on screen.
-        const sourceInSec =
-          (view as { sourceInSec?: number }).sourceInSec ?? clip.sourceInSec;
-        const sourceOutSec =
-          sourceInSec !== undefined
-            ? sourceInSec + view.duration
-            : clip.sourceOutSec;
-        const slice =
-          wave && sourceInSec !== undefined && sourceOutSec !== undefined
-            ? peaksInRange(wave, sourceInSec, sourceOutSec)
-            : wave?.peaks;
-        const pathD = slice ? waveformPath(slice, width, height) : '';
-        const audible = clip.assetId !== undefined && wave !== undefined;
-        return (
-          <div
-            key={clip.id}
-            className={cn(styles.clip, selected && styles.clipSelected)}
-            style={{
-              transform: `translateX(${8 + view.start * pps}px)`,
-              width,
-              height,
-              background: clip.color ?? 'var(--color-primary)',
-              border: 'none',
-              cursor: onClipDown ? 'grab' : undefined,
-            }}
-            title={clip.label ?? clip.id}
-            onPointerDown={onClipDown ? (e) => onClipDown(clip, 'move', e) : undefined}
-            onContextMenu={
-              onClipContextMenu
-                ? (e) => {
-                  e.preventDefault();
-                  onClipContextMenu(clip.id, e.clientX, e.clientY);
-                }
-                : undefined
-            }
-            onDoubleClick={onActivate ? () => onActivate(track.id) : undefined}
-          >
-            {pathD && (
-              <svg
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  width: '100%',
-                  height: '100%',
-                  pointerEvents: 'none',
-                  opacity: 0.35,
-                }}
-              >
-                <path d={pathD} fill="currentColor" />
-              </svg>
-            )}
-            {onClipDown ? (
-              <>
-                <div
-                  className={styles.clipHandle}
-                  data-edge="start"
-                  onPointerDown={(e) => onClipDown(clip, 'start', e)}
-                />
-                <div
-                  className={styles.clipHandle}
-                  data-edge="end"
-                  onPointerDown={(e) => onClipDown(clip, 'end', e)}
-                />
-              </>
-            ) : null}
-            {audible && onClipMuteToggle && (
-              <button
-                type="button"
-                className={styles.clipMute}
-                title={clipMuted ? 'Unmute this layer’s audio' : 'Mute this layer’s audio'}
-                aria-label={clipMuted ? 'Unmute audio' : 'Mute audio'}
-                aria-pressed={clipMuted}
-                // The bar is a drag handle; without stopping propagation the
-                // pointerdown would start a move and the click never lands.
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClipMuteToggle(clip.nodeId);
-                }}
-              >
-                <Icon name={clipMuted ? 'audio-off' : 'audio'} size="sm" />
-              </button>
-            )}
-            <span className={styles.clipLabel}>{clip.label ?? clip.id}</span>
-          </div>
-        );
-      })}
-
-      {/* Layer markers — anchored to this row, on the comp axis (AE draws them
-          on the layer bar, and they move with a trimmed layer because the
-          engine stores them layer-relative). */}
-      {track.markers?.map((m) => (
-        <div
-          key={m.id}
-          className={styles.layerMarker}
-          style={{ left: `${8 + m.time * pps}px`, background: m.color ?? undefined }}
-          title={m.label}
-        />
-      ))}
-    </LaneRow>
-  );
-}, areRowPropsEqual);
-
-function LaneRow({
-  top,
-  trackHeight,
-  ghosted,
-  children,
-}: {
-  top: number;
-  trackHeight: number;
-  ghosted?: boolean;
-  children: ReactNode;
-}): JSX.Element {
-  return (
-    <div
-      className={styles.laneRow}
-      style={{ position: 'absolute', top, left: 0, right: 0, height: trackHeight, opacity: ghosted ? 0.32 : undefined }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const Keyframes = memo(function Keyframes({
-  keyframes,
-  pps,
-  kfPreview,
-  selectedKfIds,
-  scaleGripIds,
-  onKeyframeDown,
-  onKeyframeContextMenu,
-}: {
-  keyframes: ReadonlyArray<TimelineKeyframeRef>;
-  pps: number;
-  kfPreview: Map<string, number>;
-  selectedKfIds: Set<string>;
-  /** Keyframes that are an END of the current multi-selection — the Alt grips. */
-  scaleGripIds: Set<string>;
-  onKeyframeDown: (kf: TimelineKeyframeRef, e: ReactPointerEvent<HTMLDivElement>) => void;
-  onKeyframeContextMenu?: (keyframeId: string, clientX: number, clientY: number) => void;
-}): JSX.Element {
-  return (
-    <>
-      {keyframes.map((kf) => {
-        const dragging = kfPreview.has(kf.id);
-        const selected = selectedKfIds.has(kf.id);
-        const time = dragging ? kfPreview.get(kf.id)! : kf.time;
-        // Roving keeps its own full-circle glyph: it is a statement about TIME
-        // (this key is auto-positioned for constant speed), not about the
-        // interpolation curve, so it must stay distinguishable from auto-bezier.
-        const shapes = keyframeShapes(kf.easeIn, kf.easeOut, { isFirst: kf.isFirst, isLast: kf.isLast });
-        const paths = keyframePaths(shapes.left, shapes.right);
-        return (
-          <div
-            key={kf.id}
-            className={cn(
-              styles.keyframe,
-              dragging && styles.keyframeDragging,
-              selected && styles.keyframeSelected,
-              kf.roving && styles.keyframeRoving,
-            )}
-            style={{ left: `${8 + time * pps}px` }}
-            onPointerDown={(e) => onKeyframeDown(kf, e)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onKeyframeContextMenu?.(kf.id, e.clientX, e.clientY);
-            }}
-            title={`${time.toFixed(2)}s · ${describeShapes(shapes.left, shapes.right)} — drag to move, Shift+click to multi-select, right-click for options${scaleGripIds.has(kf.id) ? ', Alt+drag to scale the selection in time' : ''
-              }`}
-          >
-            {!kf.roving && (
-              <svg className={styles.keyframeGlyph} viewBox="0 0 12 12" aria-hidden focusable="false">
-                <path d={paths.left} />
-                <path d={paths.right} />
-              </svg>
-            )}
-          </div>
-        );
-      })}
-    </>
-  );
-}, areRowPropsEqual);
-
-function TrackCategoryHeader({
-  label,
-  icon,
-  expanded,
-  count,
-  style,
-  onToggle,
-}: {
-  label: string;
-  icon: IconName;
-  expanded: boolean;
-  count: number;
-  style: CSSProperties;
-  onToggle: () => void;
-}): JSX.Element {
-  return (
-    <div className={styles.categoryHeader} style={style} onClick={onToggle}>
-      <span className={styles.disclosure}>
-        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size="sm" />
-      </span>
-      <span className={styles.categoryIcon}>
-        <Icon name={icon} size="sm" />
-      </span>
-      <span className={styles.categoryName}>{label}</span>
-      <span className={styles.categoryBadge}>{count}</span>
-    </div>
-  );
-}
-
-// ── Helpers ─────────────────────────────────────────────────────
-
-/**
- * Prop equality for the timeline's row subcomponents (track headers, lane
- * content, keyframes). The Timeline re-renders on every playback frame to move
- * the playhead — up to 60×/s — but none of these rows depend on the playhead,
- * so re-rendering them each frame is pure waste that made dense comps feel laggy
- * (the "not yet pleasant for dense compositions" note in ROADMAP.md).
- *
- * A plain shallow `memo` cannot help: every row is handed a freshly-built
- * `style` object and freshly-bound callbacks each render. But those callbacks
- * are all bound to a STABLE `track.id`, so a new closure identity is not a
- * behavioural change, and the geometry only changes on scroll or a row-height
- * switch, not per frame. So: ignore function identity, compare `style` by value,
- * and compare everything else by identity. Any real data change — the track
- * object, selection, index, expansion, geometry — still re-renders normally.
- */
-export function areRowPropsEqual(prevProps: object, nextProps: object): boolean {
-  const prev = prevProps as Record<string, unknown>;
-  const next = nextProps as Record<string, unknown>;
-  const keys = Object.keys(prev);
-  if (keys.length !== Object.keys(next).length) return false;
-  for (const key of keys) {
-    const a = prev[key];
-    const b = next[key];
-    if (Object.is(a, b)) continue;
-    // Callbacks are bound to stable ids; identity churn is not a real change.
-    if (typeof a === 'function' && typeof b === 'function') continue;
-    // Geometry arrives as a fresh object literal each render — compare by value.
-    if (key === 'style' && isShallowEqualStyle(a, b)) continue;
-    return false;
-  }
-  return true;
-}
-
-function isShallowEqualStyle(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const keys = Object.keys(ao);
-  if (keys.length !== Object.keys(bo).length) return false;
-  for (const k of keys) if (!Object.is(ao[k], bo[k])) return false;
-  return true;
-}
-
-function generateRulerTicks(durationSec: number, pps: number, fps: number, startSec = 0, offset = 0): { x: number; major: boolean; label: string }[] {
-  const targetPxBetweenMajor = 100;
-  const candidateSec = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600];
-  let majorSec = 1;
-  for (const c of candidateSec) {
-    if (c * pps >= targetPxBetweenMajor) { majorSec = c; break; }
-  }
-  const minorSec = majorSec / 5;
-  const ticks: { x: number; major: boolean; label: string }[] = [];
-  for (let t = 0; t <= durationSec + 1e-6; t += minorSec) {
-    const snapped = Math.round(t / minorSec) * minorSec;
-    const isMajor = Math.abs((snapped / majorSec) - Math.round(snapped / majorSec)) < 1e-6;
-    // The tick's POSITION is 0-based plus left margin offset (pixel layout is the real time domain); its
-    // LABEL adds the comp's start offset so the ruler reads the same timecode
-    // the playhead readout does.
-    ticks.push({ x: offset + snapped * pps, major: isMajor, label: formatTime(snapped + startSec, fps, majorSec) });
-  }
-  return ticks;
-}
-
-function formatTime(sec: number, _fps: number, majorSec: number): string {
-  if (majorSec < 1) return `${(sec * 1000).toFixed(0)}ms`;
-  if (majorSec < 60) return `${sec.toFixed(majorSec < 1 ? 2 : 0)}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec - m * 60;
-  return `${m}:${s.toFixed(0).padStart(2, '0')}`;
-}

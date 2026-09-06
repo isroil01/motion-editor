@@ -1,9 +1,39 @@
 /**
- * AssetsPanel — the project bin: one unified media list (images, video and
- * audio together, no type tabs) organised into user folders.
+ * AssetsPanel — the project's imported files AND the media browser.
  *
- * What lives here is MEDIA. Compositions are the Scene panel's, deliberately:
- * a bin that lists both is a bin where "delete" means two different things.
+ * Two sub-tabs. **Project** (tab id `bin`) is the library: the files this
+ * project has imported, persisted in the bundle — one unified media list
+ * (images, video and audio together, no type tabs) organised into user
+ * folders, shown as a list or a thumbnail grid, sortable, filterable, tagged
+ * and colour-labelled, with a metadata drawer underneath describing the
+ * selected file and the layers using it. **Media Browser** (tab id `browse`,
+ * desktop only) lists a folder on disk so footage can be dragged in without
+ * an import dialog — see `MediaBrowser.tsx`.
+ *
+ * What lives in the project list is MEDIA. Compositions are the Layers
+ * panel's, deliberately: a list that holds both is a list where "delete"
+ * means two different things.
+ *
+ * ── Import never inserts ────────────────────────────────────────────────────
+ * AE and Premiere semantics: importing fills the PROJECT, placing a file in
+ * the composition is a separate, explicit gesture. Every route in here — the
+ * Import button, Import Folder, an OS drop on the panel — adds to the library
+ * only, then offers ONE toast ("Imported N files ▸ Add to composition") for
+ * the people who did mean both. Insertion stays where it is explicit: a drag
+ * onto the canvas or the timeline, the row menu ("Add to Composition", "Add
+ * at Playhead", "Use as Source for …"), the preview's commit verbs, and New
+ * Comp from Footage. The old handler inserted every import as it landed,
+ * which read as "my import went to the scene instead of the list" — and under
+ * a persisted Unused filter the freshly-used file vanished from the list
+ * outright.
+ *
+ * ── A fresh import is always visible ────────────────────────────────────────
+ * Whatever route created it, an asset that has just arrived is selected,
+ * scrolled to, its folder opened, and any filter or search that would hide
+ * it is cleared with an inline note. The panel notices arrivals by diffing
+ * the store's ids (`importedAt` within the last few seconds — hydration from
+ * IndexedDB and a restored bundle carry old stamps and are left alone), so
+ * the Media Browser's import and a canvas drop reveal the same way.
  *
  * It owns four routes in — loose files, a whole directory (whose structure it
  * mirrors as folders), a 3D model, and drag-and-drop between folders — plus
@@ -15,23 +45,43 @@
  * `core/scene/modelImport`. A `.gltf` additionally references sidecar files
  * (.bin, textures) by name, so a selection holding one is imported WHOLE
  * through `importModelFiles`, which picks the model out and resolves the rest
- * against it. `handleFileChange` routes all of that, and the header's
- * "Import 3D model" button hands it the same selection with a model-shaped
+ * against it. `handleFileChange` routes all of that, and the Import menu's
+ * "Import 3D Model…" hands it the same selection with a model-shaped
  * `accept` — one routing, two entry points.
  *
+ * One Import affordance: the header's Import button (files) with a ▾ menu for
+ * "Import Folder…" and "Import 3D Model…". The three hidden `<input>`s stay —
+ * they are the mechanism — but nothing else in the panel opens a picker.
+ *
+ * ── Where the rules live ────────────────────────────────────────────────────
+ * Sorting, filtering, search, tag parsing and the readouts are pure functions
+ * in `assetListLogic.ts`; how the panel is looked at (view, sort, filters,
+ * sub-tab, drawer) is `assetsViewStore`. This file only wires them to state
+ * and draws rows. Both lists are virtualised (`VirtualList`) — a bin with a
+ * thousand clips must scroll like one with ten.
+ *
  * Panel chrome comes from the shared `EditorLayout/panels.module.css`, which
- * the Scene, Assets and Inspector panels all draw from.
+ * the Layers, Assets and Inspector panels all draw from.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@components/Panel';
+import { Button } from '@components/Button';
+import { IconButton } from '@components/IconButton';
 import { SearchField } from '@components/SearchField';
 import { Icon } from '@components/Icon';
-import { customConfirm } from '@components/Modal';
+import { Chip } from '@components/Chip';
+import { Segmented } from '@components/Segmented';
+import { Dropdown, type DropdownItem } from '@components/Dropdown';
+import { VirtualList } from '@components/VirtualList';
+import { customConfirm, customPrompt } from '@components/Modal';
 import { isLibraryAsset, useAssetStore, type AssetFolder, type ImportedAsset } from '@stores/assetStore';
+import { useAssetsViewStore, type AssetSortKey, type AssetTypeFilter } from '@stores/assetsViewStore';
+import { useSceneRevision } from '@stores/sceneStore';
+import { useSelectionStore } from '@stores/selectionStore';
 import { getAssetVisualInfo, FOLDER_COLOR } from '@layout/Assets/assetVisuals';
 import { openSourceMonitor } from '@stores/sourceMonitorStore';
-import { openContextMenu } from '@stores/contextMenuStore';
+import { openContextMenu, type ContextMenuItem } from '@stores/contextMenuStore';
 import { useUIStore } from '@stores/uiStore';
 import { getEventBus } from '@core/events/EventBus';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
@@ -39,22 +89,79 @@ import { insertMedia } from '@core/scene/sceneInsert';
 import { insertMediaAtPlayhead, retargetLayerSource, replaceableSelectedLayer } from '@core/scene/footageWorkflow';
 import { createCompositionFromFootage } from '@core/composition/compositionOps';
 import { setPanelAssetSelection } from '@core/composition/assetSelection';
+import { assetIdOf } from '@core/source/sourceInfo';
+import { LABEL_COLORS } from '@core/scene/labelColor';
+import type { SceneNode } from '@core/types';
 import { openFootagePreview } from '@layout/Assets/FootagePreviewDialog';
 import { openInterpretFootage } from '@layout/Assets/InterpretFootageModal';
 import { runNewCompFromClips, runAssembleFromFootage } from '@layout/Assets/footageAssembly';
 import { setCanvasDrag } from '@core/dnd/canvasDrag';
+import { AssetThumb } from './AssetThumb';
+import { AssetDrawer } from './AssetDrawer';
+import { MediaBrowser, canBrowseMedia } from './MediaBrowser';
+import { installAssetCommands, revealLabel, setAssetImportOpeners } from './assetCommands';
+import { assetDiskPath, canRevealAssets, revealAsset } from './assetReveal';
+import {
+  filterAssets,
+  formatBytes,
+  isFilterActive,
+  parseTags,
+  sortAssets,
+  tagCounts,
+  usageByAsset,
+} from './assetListLogic';
 import styles from '@layout/EditorLayout/panels.module.css';
 
-/** Human-readable file size for the Size column and the header card. */
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + (sizes[i] ?? '');
+const LIST_ROW_H = 26;
+const FOLDER_ROW_H = 26;
+/** Narrowest a grid card gets before the grid drops a column. */
+const CARD_MIN_W = 104;
+const GRID_GAP = 8;
+const GRID_PAD = 16;
+/** Name line + meta line + card padding, under the 16:9 well. */
+const CARD_CHROME_H = 40;
+/** How old an `importedAt` may be and still count as "just imported". Wide
+ *  enough for a slow batch (thumbnails, probes) to land after the first file
+ *  is stamped; narrow enough that a bundle restored with last week's stamps
+ *  is not mistaken for one. */
+const IMPORT_REVEAL_WINDOW_MS = 30_000;
+/** How long "Filters cleared to show the import" stays under the filter row. */
+const FILTER_NOTE_MS = 6000;
+
+const SORT_LABEL: Record<AssetSortKey, string> = {
+  name: 'Name',
+  type: 'Type',
+  size: 'Size',
+  date: 'Date added',
+  used: 'Times used',
+};
+
+/** One rendered line. `depth` drives only the indent. */
+type AssetRow =
+  | { kind: 'folder'; key: string; depth: number; folder: AssetFolder }
+  | { kind: 'asset'; key: string; depth: number; asset: ImportedAsset }
+  | { kind: 'cards'; key: string; depth: number; assets: ImportedAsset[] };
+
+/** Measured box size, for the virtual list's height and the grid's columns. */
+function useHostSize(): [React.RefObject<HTMLDivElement>, { width: number; height: number }] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = (): void => setSize({ width: el.clientWidth, height: el.clientHeight });
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size];
 }
 
 export function AssetsPanel(): JSX.Element {
+  useEffect(() => installAssetCommands(), []);
+
   const assets = useAssetStore((s) => s.assets);
   const folders = useAssetStore((s) => s.folders);
   const addAssetsBatch = useAssetStore((s) => s.addAssetsBatch);
@@ -64,6 +171,38 @@ export function AssetsPanel(): JSX.Element {
   const renameFolder = useAssetStore((s) => s.renameFolder);
   const removeFolder = useAssetStore((s) => s.removeFolder);
   const moveAssetToFolder = useAssetStore((s) => s.moveAssetToFolder);
+  const setTags = useAssetStore((s) => s.setTags);
+  const setLabel = useAssetStore((s) => s.setLabel);
+
+  const view = useAssetsViewStore((s) => s.view);
+  const setView = useAssetsViewStore((s) => s.setView);
+  const sortKey = useAssetsViewStore((s) => s.sortKey);
+  const sortDir = useAssetsViewStore((s) => s.sortDir);
+  const sortBy = useAssetsViewStore((s) => s.sortBy);
+  const setSort = useAssetsViewStore((s) => s.setSort);
+  const unusedOnly = useAssetsViewStore((s) => s.unusedOnly);
+  const setUnusedOnly = useAssetsViewStore((s) => s.setUnusedOnly);
+  const typeFilter = useAssetsViewStore((s) => s.typeFilter);
+  const setTypeFilter = useAssetsViewStore((s) => s.setTypeFilter);
+  const tagFilter = useAssetsViewStore((s) => s.tagFilter);
+  const setTagFilter = useAssetsViewStore((s) => s.setTagFilter);
+  const labelFilter = useAssetsViewStore((s) => s.labelFilter);
+  const setLabelFilter = useAssetsViewStore((s) => s.setLabelFilter);
+  const clearFilters = useAssetsViewStore((s) => s.clearFilters);
+  const tab = useAssetsViewStore((s) => s.tab);
+  const setTab = useAssetsViewStore((s) => s.setTab);
+  const drawerOpen = useAssetsViewStore((s) => s.drawerOpen);
+  const setDrawerOpen = useAssetsViewStore((s) => s.setDrawerOpen);
+
+  // Which layers use which asset — re-derived per scene revision, which is
+  // the only thing that can change the answer.
+  const sceneRev = useSceneRevision((s) => s.rev);
+  const usage = useMemo(() => {
+    const nodes: SceneNode[] = [];
+    defaultSceneGraph.traverse((n) => nodes.push(n));
+    return usageByAsset(nodes, assetIdOf);
+  }, [sceneRev]);
+  const usedCount = (assetId: string): number => usage.get(assetId)?.length ?? 0;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -76,10 +215,20 @@ export function AssetsPanel(): JSX.Element {
     dialog's own filter. That is the entire reason this is a separate button.
   */
   const modelInputRef = useRef<HTMLInputElement | null>(null);
+  // The pickers as COMMANDS ("Assets: Import Files…" in the palette, a File
+  // menu row when one is added) — they can only open while the inputs exist.
+  useEffect(() => {
+    setAssetImportOpeners({
+      files: () => fileInputRef.current?.click(),
+      folder: () => folderInputRef.current?.click(),
+    });
+    return () => setAssetImportOpeners(null);
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [dropFolderId, setDropFolderId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [scrollToKey, setScrollToKey] = useState<string | null>(null);
   /** Which folders are open. The root has no row, so it is always open. */
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
   const toggleFolder = (id: string): void => {
@@ -96,9 +245,17 @@ export function AssetsPanel(): JSX.Element {
   /** Off by default: the shelf is the user's imports, not the app's output. */
   const [showDerived, setShowDerived] = useState(false);
   const [dockCompDropActive, setDockCompDropActive] = useState(false);
+  /** The row keyboard traversal is on. Also the one the list scrolls to. */
+  const [focusedAssetId, setFocusedAssetId] = useState<string | null>(null);
 
   /** Anchor for Shift-range selection — the last row clicked without Shift. */
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
+  /** "Filters cleared to show the import" — shown under the filter row, briefly. */
+  const [filterNote, setFilterNote] = useState<string | null>(null);
+  /** OS files are over the list. */
+  const [osDropActive, setOsDropActive] = useState(false);
+
+  const [hostRef, hostSize] = useHostSize();
 
   /*
    * Click semantics, as every file manager has them.
@@ -114,6 +271,9 @@ export function AssetsPanel(): JSX.Element {
    */
   const selectAsset = (id: string, e: React.MouseEvent, ordered: string[]): void => {
     e.stopPropagation();
+    setScrollToKey(null);
+    setCurrentFolderId(null);
+    setFocusedAssetId(id);
     if (e.shiftKey && selectionAnchor) {
       const a = ordered.indexOf(selectionAnchor);
       const b = ordered.indexOf(id);
@@ -137,7 +297,48 @@ export function AssetsPanel(): JSX.Element {
     setSelectionAnchor(id);
   };
 
-  // Import loose files into the current folder and drop them on the canvas.
+  /*
+    The one toast an import produces. Import fills the project; this is the
+    offer for the people who meant "and put it in the comp" — the old
+    always-on insert loop, now behind a verb. Sequential and awaited:
+    insertMedia ends by selecting what it created and bumping the scene, so N
+    un-awaited inserts raced and the final selection depended on decode order.
+  */
+  const announceImport = (created: ImportedAsset[]): void => {
+    if (created.length === 0) return;
+    useUIStore.getState().notify({
+      level: 'success',
+      message: `Imported ${created.length} file${created.length === 1 ? '' : 's'}`,
+      durationMs: 6000,
+      action: {
+        label: 'Add to composition',
+        onSelect: () => {
+          void (async () => {
+            for (const a of created) await insertMedia(a);
+          })();
+        },
+      },
+    });
+  };
+
+  /** Media files out of an OS drop or a picker; models and non-media skipped. */
+  const isMediaFile = (f: File): boolean =>
+    /^(video|image|audio)\//.test(f.type)
+    || /\.(mp4|mov|webm|m4v|png|jpe?g|gif|svg|webp|exr|dpx|psd|dng|cr2|cr3|nef|arw|mp3|wav|m4a|aac|ogg|mxf|avi|wmv|flv|mts|m2ts|mpg|mpeg|vob|ts|mkv|r3d|braw)$/i.test(f.name);
+
+  /** OS files dropped on the panel: import to the current folder, never insert. */
+  const handleOsDrop = async (files: FileList): Promise<void> => {
+    const media = Array.from(files).filter(isMediaFile);
+    if (media.length === 0) {
+      useUIStore.getState().notify({ level: 'info', message: 'Drop video, image or audio files.', durationMs: 2600 });
+      return;
+    }
+    const created = await addAssetsBatch(media.map((file) => ({ file, folderId: currentFolderId })));
+    announceImport(created);
+  };
+
+  // Import loose files into the current folder. Library only — see the
+  // header comment; the toast's action is the way into the comp.
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -201,10 +402,7 @@ export function AssetsPanel(): JSX.Element {
       items.push({ file, folderId: currentFolderId });
     }
     const created = await addAssetsBatch(items);
-    // Sequential, awaited: insertMedia ends by selecting what it created and
-    // bumping the scene, so N un-awaited inserts raced — the final selection
-    // depended on decode order and failures were unhandled rejections.
-    for (const a of created) await insertMedia(a);
+    announceImport(created);
     e.target.value = '';
   };
 
@@ -242,20 +440,31 @@ export function AssetsPanel(): JSX.Element {
       items.push({ file, folderId: targetFolder });
     }
     if (items.length > 0) {
-      await addAssetsBatch(items);
+      announceImport(await addAssetsBatch(items));
     }
     e.target.value = '';
   };
 
   const handleNewFolder = () => {
     // Auto-name (Electron has no window.prompt); rename inline afterwards.
-    const siblings = folders.filter((f) => f.parentId === currentFolderId);
+    const validParentId = currentFolderId && folders.some((f) => f.id === currentFolderId) ? currentFolderId : null;
+    if (validParentId) {
+      setExpandedFolders((cur) => new Set(cur).add(validParentId));
+    }
+    if (searchQuery) setSearchQuery('');
+    if (filtering) clearFilters();
+
+    const siblings = folders.filter((f) => (f.parentId ?? null) === validParentId);
     const base = 'New Folder';
     let name = base;
     let n = 2;
     while (siblings.some((f) => f.name === name)) name = `${base} ${n++}`;
-    const created = createFolder(name, currentFolderId);
+    const created = createFolder(name, validParentId);
+    setCurrentFolderId(created.id);
     setRenamingId(created.id);
+    setScrollToKey(created.id);
+    setSelectedAssetIds(new Set());
+    setSelectionAnchor(null);
   };
 
   /*
@@ -276,12 +485,6 @@ export function AssetsPanel(): JSX.Element {
 
   /**
    * Delete the whole selection.
-   *
-   * The panel has supported Ctrl- and Shift-click since it was written, so a
-   * user could always SELECT twenty files — there was just no way to act on
-   * that selection, and the only delete on offer removed the one row under the
-   * cursor. Selecting many and deleting one is the kind of gap that reads as
-   * the selection not having worked.
    *
    * Names are listed up to a point and then counted. A confirm that renders
    * fifty filenames is a confirm nobody reads, and this is the dialog standing
@@ -321,17 +524,60 @@ export function AssetsPanel(): JSX.Element {
         : 'Delete this empty folder?',
       { confirmLabel: 'Delete', isDanger: true },
     );
-    if (ok) removeFolder(folder.id);
+    if (ok) {
+      if (currentFolderId === folder.id) setCurrentFolderId(null);
+      if (scrollToKey === folder.id) setScrollToKey(null);
+      removeFolder(folder.id);
+    }
   };
+
+  /** Tags for one asset or the whole selection, edited as one comma list. */
+  const editTags = async (targets: ImportedAsset[]): Promise<void> => {
+    const first = targets[0];
+    if (!first) return;
+    const shared = targets.length === 1
+      ? first.tags ?? []
+      : (first.tags ?? []).filter((t) => targets.every((a) => (a.tags ?? []).includes(t)));
+    const text = await customPrompt(
+      targets.length === 1 ? `Tags for “${first.name}”` : `Tags for ${targets.length} assets`,
+      'Comma-separated. Search matches tags as well as names.',
+      shared.join(', '),
+      { placeholder: 'b-roll, interview, logo', confirmLabel: 'Save' },
+    );
+    if (text === null || text === undefined) return;
+    const next = parseTags(text);
+    for (const a of targets) {
+      // Multi-edit replaces only the SHARED tags; each asset keeps its own.
+      const own = targets.length === 1 ? [] : (a.tags ?? []).filter((t) => !shared.includes(t));
+      setTags(a.id, parseTags([...own, ...next].join(',')));
+    }
+  };
+
+  /** "Label" submenu — the same palette the Layers panel uses. */
+  const labelMenuItems = (ids: string[], current: string | undefined): ContextMenuItem[] => [
+    {
+      id: 'label-none',
+      label: 'None',
+      icon: current === undefined ? 'check' : undefined,
+      onSelect: () => setLabel(ids, null),
+    },
+    { id: 'label-sep', separator: true },
+    ...LABEL_COLORS.map((c): ContextMenuItem => ({
+      id: `label-${c.id}`,
+      label: (
+        <>
+          <span className={styles.labelSwatch} style={{ background: c.color }} aria-hidden />
+          {c.label}
+        </>
+      ),
+      icon: current === c.id ? 'check' : undefined,
+      onSelect: () => setLabel(ids, c.id),
+    })),
+  ];
 
   /*
    * Right-click menus — these REPLACE the per-row buttons.
    *
-   * Every row used to carry a trash icon (and each asset a plus as well), so
-   * there were two permanently-visible targets per line, one of them
-   * destructive, a few pixels from the row you click to select. A delete that
-   * always sits under the cursor is a delete that eventually gets hit by
-   * accident — and the pair cost the width the Type and Size columns now use.
    * Right-click is where a file manager puts this, and where this editor's own
    * layer tree already puts it.
    */
@@ -352,6 +598,8 @@ export function AssetsPanel(): JSX.Element {
     }
     const count = inSelection ? selectedAssetIds.size : 1;
     const many = count > 1;
+    const targetIds = many ? orderedAssetIds.filter((id) => selectedAssetIds.has(id)) : [asset.id];
+    const targets = targetIds.map((id) => assets.find((x) => x.id === id)).filter((a): a is ImportedAsset => !!a);
     openContextMenu(e.clientX, e.clientY, [
       {
         id: 'add',
@@ -363,11 +611,7 @@ export function AssetsPanel(): JSX.Element {
           // Awaited sequentially inside one async task: concurrent inserts
           // raced the selection and scrambled stacking order.
           void (async () => {
-            for (const id of orderedAssetIds) {
-              if (!selectedAssetIds.has(id)) continue;
-              const a = assets.find((x) => x.id === id);
-              if (a) await insertMedia(a);
-            }
+            for (const a of targets) await insertMedia(a);
           })();
         },
       },
@@ -380,11 +624,7 @@ export function AssetsPanel(): JSX.Element {
         label: many ? `Add ${count} at Playhead` : 'Add at Playhead',
         onSelect: () => {
           if (!many) { void insertMediaAtPlayhead(asset); return; }
-          for (const id of orderedAssetIds) {
-            if (!selectedAssetIds.has(id)) continue;
-            const a = assets.find((x) => x.id === id);
-            if (a) void insertMediaAtPlayhead(a);
-          }
+          for (const a of targets) void insertMediaAtPlayhead(a);
         },
       },
       {
@@ -400,17 +640,11 @@ export function AssetsPanel(): JSX.Element {
       {
         // The multi-clip counterpart of the row above: the comp still takes the
         // FIRST clip's size, duration and rate, but every selected clip lands
-        // in it end-to-end rather than stacked at frame 0. Offered for one clip
-        // too — it is then the same comp with an overlap prompt skipped, and an
-        // entry that appears only above some threshold is an entry people stop
-        // looking for.
+        // in it end-to-end rather than stacked at frame 0.
         id: 'comp-from-clips',
         label: many ? `New Composition from ${count} Clips…` : 'New Composition from Clip…',
         onSelect: () => {
-          const chosen = orderedAssetIds
-            .filter((id) => (many ? selectedAssetIds.has(id) : id === asset.id))
-            .map((id) => assets.find((x) => x.id === id))
-            .filter((a): a is ImportedAsset => !!a && (a.type === 'video' || a.type === 'image'));
+          const chosen = targets.filter((a) => a.type === 'video' || a.type === 'image');
           void runNewCompFromClips(chosen.length > 0 ? chosen : [asset]);
         },
       },
@@ -454,6 +688,19 @@ export function AssetsPanel(): JSX.Element {
           onSelect: () => { retargetLayerSource(target, asset); },
         }];
       })(),
+      { id: 'sep-org', separator: true },
+      { id: 'label', label: 'Label', children: labelMenuItems(targetIds, many ? undefined : asset.label) },
+      { id: 'tags', label: 'Edit Tags…', onSelect: () => { void editTags(targets); } },
+      // Desktop only — the browser build has no file manager to reveal in,
+      // and an item that can never work is worse than no item.
+      ...(canRevealAssets()
+        ? [{
+            id: 'reveal',
+            label: revealLabel(),
+            disabled: many || !assetDiskPath(asset),
+            onSelect: () => { void revealAsset(asset); },
+          }]
+        : []),
       { id: 'sep-a', separator: true },
       {
         id: 'delete',
@@ -487,91 +734,358 @@ export function AssetsPanel(): JSX.Element {
 
   // ── The tree ─────────────────────────────────────────────────────
   //
-  // Folders expand IN PLACE, the way Explorer and AE's project panel work,
-  // rather than replacing the view the way the old breadcrumb drill-down did.
-  // The difference is not cosmetic: drilling down shows you one folder at a
-  // time, so comparing two folders or dragging between them means navigating
-  // away from one of them. A tree shows the structure and the contents at once.
+  // Folders expand IN PLACE, the way Explorer and AE's project panel work.
   const childFolders = (parentId: string | null): AssetFolder[] =>
-    folders.filter((f) => f.parentId === parentId);
+    folders.filter((f) => (f.parentId ?? null) === parentId);
   /*
    * What the shelf shows.
    *
    * The library means "media I brought in". Operations that duplicate or
-   * rasterize scene content — a plugin repeater, Rig Logo — still have to
-   * create real assets, because the layers that use them reference them by id
-   * and those bytes have to persist. But filing them as ordinary imports put a
-   * row on this shelf per generated copy, mixed in with the user's own
-   * footage, with nothing to tell them apart. `source: 'derived'` is that
-   * distinction; see `AssetSource`.
-   *
-   * Hidden rather than removed, and revealable rather than hidden outright:
-   * they are still assets, and a category of asset with no way to see or
-   * delete it would be a storage leak the user cannot reach.
+   * rasterize scene content still have to create real assets — `source:
+   * 'derived'` is that distinction; see `AssetSource`. Hidden rather than
+   * removed, and revealable rather than hidden outright.
    */
   const shelfAssets = showDerived ? assets : assets.filter(isLibraryAsset);
   const derivedCount = assets.length - assets.filter(isLibraryAsset).length;
 
-  const folderAssets = (folderId: string | null): ImportedAsset[] =>
-    shelfAssets.filter((a) => (a.folderId ?? null) === folderId);
-
-  /** One rendered line. `depth` drives only the indent. */
-  type AssetRow =
-    | { kind: 'folder'; key: string; depth: number; folder: AssetFolder }
-    | { kind: 'asset'; key: string; depth: number; asset: ImportedAsset };
-
-  const buildRows = (parentId: string | null, depth: number, out: AssetRow[]): void => {
-    for (const f of childFolders(parentId)) {
-      out.push({ kind: 'folder', key: f.id, depth, folder: f });
-      // Closed folders contribute nothing — that is what makes this a tree
-      // rather than an indented flat list.
-      if (expandedFolders.has(f.id)) buildRows(f.id, depth + 1, out);
-    }
-    for (const a of folderAssets(parentId)) {
-      out.push({ kind: 'asset', key: a.id, depth, asset: a });
-    }
-  };
-
   const q = searchQuery.trim().toLowerCase();
+  const filters = { query: q, unusedOnly, type: typeFilter, tag: tagFilter, label: labelFilter };
+  const filtering = isFilterActive(filters);
   const searching = q.length > 0;
-  // While searching, flatten every asset regardless of folder; otherwise show
-  // just this folder's subfolders + assets.
-  //
-  // Searching FLATTENS: a tree hides matches inside closed folders, and the one
-  // thing a search must not do is answer "no results" because the result was
-  // behind a disclosure triangle.
-  const visibleAssets = searching
-    ? shelfAssets.filter((a) => a.name.toLowerCase().includes(q))
-    : shelfAssets;
-  const rows: AssetRow[] = [];
-  if (searching) {
-    for (const a of visibleAssets) rows.push({ kind: 'asset', key: a.id, depth: 0, asset: a });
-  } else {
-    buildRows(null, 0, rows);
-  }
+  // A search or a filter FLATTENS: a tree hides matches inside closed
+  // folders, and the one thing a search must not do is answer "no results"
+  // because the result was behind a disclosure triangle.
+  const flat = searching || filtering;
+  const visibleAssets = useMemo(
+    () => sortAssets(filterAssets(shelfAssets, filters, usedCount), sortKey, sortDir, usedCount),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shelfAssets, q, unusedOnly, typeFilter, tagFilter, labelFilter, sortKey, sortDir, usage],
+  );
+
+  /*
+   * Reveal what just arrived — see the header comment. The diff is against
+   * the ids seen on the previous render, so the FIRST render (whatever the
+   * store already holds) reveals nothing; after that, a library asset with a
+   * fresh `importedAt` is an import, wherever it came from.
+   */
+  const seenIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const prev = seenIdsRef.current;
+    seenIdsRef.current = new Set(assets.map((a) => a.id));
+    if (!prev) return;
+    const now = Date.now();
+    const fresh = assets.filter((a) =>
+      !prev.has(a.id) && isLibraryAsset(a) && a.importedAt !== undefined && now - a.importedAt < IMPORT_REVEAL_WINDOW_MS);
+    if (fresh.length === 0) return;
+    const first = fresh[0];
+    if (!first) return;
+
+    // A filter or search that would drop any of them is cleared — the one
+    // thing an import must not do is disappear — and the row says why.
+    if (filterAssets(fresh, filters, usedCount).length < fresh.length) {
+      clearFilters();
+      setSearchQuery('');
+      setFilterNote('Filters cleared to show the import');
+    }
+    // Open every folder on the way down to each file.
+    const toOpen = new Set<string>();
+    for (const a of fresh) {
+      let id = a.folderId ?? null;
+      while (id) {
+        toOpen.add(id);
+        id = folders.find((f) => f.id === id)?.parentId ?? null;
+      }
+    }
+    if (toOpen.size > 0) setExpandedFolders((cur) => new Set([...cur, ...toOpen]));
+    setSelectedAssetIds(new Set(fresh.map((a) => a.id)));
+    setSelectionAnchor(first.id);
+    // The focused row is the one the list scrolls to.
+    setFocusedAssetId(first.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets]);
+
+  // The note is transient: long enough to read, gone before it nags.
+  useEffect(() => {
+    if (!filterNote) return;
+    const t = setTimeout(() => setFilterNote(null), FILTER_NOTE_MS);
+    return () => clearTimeout(t);
+  }, [filterNote]);
+
+  // Grid geometry from the measured host. Columns first, then the card
+  // height that a 16:9 well at that width implies.
+  const cols = view === 'grid' ? Math.max(2, Math.floor((hostSize.width - GRID_PAD + GRID_GAP) / (CARD_MIN_W + GRID_GAP))) : 1;
+  const cardW = view === 'grid' ? (hostSize.width - GRID_PAD - (cols - 1) * GRID_GAP) / cols : 0;
+  const cardRowH = Math.round((cardW * 9) / 16 + CARD_CHROME_H);
+
+  const rows = useMemo<AssetRow[]>(() => {
+    const out: AssetRow[] = [];
+    const pushAssets = (list: ImportedAsset[], depth: number): void => {
+      if (view === 'grid') {
+        for (let i = 0; i < list.length; i += cols) {
+          const chunk = list.slice(i, i + cols);
+          out.push({ kind: 'cards', key: `cards:${depth}:${chunk[0]!.id}`, depth, assets: chunk });
+        }
+      } else {
+        for (const a of list) out.push({ kind: 'asset', key: a.id, depth, asset: a });
+      }
+    };
+    if (flat) {
+      pushAssets(visibleAssets, 0);
+      return out;
+    }
+    const build = (parentId: string | null, depth: number): void => {
+      for (const f of childFolders(parentId)) {
+        out.push({ kind: 'folder', key: f.id, depth, folder: f });
+        // Closed folders contribute nothing — that is what makes this a tree
+        // rather than an indented flat list.
+        if (expandedFolders.has(f.id)) build(f.id, depth + 1);
+      }
+      pushAssets(visibleAssets.filter((a) => (a.folderId ?? null) === parentId), depth);
+    };
+    build(null, 0);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleAssets, folders, expandedFolders, flat, view, cols]);
 
   const isEmpty = rows.length === 0;
   /** Asset ids in the order they are DRAWN — what Shift-range walks over. */
-  const orderedAssetIds = rows.filter((r) => r.kind === 'asset').map((r) => r.key);
+  const orderedAssetIds = useMemo(
+    () => rows.flatMap((r) => (r.kind === 'asset' ? [r.key] : r.kind === 'cards' ? r.assets.map((a) => a.id) : [])),
+    [rows],
+  );
+  const rowIndexOfAsset = (id: string | null): number =>
+    id === null ? -1 : rows.findIndex((r) => (r.kind === 'asset' && r.key === id) || (r.kind === 'cards' && r.assets.some((a) => a.id === id)));
+
+  const scrollToIndex = useMemo(() => {
+    if (scrollToKey) {
+      const idx = rows.findIndex((r) => r.key === scrollToKey);
+      if (idx !== -1) return idx;
+    }
+    return rowIndexOfAsset(focusedAssetId);
+  }, [rows, scrollToKey, focusedAssetId]);
 
   const singleSelectedAsset = selectedAssetIds.size === 1
     ? assets.find((x) => x.id === [...selectedAssetIds][0]) ?? null
     : null;
 
   /*
-    Publish the selection for the commands that act on it.
-
-    "New Composition from Selected Clips" and "Assemble from Footage" are
-    registry commands, so they run from the palette and the menu bar — neither
-    of which is inside this component's tree, and neither of which could
-    otherwise learn what is selected here. Published in ROW order, the same
-    order the panel's own "Add N to Composition" uses, so a comp built from a
-    selection matches what the user is looking at.
+    Publish the selection for the commands that act on it — "New Composition
+    from Selected Clips", "Assemble from Footage", "Reveal in Explorer" are
+    registry commands, so they run from the palette and the menu bar.
+    Published in ROW order, the same order "Add N to Composition" uses.
   */
   const selectionKey = orderedAssetIds.filter((id) => selectedAssetIds.has(id)).join(',');
   useEffect(() => {
     setPanelAssetSelection(selectionKey ? selectionKey.split(',') : []);
   }, [selectionKey]);
+
+  /** Keyboard traversal: Up/Down walk rows; in the grid Left/Right walk cards. */
+  const moveFocus = (delta: number): void => {
+    setScrollToKey(null);
+    if (orderedAssetIds.length === 0) return;
+    const cur = focusedAssetId ? orderedAssetIds.indexOf(focusedAssetId) : -1;
+    const next = cur === -1 ? (delta > 0 ? 0 : orderedAssetIds.length - 1) : Math.min(orderedAssetIds.length - 1, Math.max(0, cur + delta));
+    const id = orderedAssetIds[next];
+    if (!id) return;
+    setFocusedAssetId(id);
+    setSelectedAssetIds(new Set([id]));
+    setSelectionAnchor(id);
+  };
+
+  const tags = useMemo(() => tagCounts(shelfAssets), [shelfAssets]);
+  const usedBy = singleSelectedAsset
+    ? (usage.get(singleSelectedAsset.id) ?? []).map((id) => ({ id, name: defaultSceneGraph.getNode(id)?.name ?? id }))
+    : [];
+
+  const sortItems: DropdownItem[] = [
+    { type: 'label', label: 'Sort by' },
+    ...(Object.keys(SORT_LABEL) as AssetSortKey[]).map((key): DropdownItem => ({
+      type: 'item',
+      id: key,
+      label: SORT_LABEL[key],
+      icon: sortKey === key ? 'check' : undefined,
+      onSelect: () => sortBy(key),
+    })),
+    { type: 'separator' },
+    {
+      type: 'item',
+      id: 'dir',
+      label: sortDir === 'asc' ? 'Ascending' : 'Descending',
+      icon: sortDir === 'asc' ? 'arrow-up' : 'arrow-down',
+      onSelect: () => setSort(sortKey, sortDir === 'asc' ? 'desc' : 'asc'),
+    },
+  ];
+
+  const typeChip = (type: Exclude<AssetTypeFilter, 'all'>, label: string): JSX.Element => (
+    <Chip size="sm" selected={typeFilter === type} onSelect={() => setTypeFilter(typeFilter === type ? 'all' : type)}>
+      {label}
+    </Chip>
+  );
+
+  const headBtn = (key: AssetSortKey, label: string, className: string | undefined): JSX.Element => (
+    <button
+      type="button"
+      className={`${className} ${styles.assetHeadBtn}${sortKey === key ? ` ${styles.assetHeadBtnActive}` : ''}`}
+      onClick={() => sortBy(key)}
+      title={`Sort by ${SORT_LABEL[key].toLowerCase()}`}
+      aria-sort={sortKey === key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+    >
+      {label}
+      {sortKey === key && <Icon name={sortDir === 'asc' ? 'chevron-up' : 'chevron-down'} size="sm" />}
+    </button>
+  );
+
+  const renderFolderRow = (row: Extract<AssetRow, { kind: 'folder' }>): JSX.Element => (
+    <div
+      role="treeitem"
+      aria-expanded={expandedFolders.has(row.folder.id)}
+      className={`${styles.assetRow}${dropFolderId === row.folder.id ? ` ${styles.dropActive}` : ''}${currentFolderId === row.folder.id ? ` ${styles.assetRowActive}` : ''}`}
+      style={{ paddingLeft: 8 + row.depth * 16 }}
+      title={row.folder.name}
+      onClick={() => {
+        if (renamingId === row.folder.id) return;
+        setCurrentFolderId(row.folder.id);
+        toggleFolder(row.folder.id);
+        setSelectedAssetIds(new Set());
+        setSelectionAnchor(null);
+      }}
+      onContextMenu={(e) => openFolderMenu(row.folder, e)}
+      onDragOver={(e) => { e.preventDefault(); setDropFolderId(row.folder.id); }}
+      onDragLeave={() => setDropFolderId((cur) => (cur === row.folder.id ? null : cur))}
+      onDrop={(e) => {
+        e.preventDefault();
+        const assetId = e.dataTransfer.getData('text/asset-id');
+        if (assetId) moveAssetToFolder(assetId, row.folder.id);
+        setDropFolderId(null);
+      }}
+    >
+      <Icon
+        name={expandedFolders.has(row.folder.id) ? 'chevron-down' : 'chevron-right'}
+        size="sm"
+        className={styles.assetTwisty}
+      />
+      <Icon
+        name={expandedFolders.has(row.folder.id) ? 'folder-open' : 'folder'}
+        size="md"
+        className={styles.assetGlyphFolder}
+        style={{ color: FOLDER_COLOR }}
+      />
+      {renamingId === row.folder.id ? (
+        <input
+          ref={(el) => {
+            if (el) {
+              el.focus();
+              el.select();
+            }
+          }}
+          defaultValue={row.folder.name}
+          className={styles.assetRename}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={(e) => {
+            const val = e.target.value.trim();
+            if (val) renameFolder(row.folder.id, val);
+            setRenamingId(null);
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              const val = (e.target as HTMLInputElement).value.trim();
+              if (val) renameFolder(row.folder.id, val);
+              setRenamingId(null);
+            }
+            if (e.key === 'Escape') setRenamingId(null);
+          }}
+        />
+      ) : (
+        <span className={styles.assetRowName}>{row.folder.name}</span>
+      )}
+      <span className={styles.assetRowType}>Folder</span>
+      <span className={styles.assetRowSize} />
+    </div>
+  );
+
+  const labelColorOf = (asset: ImportedAsset): string | undefined =>
+    asset.label ? LABEL_COLORS.find((c) => c.id === asset.label)?.color : undefined;
+
+  const dragHandlers = (asset: ImportedAsset) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData('text/asset-id', asset.id);
+      setCanvasDrag(e, { kind: 'asset', assetId: asset.id });
+    },
+  });
+
+  const renderAssetRow = (row: Extract<AssetRow, { kind: 'asset' }>): JSX.Element => {
+    const { asset } = row;
+    const visual = getAssetVisualInfo(asset);
+    const label = labelColorOf(asset);
+    return (
+      <div
+        role="treeitem"
+        aria-selected={selectedAssetIds.has(asset.id)}
+        className={`${styles.assetRow}${selectedAssetIds.has(asset.id) ? ` ${styles.assetRowSelected}` : ''}`}
+        style={{ paddingLeft: 8 + row.depth * 16 + (flat ? 0 : 16) }}
+        title={asset.tags?.length ? `${asset.name}\nTags: ${asset.tags.join(', ')}` : asset.name}
+        data-focused={focusedAssetId === asset.id || undefined}
+        onClick={(e) => selectAsset(asset.id, e, orderedAssetIds)}
+        onDoubleClick={() => openFootagePreview(asset)}
+        onContextMenu={(e) => openAssetMenu(asset, e)}
+        {...dragHandlers(asset)}
+      >
+        <AssetThumb asset={asset} variant="row" />
+        {label && <span className={styles.assetLabelDot} style={{ background: label }} aria-hidden />}
+        <span className={styles.assetRowName}>{asset.name}</span>
+        {asset.tags && asset.tags.length > 0 && (
+          <span className={styles.assetRowTags} aria-label={`Tags: ${asset.tags.join(', ')}`}>
+            {asset.tags.slice(0, 2).map((t) => (
+              <Chip key={t} size="sm" selected={tagFilter === t} onSelect={() => setTagFilter(tagFilter === t ? null : t)}>{t}</Chip>
+            ))}
+            {asset.tags.length > 2 && <span className={styles.assetRowUsed}>+{asset.tags.length - 2}</span>}
+          </span>
+        )}
+        <span className={styles.assetRowType}>{visual.label}</span>
+        <span className={styles.assetRowSize}>{formatBytes(asset.size)}</span>
+      </div>
+    );
+  };
+
+  const renderCardsRow = (row: Extract<AssetRow, { kind: 'cards' }>): JSX.Element => (
+    // The column count is a measured layout value, not a design token — the
+    // one inline style the grid rules allow (see `.assetGridRow`).
+    <div className={styles.assetGridRow} style={{ '--asset-grid-cols': cols, paddingLeft: 8 + row.depth * 16 } as React.CSSProperties} role="row">
+      {row.assets.map((asset) => {
+        const visual = getAssetVisualInfo(asset);
+        const label = labelColorOf(asset);
+        const selected = selectedAssetIds.has(asset.id);
+        return (
+          <div
+            key={asset.id}
+            role="treeitem"
+            aria-selected={selected}
+            className={`${styles.assetCard}${selected ? ` ${styles.assetCardSelected}` : ''}`}
+            title={asset.tags?.length ? `${asset.name}\nTags: ${asset.tags.join(', ')}` : asset.name}
+            data-focused={focusedAssetId === asset.id || undefined}
+            onClick={(e) => selectAsset(asset.id, e, orderedAssetIds)}
+            onDoubleClick={() => openFootagePreview(asset)}
+            onContextMenu={(e) => openAssetMenu(asset, e)}
+            {...dragHandlers(asset)}
+          >
+            {label && <span className={styles.assetCardStripe} style={{ background: label }} aria-hidden />}
+            <AssetThumb asset={asset} variant="card" scrub />
+            <span className={styles.assetCardName}>{asset.name}</span>
+            <span className={styles.assetCardMeta}>
+              <span>{visual.label}</span>
+              <span>·</span>
+              <span>{formatBytes(asset.size)}</span>
+              {usedCount(asset.id) > 0 && <span title={`Used by ${usedCount(asset.id)} layer${usedCount(asset.id) === 1 ? '' : 's'}`}>· ×{usedCount(asset.id)}</span>}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const browseAvailable = canBrowseMedia();
 
   return (
     <Panel
@@ -579,341 +1093,483 @@ export function AssetsPanel(): JSX.Element {
       title="Assets"
       icon="media"
       hideHeader
+      noScroll
       onClose={() => getEventBus().emit('PanelClosed', { panelId: 'assets' })}
     >
-      <div className={styles.toolbar} style={{ paddingBottom: 4, width: '100%' }}>
-        <SearchField
-          placeholder="Search all assets…"
-          ariaLabel="Search assets"
-          className={styles.search}
-          value={searchQuery}
-          onChange={setSearchQuery}
-        />
-        {/*
-          In the header rather than only in the bottom dock: a 3D model is the
-          one import whose result is not a row in this list, so a user who has
-          just imported one goes looking for what happened — and the dock's
-          icon-only buttons name nothing. This one says what it does.
-        */}
-        <button
-          type="button"
-          className={styles.importModelBtn}
-          title="Import a .glb, or a .gltf together with its .bin and textures"
-          onClick={() => modelInputRef.current?.click()}
-        >
-          <Icon name="cube" size="sm" />
-          <span>Import 3D model</span>
-        </button>
-      </div>
-
-      {/* AE Top Footage Header Card — shown when a single asset is selected */}
-      {singleSelectedAsset && (() => {
-        const m = singleSelectedAsset.metadata ?? {};
-        const parts: string[] = [];
-        if (m.width && m.height) parts.push(`${Math.round(m.width * (singleSelectedAsset.interpret?.par ?? 1))}×${m.height}`);
-        if (m.duration && m.duration > 0) parts.push(`${m.duration.toFixed(2)}s`);
-        if (m.fps && m.fps > 0) parts.push(`${m.fps % 1 === 0 ? m.fps : m.fps.toFixed(3)} fps`);
-        if (m.hasAudioTrack) parts.push('audio');
-        parts.push(formatBytes(singleSelectedAsset.size));
-
-        const visual = getAssetVisualInfo(singleSelectedAsset);
-        const glyphClass = (styles as Record<string, string>)[visual.className] ?? styles.assetGlyphFile;
-
-        return (
-          <div className={`${styles.assetHeaderCard} ${styles.assetMetaFooter}`} data-asset-meta="">
-            <div className={styles.assetHeaderThumb}>
-              {singleSelectedAsset.thumbSrc ? (
-                <img src={singleSelectedAsset.thumbSrc} alt={singleSelectedAsset.name} className={styles.assetHeaderThumbImg} />
-              ) : (
-                <Icon
-                  name={visual.icon}
-                  size="md"
-                  className={`${styles.assetGlyph} ${glyphClass}`}
-                  style={{ color: visual.color }}
-                />
-              )}
-            </div>
-            <div className={styles.assetHeaderDetails}>
-              <span className={styles.assetHeaderName} title={singleSelectedAsset.name}>
-                {singleSelectedAsset.name}
-              </span>
-              <span className={styles.assetHeaderFacts} title={parts.join(' · ')}>
-                {parts.join(' · ')}
-              </span>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Hidden file inputs for media and folder imports */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        className={styles.fileInput}
-        multiple
-        accept="image/*,video/*,audio/*,.exr,.dpx,.psd,.dng,.cr2,.cr3,.nef,.arw,.mxf,.mkv,.avi,.mts,.m2ts,.r3d,.braw,.glb,.gltf"
-        onChange={handleFileChange}
-      />
-      <input
-        type="file"
-        ref={folderInputRef}
-        className={styles.fileInput}
-        multiple
-        onChange={handleFolderChange}
-        {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
-      />
-      {/* `multiple` and the sidecar extensions, because a .gltf is never one
-          file — see the note on `modelInputRef`. Same handler as the media
-          input above; only the filter differs. */}
-      <input
-        type="file"
-        ref={modelInputRef}
-        className={styles.fileInput}
-        multiple
-        accept=".glb,.gltf,.bin,image/png,image/jpeg,image/webp,image/ktx2"
-        onChange={handleFileChange}
-      />
-
-      {/* Column headings, as in Explorer's details view and AE's project panel */}
-      <div className={styles.assetHead}>
-        <span className={styles.assetHeadName}>Name</span>
-        <span className={styles.assetHeadType}>Type</span>
-        <span className={styles.assetHeadSize}>Size</span>
-      </div>
-
-      {/*
-        Del deletes the selection, Ctrl/Cmd+A takes all of it, Escape drops it.
-      */}
-      <div
-        className={styles.body}
-        style={{ padding: '2px 0' }}
-        tabIndex={0}
-        data-shortcut-claim="delete backspace Ctrl+a Meta+a Ctrl+Alt+g Meta+Alt+g"
-        data-tour="assets-panel"
-        onKeyDown={(e) => {
-          if (e.key === 'Delete' || e.key === 'Backspace') {
-            if (selectedAssetIds.size === 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-            void deleteSelectedAssets();
-            return;
-          }
-          if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === 'g' || e.key === 'G')) {
-            if (singleSelectedAsset) {
-              e.preventDefault();
-              e.stopPropagation();
-              openInterpretFootage(singleSelectedAsset);
-              return;
-            }
-          }
-          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-            e.preventDefault();
-            e.stopPropagation();
-            setSelectedAssetIds(new Set(orderedAssetIds));
-            return;
-          }
-          if (e.key === 'Escape' && selectedAssetIds.size > 0) {
-            e.preventDefault();
-            setSelectedAssetIds(new Set());
-            setSelectionAnchor(null);
-          }
-        }}
-      >
-        {isEmpty ? (
-          <div className={styles.empty}>
-            <p style={{ margin: 0, color: 'var(--color-text-tertiary)', fontSize: '11px' }}>
-              {searching
-                ? 'No matching assets found.'
-                : 'No media yet. Import files or a folder, or create a folder to organise them.'}
-            </p>
-          </div>
-        ) : (
-          <div className={styles.assetTree} role="tree">
-            {rows.map((row) =>
-              row.kind === 'folder' ? (
-                <div
-                  key={row.key}
-                  role="treeitem"
-                  aria-expanded={expandedFolders.has(row.folder.id)}
-                  className={`${styles.assetRow}${dropFolderId === row.folder.id ? ` ${styles.dropActive}` : ''}${currentFolderId === row.folder.id ? ` ${styles.assetRowActive}` : ''}`}
-                  style={{ paddingLeft: 8 + row.depth * 16 }}
-                  title={row.folder.name}
-                  onClick={() => {
-                    if (renamingId === row.folder.id) return;
-                    setCurrentFolderId(row.folder.id);
-                    toggleFolder(row.folder.id);
-                    setSelectedAssetIds(new Set());
-                    setSelectionAnchor(null);
-                  }}
-                  onContextMenu={(e) => openFolderMenu(row.folder, e)}
-                  onDragOver={(e) => { e.preventDefault(); setDropFolderId(row.folder.id); }}
-                  onDragLeave={() => setDropFolderId((cur) => (cur === row.folder.id ? null : cur))}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const assetId = e.dataTransfer.getData('text/asset-id');
-                    if (assetId) moveAssetToFolder(assetId, row.folder.id);
-                    setDropFolderId(null);
-                  }}
-                >
-                  <Icon
-                    name={expandedFolders.has(row.folder.id) ? 'chevron-down' : 'chevron-right'}
-                    size="sm"
-                    className={styles.assetTwisty}
-                  />
-                  <Icon
-                    name={expandedFolders.has(row.folder.id) ? 'folder-open' : 'folder'}
-                    size="md"
-                    className={styles.assetGlyphFolder}
-                    style={{ color: FOLDER_COLOR }}
-                  />
-                  {renamingId === row.folder.id ? (
-                    <input
-                      autoFocus
-                      defaultValue={row.folder.name}
-                      className={styles.assetRename}
-                      onClick={(e) => e.stopPropagation()}
-                      onBlur={(e) => { renameFolder(row.folder.id, e.target.value); setRenamingId(null); }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { renameFolder(row.folder.id, (e.target as HTMLInputElement).value); setRenamingId(null); }
-                        if (e.key === 'Escape') setRenamingId(null);
-                      }}
-                    />
-                  ) : (
-                    <span className={styles.assetRowName}>{row.folder.name}</span>
-                  )}
-                  <span className={styles.assetRowType}>Folder</span>
-                  <span className={styles.assetRowSize} />
-                </div>
-              ) : (() => {
-                const visual = getAssetVisualInfo(row.asset);
-                const glyphClass = (styles as Record<string, string>)[visual.className] ?? styles.assetGlyphFile;
-                return (
-                  <div
-                    key={row.key}
-                    role="treeitem"
-                    className={`${styles.assetRow}${selectedAssetIds.has(row.asset.id) ? ` ${styles.assetRowSelected}` : ''}`}
-                    style={{ paddingLeft: 8 + row.depth * 16 + (searching ? 0 : 16) }}
-                    title={row.asset.name}
-                    draggable
-                    onClick={(e) => selectAsset(row.asset.id, e, orderedAssetIds)}
-                    onDoubleClick={() => openFootagePreview(row.asset)}
-                    onContextMenu={(e) => openAssetMenu(row.asset, e)}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/asset-id', row.asset.id);
-                      setCanvasDrag(e, { kind: 'asset', assetId: row.asset.id });
-                    }}
-                  >
-                    <Icon
-                      name={visual.icon}
-                      size="md"
-                      className={`${styles.assetGlyph} ${glyphClass}`}
-                      style={{ color: visual.color }}
-                    />
-                    <span className={styles.assetRowName}>{row.asset.name}</span>
-                    <span className={styles.assetRowType}>{visual.label}</span>
-                    <span className={styles.assetRowSize}>{formatBytes(row.asset.size)}</span>
-                  </div>
-                );
-              })(),
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* AE Project Bottom Action Dock */}
-      <div className={styles.assetBottomDock}>
-        <button
-          type="button"
-          className={`${styles.dockBtn}${dockCompDropActive ? ` ${styles.dockBtnDropActive}` : ''}`}
-          disabled={!singleSelectedAsset || singleSelectedAsset.type === 'audio'}
-          title="Create New Composition from Footage (or drag & drop footage here)"
-          onClick={() => {
-            if (singleSelectedAsset) void createCompositionFromFootage(singleSelectedAsset);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDockCompDropActive(true);
-          }}
-          onDragLeave={() => setDockCompDropActive(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDockCompDropActive(false);
-            const assetId = e.dataTransfer.getData('text/asset-id');
-            const dropped = assets.find((a) => a.id === assetId);
-            if (dropped && dropped.type !== 'audio') {
-              void createCompositionFromFootage(dropped);
-            }
-          }}
-        >
-          <Icon name="component" size="sm" style={{ color: singleSelectedAsset && singleSelectedAsset.type !== 'audio' ? '#818cf8' : undefined }} />
-        </button>
-
-        <button
-          type="button"
-          className={styles.dockBtn}
-          title="New Folder"
-          onClick={handleNewFolder}
-        >
-          <Icon name="folder-plus" size="sm" style={{ color: FOLDER_COLOR }} />
-        </button>
-
-        <button
-          type="button"
-          className={styles.dockBtn}
-          title="Import Folder (keeps folder structure)…"
-          onClick={() => folderInputRef.current?.click()}
-        >
-          <Icon name="folder-open" size="sm" style={{ color: FOLDER_COLOR }} />
-        </button>
-
-        <button
-          type="button"
-          className={styles.dockBtn}
-          title="Import Media Files…"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Icon name="upload" size="sm" style={{ color: '#38bdf8' }} />
-        </button>
-
-        {derivedCount > 0 && (
+      {/* Project / Media Browser. The Media Browser needs the desktop shell;
+          the web build never renders the strip at all rather than showing one
+          tab. Ids stay `bin` / `browse` — the stores and the tour key on them. */}
+      {browseAvailable && (
+        <div className={styles.libTabs} role="tablist" aria-label="Assets views">
           <button
             type="button"
-            className={`${styles.dockBtn}${showDerived ? ` ${styles.dockBtnDropActive}` : ''}`}
-            onClick={() => setShowDerived((v) => !v)}
-            title={
-              showDerived
-                ? 'Hide generated images (duplicates and rasterized copies)'
-                : `Show ${derivedCount} generated image${derivedCount === 1 ? '' : 's'} — duplicates and rasterized copies made by effects and plugins`
-            }
+            role="tab"
+            aria-selected={tab === 'bin'}
+            className={tab === 'bin' ? styles.libTabActive : styles.libTab}
+            title="Project — the files this project has imported. Saved with the project."
+            onClick={() => setTab('bin')}
           >
-            <Icon name="sparkles" size="sm" />
+            <Icon name="media" size="sm" />
+            <span>Project</span>
           </button>
-        )}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'browse'}
+            className={tab === 'browse' ? styles.libTabActive : styles.libTab}
+            title="Media Browser — a folder on disk you can drag from. Nothing is imported until you drop it."
+            onClick={() => setTab('browse')}
+          >
+            <Icon name="folder" size="sm" />
+            <span>Media Browser</span>
+          </button>
+        </div>
+      )}
 
-        <button
-          type="button"
-          className={styles.dockBtn}
-          disabled={!singleSelectedAsset}
-          title="Interpret Footage… (Ctrl+Alt+G)"
-          onClick={() => {
-            if (singleSelectedAsset) openInterpretFootage(singleSelectedAsset);
-          }}
-        >
-          <Icon name="sliders-h" size="sm" />
-        </button>
+      {browseAvailable && tab === 'browse' ? (
+        <MediaBrowser />
+      ) : (
+        <>
+          <div className={styles.assetSearchRow}>
+            <SearchField
+              placeholder="Search assets…"
+              ariaLabel="Search assets"
+              fullWidth
+              size="sm"
+              value={searchQuery}
+              onChange={setSearchQuery}
+            />
+          </div>
 
-        <button
-          type="button"
-          className={styles.dockBtn}
-          disabled={selectedAssetIds.size === 0}
-          title={`Delete Selected Asset${selectedAssetIds.size > 1 ? 's' : ''} (Del)`}
-          onClick={() => {
-            void deleteSelectedAssets();
-          }}
-        >
-          <Icon name="trash" size="sm" />
-        </button>
-      </div>
+          <div className={styles.assetToolbarRow}>
+            <div className={styles.assetToolbarGroup}>
+              <span className={styles.assetImportSplit} role="group" aria-label="Import">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<Icon name="upload" size="sm" />}
+                  className={styles.assetImportMain}
+                  title="Import files into the project (they are not added to the composition)"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Import
+                </Button>
+                <Dropdown
+                  placement="bottom-start"
+                  trigger={
+                    <IconButton
+                      size="sm"
+                      variant="secondary"
+                      className={styles.assetImportMore}
+                      aria-label="More import options"
+                      title="More import options"
+                    >
+                      <Icon name="chevron-down" size="sm" />
+                    </IconButton>
+                  }
+                  items={[
+                    { type: 'item', id: 'files', label: 'Import Files…', icon: 'upload', onSelect: () => fileInputRef.current?.click() },
+                    { type: 'item', id: 'folder', label: 'Import Folder…', icon: 'folder-open', onSelect: () => folderInputRef.current?.click() },
+                    { type: 'separator' },
+                    { type: 'item', id: 'model', label: 'Import 3D Model…', icon: 'cube', onSelect: () => modelInputRef.current?.click() },
+                    { type: 'separator' },
+                    // Also in the bottom dock and the list's right-click menu;
+                    // here because the dock is the first thing a short panel
+                    // scrolls out of view, and "I can't make a folder" was the
+                    // report that followed.
+                    { type: 'item', id: 'new-folder', label: 'New Folder', icon: 'folder-plus', onSelect: handleNewFolder },
+                  ]}
+                />
+              </span>
+            </div>
+
+            <div className={styles.assetToolbarGroup}>
+              <Dropdown
+                placement="bottom-end"
+                trigger={
+                  <button
+                    type="button"
+                    className={styles.assetToolbarBtn}
+                    title={`Sorted by ${SORT_LABEL[sortKey].toLowerCase()}, ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+                    aria-label="Sort assets"
+                  >
+                    <Icon name={sortDir === 'asc' ? 'arrow-up' : 'arrow-down'} size="sm" />
+                  </button>
+                }
+                items={sortItems}
+              />
+              <Segmented
+                size="sm"
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: 'list', label: <Icon name="menu" size="sm" />, ariaLabel: 'List view' },
+                  { value: 'grid', label: <Icon name="grid" size="sm" />, ariaLabel: 'Grid view' },
+                ]}
+              />
+            </div>
+          </div>
+
+          <div className={styles.assetFilterRow} aria-label="Filters">
+            <Chip size="sm" icon="eye-off" selected={unusedOnly} onSelect={() => setUnusedOnly(!unusedOnly)}>Unused</Chip>
+            {typeChip('video', 'Video')}
+            {typeChip('image', 'Image')}
+            {typeChip('audio', 'Audio')}
+            {tags.map(({ tag, count }) => (
+              <Chip key={tag} size="sm" selected={tagFilter === tag} onSelect={() => setTagFilter(tagFilter === tag ? null : tag)}>
+                {tag} <span className={styles.assetRowUsed}>{count}</span>
+              </Chip>
+            ))}
+            <Dropdown
+              placement="bottom-start"
+              trigger={
+                <button
+                  type="button"
+                  className={styles.assetFilterLabelBtn}
+                  title="Filter by label"
+                  aria-label="Filter by label"
+                  aria-pressed={labelFilter !== null}
+                >
+                  {labelFilter ? (
+                    <span className={styles.sceneFilterLabelDot} style={{ background: LABEL_COLORS.find((c) => c.id === labelFilter)?.color }} aria-hidden />
+                  ) : (
+                    <Icon name="palette" size="sm" />
+                  )}
+                  <span>Label</span>
+                </button>
+              }
+              items={[
+                { type: 'item', id: 'any', label: 'Any label', icon: labelFilter === null ? 'check' : undefined, onSelect: () => setLabelFilter(null) },
+                { type: 'separator' },
+                ...LABEL_COLORS.map((c): DropdownItem => ({
+                  type: 'item',
+                  id: c.id,
+                  label: (
+                    <>
+                      <span className={styles.labelSwatch} style={{ background: c.color }} aria-hidden />
+                      {c.label}
+                    </>
+                  ),
+                  icon: labelFilter === c.id ? 'check' : undefined,
+                  onSelect: () => setLabelFilter(labelFilter === c.id ? null : c.id),
+                })),
+              ]}
+            />
+            {filtering && (
+              <Chip size="sm" icon="close" onSelect={clearFilters}>Clear</Chip>
+            )}
+          </div>
+          {filterNote && (
+            <div className={styles.assetNote} role="status">{filterNote}</div>
+          )}
+
+          {/* Hidden file inputs for media and folder imports */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            className={styles.fileInput}
+            multiple
+            accept="image/*,video/*,audio/*,.exr,.dpx,.psd,.dng,.cr2,.cr3,.nef,.arw,.mxf,.mkv,.avi,.mts,.m2ts,.r3d,.braw,.glb,.gltf"
+            onChange={handleFileChange}
+          />
+          <input
+            type="file"
+            ref={folderInputRef}
+            className={styles.fileInput}
+            multiple
+            onChange={handleFolderChange}
+            {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+          />
+          {/* `multiple` and the sidecar extensions, because a .gltf is never one
+              file — see the note on `modelInputRef`. Same handler as the media
+              input above; only the filter differs. */}
+          <input
+            type="file"
+            ref={modelInputRef}
+            className={styles.fileInput}
+            multiple
+            accept=".glb,.gltf,.bin,image/png,image/jpeg,image/webp,image/ktx2"
+            onChange={handleFileChange}
+          />
+
+          {/* Column headings, as in Explorer's details view. Buttons: click sorts. */}
+          {view === 'list' && (
+            <div className={styles.assetHead}>
+              {headBtn('name', 'Name', styles.assetHeadName)}
+              {headBtn('type', 'Type', styles.assetHeadType)}
+              {headBtn('size', 'Size', styles.assetHeadSize)}
+            </div>
+          )}
+
+          {/*
+            Del deletes the selection, Ctrl/Cmd+A takes all of it, Escape drops it,
+            the arrows walk it.
+          */}
+          <div
+            ref={hostRef}
+            className={`${styles.assetListHost}${osDropActive ? ` ${styles.assetListHostDrop}` : ''}`}
+            tabIndex={0}
+            role="tree"
+            aria-label="Assets"
+            data-shortcut-claim="delete backspace Ctrl+a Meta+a Ctrl+Alt+g Meta+Alt+g"
+            data-tour="assets-panel"
+            // OS files onto the list = import to the project, no insert.
+            // Folder rows handle their own asset-move drops; they carry no
+            // files, so the guard below leaves them alone.
+            onDragOver={(e) => {
+              if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+              setOsDropActive(true);
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              setOsDropActive(false);
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget || (styles.empty && (e.target as HTMLElement).classList.contains(styles.empty))) {
+                setSelectedAssetIds(new Set());
+                setSelectionAnchor(null);
+                setCurrentFolderId(null);
+                setScrollToKey(null);
+              }
+            }}
+            onContextMenu={(e) => {
+              if (e.target === e.currentTarget || (styles.empty && (e.target as HTMLElement).classList.contains(styles.empty))) {
+                e.preventDefault();
+                e.stopPropagation();
+                openContextMenu(e.clientX, e.clientY, [
+                  { id: 'new-folder', label: 'New Folder', onSelect: handleNewFolder },
+                  { id: 'sep-e1', separator: true },
+                  { id: 'import-files', label: 'Import Files…', onSelect: () => fileInputRef.current?.click() },
+                  { id: 'import-folder', label: 'Import Folder…', onSelect: () => folderInputRef.current?.click() },
+                ]);
+              }
+            }}
+            onDrop={(e) => {
+              setOsDropActive(false);
+              const files = e.dataTransfer.files;
+              if (!files || files.length === 0) return;
+              e.preventDefault();
+              void handleOsDrop(files);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (selectedAssetIds.size === 0 && !currentFolderId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (selectedAssetIds.size > 0) {
+                  void deleteSelectedAssets();
+                } else if (currentFolderId) {
+                  const f = folders.find((x) => x.id === currentFolderId);
+                  if (f) void deleteFolder(f);
+                }
+                return;
+              }
+              if (e.key === 'F2' && currentFolderId && selectedAssetIds.size === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                setRenamingId(currentFolderId);
+                return;
+              }
+              if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === 'g' || e.key === 'G')) {
+                if (singleSelectedAsset) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openInterpretFootage(singleSelectedAsset);
+                  return;
+                }
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+                e.preventDefault();
+                e.stopPropagation();
+                setSelectedAssetIds(new Set(orderedAssetIds));
+                return;
+              }
+              if (e.key === 'Escape' && selectedAssetIds.size > 0) {
+                e.preventDefault();
+                setSelectedAssetIds(new Set());
+                setSelectionAnchor(null);
+                return;
+              }
+              if (e.key === 'ArrowDown') { e.preventDefault(); moveFocus(view === 'grid' ? cols : 1); return; }
+              if (e.key === 'ArrowUp') { e.preventDefault(); moveFocus(view === 'grid' ? -cols : -1); return; }
+              if (view === 'grid' && e.key === 'ArrowRight') { e.preventDefault(); moveFocus(1); return; }
+              if (view === 'grid' && e.key === 'ArrowLeft') { e.preventDefault(); moveFocus(-1); return; }
+              if (e.key === 'Enter' && singleSelectedAsset) { e.preventDefault(); openFootagePreview(singleSelectedAsset); }
+            }}
+          >
+            {isEmpty ? (
+              <div className={styles.empty}>
+                {flat ? (
+                  'No matching assets found.'
+                ) : (
+                  <>
+                    <p className={styles.emptyLead}>Nothing imported yet. Import files, or drag them here.</p>
+                    <p className={styles.emptyNote}>
+                      Imports go to this list; add them to the composition by dragging onto the canvas or the timeline.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={<Icon name="upload" size="sm" />}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Import
+                    </Button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <VirtualList
+                items={rows}
+                itemHeight={LIST_ROW_H}
+                getItemHeight={(row) => (row.kind === 'cards' ? cardRowH : row.kind === 'folder' ? FOLDER_ROW_H : LIST_ROW_H)}
+                height={hostSize.height > 0 ? hostSize.height : '100%'}
+                scrollToIndex={scrollToIndex}
+                itemKey={(row) => row.key}
+                renderItem={(row) =>
+                  row.kind === 'folder' ? renderFolderRow(row) : row.kind === 'asset' ? renderAssetRow(row) : renderCardsRow(row)
+                }
+              />
+            )}
+          </div>
+
+          <AssetDrawer
+            asset={singleSelectedAsset}
+            selectionCount={selectedAssetIds.size}
+            open={drawerOpen}
+            onToggle={() => setDrawerOpen(!drawerOpen)}
+            usedBy={usedBy}
+            onSelectLayer={(id) => useSelectionStore.getState().set([id])}
+            onSetTags={setTags}
+          />
+
+          {/* AE Project Bottom Action Dock */}
+          <div className={styles.assetBottomDock}>
+            <button
+              type="button"
+              className={`${styles.dockBtn}${dockCompDropActive ? ` ${styles.dockBtnDropActive}` : ''}`}
+              disabled={!singleSelectedAsset || singleSelectedAsset.type === 'audio'}
+              title="Create New Composition from Footage (or drag & drop footage here)"
+              onClick={() => {
+                if (singleSelectedAsset) void createCompositionFromFootage(singleSelectedAsset);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDockCompDropActive(true);
+              }}
+              onDragLeave={() => setDockCompDropActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDockCompDropActive(false);
+                const assetId = e.dataTransfer.getData('text/asset-id');
+                const dropped = assets.find((a) => a.id === assetId);
+                if (dropped && dropped.type !== 'audio') {
+                  void createCompositionFromFootage(dropped);
+                }
+              }}
+            >
+              <Icon name="component" size="sm" className={singleSelectedAsset && singleSelectedAsset.type !== 'audio' ? styles.assetGlyphComp : undefined} />
+            </button>
+
+            <button
+              type="button"
+              className={styles.dockBtn}
+              title="New Folder"
+              aria-label="New Folder"
+              onClick={handleNewFolder}
+            >
+              <Icon name="folder-plus" size="sm" style={{ color: FOLDER_COLOR }} />
+            </button>
+
+            {/* The two verbs that put a clip in the edit, as buttons. They
+                existed only in the right-click menu and the footage dialog,
+                and "I imported it but can't add it" was the result: a bin
+                with no visible way from the list to the comp. */}
+            <button
+              type="button"
+              className={styles.dockBtn}
+              disabled={selectedAssetIds.size === 0}
+              title={selectedAssetIds.size > 1 ? `Add ${selectedAssetIds.size} selected to composition` : 'Add selected asset to composition'}
+              aria-label="Add to composition"
+              onClick={() => {
+                const picked = assets.filter((a) => selectedAssetIds.has(a.id));
+                void (async () => {
+                  for (const a of picked) await insertMedia(a);
+                })();
+              }}
+            >
+              <Icon name="plus" size="sm" />
+            </button>
+            <button
+              type="button"
+              className={styles.dockBtn}
+              disabled={selectedAssetIds.size === 0}
+              title={selectedAssetIds.size > 1 ? `Add ${selectedAssetIds.size} selected at playhead` : 'Add selected asset at the playhead'}
+              aria-label="Add at playhead"
+              onClick={() => {
+                const picked = assets.filter((a) => selectedAssetIds.has(a.id));
+                for (const a of picked) void insertMediaAtPlayhead(a);
+              }}
+            >
+              <Icon name="stopwatch" size="sm" />
+            </button>
+
+            {/* No import buttons here: the header's Import is the one door. */}
+
+            {derivedCount > 0 && (
+              <button
+                type="button"
+                className={`${styles.dockBtn}${showDerived ? ` ${styles.dockBtnDropActive}` : ''}`}
+                onClick={() => setShowDerived((v) => !v)}
+                title={
+                  showDerived
+                    ? 'Hide generated images (duplicates and rasterized copies)'
+                    : `Show ${derivedCount} generated image${derivedCount === 1 ? '' : 's'} — duplicates and rasterized copies made by effects and plugins`
+                }
+              >
+                <Icon name="sparkles" size="sm" />
+              </button>
+            )}
+
+            <button
+              type="button"
+              className={styles.dockBtn}
+              disabled={!singleSelectedAsset}
+              title="Interpret Footage… (Ctrl+Alt+G)"
+              onClick={() => {
+                if (singleSelectedAsset) openInterpretFootage(singleSelectedAsset);
+              }}
+            >
+              <Icon name="sliders-h" size="sm" />
+            </button>
+
+            <button
+              type="button"
+              className={styles.dockBtn}
+              disabled={selectedAssetIds.size === 0 && !currentFolderId}
+              title={
+                selectedAssetIds.size === 0
+                  ? currentFolderId
+                    ? 'Delete selected folder (Del)'
+                    : 'Delete selected asset(s) (Del)'
+                  : `Delete Selected Asset${selectedAssetIds.size > 1 ? 's' : ''} (Del)`
+              }
+              onClick={() => {
+                if (selectedAssetIds.size > 0) {
+                  void deleteSelectedAssets();
+                } else if (currentFolderId) {
+                  const f = folders.find((x) => x.id === currentFolderId);
+                  if (f) void deleteFolder(f);
+                }
+              }}
+            >
+              <Icon name="trash" size="sm" />
+            </button>
+          </div>
+        </>
+      )}
     </Panel>
   );
 }

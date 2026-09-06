@@ -15,6 +15,7 @@ import { cn } from '@utils/cn';
 import { openModal } from '@stores/modalStore';
 import { useVersionHistoryStore } from '@stores/versionHistoryStore';
 import type { VersionKind } from '@core/api/client';
+import { openVersionCompare } from './VersionCompareDialog';
 import styles from './VersionHistoryPanel.module.css';
 
 const KIND_LABEL: Record<VersionKind, string> = {
@@ -76,6 +77,7 @@ function VersionHistory(): JSX.Element {
           icon="history"
           title="No versions yet"
           message="Autosave captures snapshots as you work — or name a checkpoint above to keep one deliberately."
+          action={{ label: 'Save a version', onClick: () => void onSave() }}
         />
       )}
 
@@ -95,6 +97,16 @@ function VersionHistory(): JSX.Element {
                   {formatWhen(v.createdAt)} · rev {v.revision} · {v.time.toFixed(1)}s
                 </span>
               </div>
+              <button
+                type="button"
+                className={styles.compare}
+                disabled={isRestoring}
+                title="Wipe between this version and the current composition"
+                onClick={() => openVersionCompare(v)}
+              >
+                <Icon name="wipe" size="sm" />
+                Compare
+              </button>
               <button
                 type="button"
                 className={styles.restore}

@@ -263,3 +263,11 @@
   background: var(--color-border-subtle, rgba(255, 255, 255, 0.1));
   margin: var(--space-2, 6px) 0 var(--space-1, 4px);
 }
+
+/* The presets dropdown sits right-aligned above the Material Library header,
+   matching Transform and Fill & Stroke so the control is in one place. */
+.presetRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-2);
+}

@@ -19,7 +19,7 @@
  * box, the same persisted open/closed behaviour.
  */
 
-import { useCallback } from 'react';
+import { memo, useCallback, type ComponentType } from 'react';
 import { Accordion, type AccordionItem } from '@components/Accordion';
 import { EmptyState } from '@components/EmptyState';
 import { usePreferenceStore } from '@stores/preferenceStore';
@@ -29,6 +29,7 @@ import {
   categoryLabel,
   inspectorSectionsFor,
   resolve,
+  sectionCoverage,
   type InspectorSectionDef,
   type InspectorCategory,
 } from './inspectorSections';
@@ -49,14 +50,52 @@ function matchesQuery(def: InspectorSectionDef, nodeId: string, q: string): bool
 }
 
 /**
+ * The shell around ONE section, memoised on (component, node).
+ *
+ * The panel re-renders for reasons that are none of a section's business — a
+ * keystroke in the search box, a switch in the selection header, the tab strip
+ * — and every re-render used to rebuild every section's element tree and run
+ * every section's render. With the host memoised, a section renders again only
+ * when its own node's revision moves (`useNodeRevision` inside it) or when the
+ * node it is drawn for changes.
+ */
+const SectionHost = memo(function SectionHost({
+  Component,
+  nodeId,
+}: {
+  Component: ComponentType<{ nodeId: string }>;
+  nodeId: string;
+}): JSX.Element {
+  return (
+    <InspectorSection>
+      <Component nodeId={nodeId} />
+    </InspectorSection>
+  );
+});
+
+/**
  * One registry row → one accordion item, drawn in the shared section shell.
  *
  * A search result carries its sub-tab's name as the header badge, so a hit
  * found from the search box also tells you where it lives once you stop
  * searching. That badge is the answer to "which tab owns this property".
+ *
+ * With several layers selected, a section that only some of them have is
+ * badged "2 of 3" — the rows inside edit every layer that has the property,
+ * and the badge says how many that is.
  */
-function toAccordionItem(def: InspectorSectionDef, nodeId: string, searching: boolean): AccordionItem {
+function toAccordionItem(
+  def: InspectorSectionDef,
+  nodeId: string,
+  searching: boolean,
+  nodeIds: ReadonlyArray<string>,
+): AccordionItem {
   const { Component } = def;
+  const coverage = nodeIds.length > 1 ? sectionCoverage(def, nodeIds) : nodeIds.length;
+  const partial = nodeIds.length > 1 && coverage < nodeIds.length ? `${coverage} of ${nodeIds.length}` : null;
+  const badge = searching
+    ? (partial ? `${categoryLabel(def.category)} · ${partial}` : categoryLabel(def.category))
+    : partial ?? undefined;
   return {
     id: def.id,
     title: resolve(def.title, nodeId),
@@ -64,12 +103,9 @@ function toAccordionItem(def: InspectorSectionDef, nodeId: string, searching: bo
     mountOnOpen: def.mountOnOpen,
     // `forceOpen`, not `defaultOpen`: a remembered "closed" for this section
     // outranks defaultOpen, and would otherwise hide the hit you searched for.
-    ...(searching ? { forceOpen: true, badge: categoryLabel(def.category) } : {}),
-    content: (
-      <InspectorSection>
-        <Component nodeId={nodeId} />
-      </InspectorSection>
-    ),
+    ...(searching ? { forceOpen: true } : {}),
+    ...(badge !== undefined ? { badge } : {}),
+    content: <SectionHost Component={Component} nodeId={nodeId} />,
   };
 }
 
@@ -120,9 +156,14 @@ export interface InspectorContentProps {
   query?: string;
   /** The sub-tab to draw. `'all'` draws every section — the search view. */
   category?: InspectorCategory | 'all';
+  /**
+   * The whole selection, primary first. Only the coverage badges read it here;
+   * the rows reach it through `InspectorSelectionProvider`.
+   */
+  nodeIds?: ReadonlyArray<string>;
 }
 
-export function InspectorContent({ nodeId, query = '', category = 'all' }: InspectorContentProps): JSX.Element {
+export function InspectorContent({ nodeId, query = '', category = 'all', nodeIds }: InspectorContentProps): JSX.Element {
   if (!nodeId) {
     return (
       <EmptyState
@@ -150,7 +191,8 @@ export function InspectorContent({ nodeId, query = '', category = 'all' }: Inspe
     return <EmptyState compact icon="search" message={`No properties match “${query.trim()}”.`} />;
   }
 
-  return <InspectorAccordion items={matched.map((def) => toAccordionItem(def, nodeId, q.length > 0))} />;
+  const selection = nodeIds && nodeIds.length > 0 ? nodeIds : [nodeId];
+  return <InspectorAccordion items={matched.map((def) => toAccordionItem(def, nodeId, q.length > 0, selection))} />;
 }
 
 export default InspectorContent;

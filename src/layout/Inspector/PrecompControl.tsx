@@ -23,7 +23,7 @@ import { readCompCollapse } from '@core/scene/compInstance';
 import { CompOverridesSection } from './CompOverridesSection';
 import styles from './ParentControl.module.css';
 import ta from './TextAnimatorControls.module.css';
-import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 
 const REMAP = 'timeRemap';
 const LEGACY_REMAP = 'precompTime';
@@ -57,12 +57,7 @@ export function TimeRemapRow({ nodeId }: { nodeId: string }): JSX.Element {
   return (
     <div className={ta.paramRow}>
       <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-          <Checkbox 
-            checked={animated} 
-            onChange={toggle} 
-            title="Toggle Animation"
-            style={{ width: 14, height: 14 }}
-          />
+          <AnimToggle nodeId={nodeId} tracks={[REMAP]} label="Time Remap" animated={animated} onToggle={toggle} values={() => [display]} />
         </div>
       <span className={ta.paramLabel}>Time Remap</span>
       <ValueField value={display} onChange={onChange} unit="s" precision={2} min={0} disabled={!animated} aria-label="Time remap" />

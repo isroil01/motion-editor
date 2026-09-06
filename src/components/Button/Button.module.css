@@ -36,7 +36,7 @@
 }
 
 .root:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
@@ -103,9 +103,30 @@
 .root[data-size="md"] { height: var(--control-height-lg); padding: 0 var(--space-5); font-size: var(--font-size-sm); }
 .root[data-size="lg"] { height: 34px; padding: 0 var(--space-6); font-size: var(--font-size-md); }
 .root[data-size="xl"] { height: 42px; padding: 0 var(--space-7); font-size: var(--font-size-lg); }
+.root.iconOnly[data-size] { padding: 0; }
 
 .fullWidth {
   width: 100%;
+}
+
+/* Square: width follows height, padding collapses, the label is read but
+   not drawn. Sizes below set `height`; `aspect-ratio` keeps them square. */
+.iconOnly {
+  padding: 0;
+  aspect-ratio: 1;
+  gap: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .label {

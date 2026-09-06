@@ -40,12 +40,15 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  background: rgba(18, 20, 26, 0.9);
+  /* The shared overlay glass panel — see `--color-overlay-*` in
+     tokens/domain.css. Theme-fixed on purpose: this card sits over the
+     rendered frame, not over the app's ground. */
+  border: 1px solid var(--color-overlay-panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-overlay-panel-bg);
   backdrop-filter: blur(8px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-  color: #ffffff;
+  box-shadow: var(--color-overlay-panel-shadow);
+  color: var(--color-overlay-text);
   font-size: var(--font-size-xs);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -57,5 +60,5 @@
   height: 6px;
   border-radius: 50%;
   /* The plane's own pink, so the badge reads as belonging to it. */
-  background: #ff9ecb;
+  background: var(--color-overlay-focus);
 }

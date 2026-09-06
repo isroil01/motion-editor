@@ -24,6 +24,14 @@ export interface AssetRecord {
   width?: number;
   height?: number;
   duration?: number;
+  /**
+   * The user's organisation of the library — tags and a colour label — kept
+   * WITH the bundle so it travels with the project rather than living only in
+   * one machine's localStorage. Optional and absent for most records; a
+   * registry written before these existed reads back unchanged.
+   */
+  tags?: string[];
+  label?: string;
 }
 
 /** Serialized `assets/registry.json`. */

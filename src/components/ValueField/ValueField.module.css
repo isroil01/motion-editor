@@ -65,9 +65,16 @@
   background: transparent;
   border: none;
   outline: none;
+  box-shadow: none;
   height: 100%;
   padding: 0;
   color: var(--color-text-primary);
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .editing {
@@ -98,6 +105,16 @@
   background: var(--color-surface-0) !important;
   color: var(--color-text-disabled) !important;
   border-color: transparent !important;
+}
+
+/* A multi-selection whose values disagree. The dash is a value, not a blank:
+   it is still draggable (offsets every layer) and typable (sets every layer). */
+.mixed {
+  color: var(--color-text-secondary);
+}
+
+.mixed .value {
+  letter-spacing: 0.1em;
 }
 
 @keyframes value-shake {

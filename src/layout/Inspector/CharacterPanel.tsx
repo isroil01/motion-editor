@@ -13,7 +13,9 @@ import { readRuns, writeRuns, applyStyleToRange, type RunStyleKey } from '@core/
 import type { TextStyle } from '@core/text/textLayout';
 import { readTextPathConfig, updateTextPath, setTextPath, defaultTextPath } from '@core/text/textPath';
 import type { MaskPath } from '@core/effects/mask';
+import { applyTextPreset, captureTextPreset } from '@core/inspector/sectionPresets';
 import { FontPicker } from './FontPicker';
+import { SectionPresetMenu } from './SectionPresetMenu';
 import { ColorPicker } from '@components/ColorPicker';
 import { Checkbox } from '@components/Checkbox';
 import { Icon } from '@components/Icon';
@@ -290,6 +292,20 @@ export function CharacterPanel(): JSX.Element {
         <span className={hasTarget ? styles.panelHeadStatusOn : styles.panelHeadStatus}>
           {hasTarget ? node?.name || 'Selected Text' : 'Default Preset'}
         </span>
+        {/*
+         * Text-style presets capture the PRIMARY layer's Text component props
+         * and write them to every selected text layer as one undo entry. The
+         * built-in `PRESETS` row below is a fixed type scale; this is the
+         * user's own house style, saved from whatever is on screen.
+         */}
+        {hasTarget && (
+          <SectionPresetMenu
+            sectionId="text"
+            label="Text style presets"
+            capture={() => (primary ? captureTextPreset(primary) : {})}
+            apply={(values) => applyTextPreset(selected.length > 0 ? selected : [], values)}
+          />
+        )}
       </div>
 
       {/* Ranged Selection Banner */}

@@ -24,7 +24,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useGuidesStore, type Camera3dMode } from '@stores/guidesStore';
 import { useCompositionStore } from '@stores/compositionStore';
-import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import { is3DEnabled, canBe3D } from '@core/scene/threeD';
@@ -117,7 +117,7 @@ export function useGizmo3d(stageRef: React.RefObject<HTMLElement | null>, option
 
   // Current playhead time of the active tab — the camera must be sampled at it
   // (an animated/orbited camera otherwise leaves the gizmo at frame 0's view).
-  const time = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
 
   // Re-render on scene mutation (canvas drags, inspector edits, undo…) so the
   // gizmo tracks the object it is attached to — frame-coalesced: the raw rev

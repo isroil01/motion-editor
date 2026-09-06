@@ -183,3 +183,81 @@
   color: var(--color-text-primary);
   background: var(--color-surface-2);
 }
+
+/* ── Name-cell extras: pin, mixed mark, hint, trailing controls ──── */
+/* The name is a flex row so the extras sit AFTER the text and never push the
+   value column: the cell is `minmax(0, 1fr)` and the text truncates first. */
+.name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.nameText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An expression that does not evaluate: a dashed underline in the danger
+   colour, the message on hover (the cell's title). */
+.nameError {
+  text-decoration: underline dashed var(--color-danger);
+  text-underline-offset: 2px;
+  color: var(--color-danger);
+}
+
+.pin {
+  flex: none;
+  color: var(--color-primary);
+}
+
+.mixedMark {
+  flex: none;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-regular);
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+.hint {
+  flex: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-regular);
+}
+
+/* Revealed on hover like the reset button — a `=` and a whip on fifty rows at
+   once is noise; on the row under the cursor it is the affordance. */
+.trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.row:hover .trailing,
+.row:focus-within .trailing,
+.trailing[data-active] {
+  opacity: 1;
+}
+
+/* ── The full-width strip under a row ───────────────────────────── */
+.withBelow {
+  grid-template-rows: auto auto;
+}
+
+.below {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 2px;
+}

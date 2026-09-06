@@ -22,6 +22,7 @@ import { getTimelineController } from '@core/timeline/TimelineController';
 import { useAiChatContext } from './AiChatContext';
 import { openAiSettings } from '@layout/Settings/CustomizeDialog';
 import styles from './AiChatPanel.module.css';
+import { getWorkspaceController } from '@core/workspace/WorkspaceController';
 
 /** BYOK providers offered in the picker, in display order. */
 const PROVIDER_OPTIONS: { id: GatewayProviderId; label: string }[] = [
@@ -226,7 +227,11 @@ export function AiChatPanel(): JSX.Element {
     }
     const timer = setTimeout(() => {
       try {
-        const cvs = document.querySelector('canvas');
+        // The viewport's CONTENT canvas, not `document.querySelector('canvas')`
+        // — that returns the first canvas in the DOM, which is the scopes
+        // panel's histogram or a 2/4-up secondary pane whenever one is
+        // mounted, so the thumbnail showed the wrong picture entirely.
+        const cvs = getWorkspaceController().getContentCanvas();
         if (cvs) setCanvasSnapshot(cvs.toDataURL('image/png'));
       } catch {
         /* cross-origin/empty canvas — show the card without a snapshot */

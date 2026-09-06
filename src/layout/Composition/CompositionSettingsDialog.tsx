@@ -22,13 +22,19 @@ import {
   type FillPaint, type FillType, type ColorStop,
 } from '@core/paint/fill';
 import { openModal } from '@stores/modalStore';
+import { DialogFooter } from '@components/Modal';
 import { useCompositionStore } from '@stores/compositionStore';
-import { resolveSsao, type SsaoSettings } from '@stores/projectStore';
+import { resolveSsao, resolvePixelAspect, DEFAULT_PIXEL_ASPECT, type SsaoSettings } from '@stores/projectStore';
 import { useGuidesStore, type GridStyle } from '@stores/guidesStore';
 import { useColorManagementStore, type IntermediateBitDepth } from '@stores/colorManagementStore';
 import { useViewerLutStore } from '@stores/viewerLutStore';
 import { getTimelineController } from '@core/timeline/TimelineController';
 import { FPS_PRESETS, MAX_DURATION } from '@core/composition/presets';
+import {
+  PIXEL_ASPECT_PRESETS,
+  findPixelAspectPreset,
+  describePixelAspect,
+} from './pixelAspectPresets';
 import {
   ENVIRONMENT_PRESETS,
   DEFAULT_ENVIRONMENT_PRESET,
@@ -39,7 +45,7 @@ import styles from './CompositionSettingsDialog.module.css';
 
 type TabId = 'general' | 'background' | 'grid' | 'world' | 'time' | 'color';
 
-function CompositionSettings({ close }: { close: () => void }): JSX.Element {
+function CompositionSettings(): JSX.Element {
   const s = useCompositionStore();
   const [activeTab, setActiveTab] = useState<TabId>('general');
 
@@ -82,6 +88,25 @@ function CompositionSettings({ close }: { close: () => void }): JSX.Element {
     getTimelineController().setDurationSeconds(useCompositionStore.getState().durationSeconds);
   };
   const setStartFrame = (startFrame: number): void => s.update({ startFrame });
+
+  /*
+    PIXEL ASPECT RATIO.
+
+    Read through `resolvePixelAspect`, so a document written before the field
+    existed reads as 1 and NOTHING is written until the user picks something
+    else. Picking "Square Pixels" writes the literal 1 rather than clearing the
+    key — a comp the user has explicitly set to square is a different thing
+    from one that never had an opinion only in the file, and re-opening the
+    dialog must show the choice they made.
+
+    This is the COMPOSITION's pixel aspect, not any layer's. Footage PAR was
+    already applied at import, so an anamorphic plate is a correctly-shaped
+    square-pixel layer before it reaches the comp; this must never be applied
+    to it a second time.
+  */
+  const pixelAspect = resolvePixelAspect(s.comp());
+  const setPixelAspect = (pixelAspect: number): void => s.update({ pixelAspect });
+  const parPresetId = findPixelAspectPreset(pixelAspect)?.id ?? '';
 
   // ── World ──────────────────────────────────────────────────────────
   //
@@ -251,6 +276,74 @@ function CompositionSettings({ close }: { close: () => void }): JSX.Element {
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/*
+              PIXEL ASPECT RATIO.
+
+              Sits in General beside frame rate because it is the same kind of
+              fact about the composition: what one of its units MEANS. The hint
+              is deliberately blunt about the two things people get wrong here —
+              that this is not footage interpretation, and that it changes the
+              preview only.
+            */}
+            <div className={styles.section}>
+              <div className={styles.label}>Pixel Aspect Ratio</div>
+              <div className={styles.row}>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Preset</span>
+                  <select
+                    className={styles.selectInput}
+                    value={parPresetId}
+                    onChange={(e) => {
+                      const preset = PIXEL_ASPECT_PRESETS.find((p) => p.id === e.target.value);
+                      setPixelAspect(preset ? preset.value : DEFAULT_PIXEL_ASPECT);
+                    }}
+                    aria-label="Pixel aspect ratio preset"
+                  >
+                    {/* Only while the number IS custom — a permanent "Custom"
+                        entry in a list of real formats is a value you can pick
+                        that does nothing. */}
+                    {parPresetId === '' && <option value="">Custom</option>}
+                    {PIXEL_ASPECT_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.fieldLabel}>Ratio</span>
+                  <ValueField
+                    value={pixelAspect}
+                    onChange={setPixelAspect}
+                    min={0.1}
+                    max={10}
+                    step={0.01}
+                    // 4, not the default 2: the field's draft is what a commit
+                    // parses, so a 2-decimal display would silently round
+                    // 0.9091 to 0.91 the first time anyone focused the field.
+                    precision={4}
+                    aria-label="Pixel aspect ratio"
+                  />
+                </label>
+              </div>
+
+              <div className={styles.hint} style={{ opacity: 0.6, marginTop: 4 }}>
+                {describePixelAspect(pixelAspect)}
+              </div>
+
+              <p className={styles.hint} style={{ marginTop: 4 }}>
+                The width of one COMPOSITION pixel divided by its height — for
+                authoring against a non-square delivery raster (D1/DV, HDV).
+                Imported footage is <strong>not</strong> affected: its own pixel
+                aspect is applied once when it is interpreted, so a plate is
+                already the right shape before it reaches the comp.
+              </p>
+              <p className={styles.hint} style={{ marginTop: 2 }}>
+                Preview only. Turn it on with <strong>View ▸ Pixel Aspect
+                Correction</strong>, which stretches the viewport so a circle
+                authored here looks round. No exporter writes a sample aspect
+                ratio, so exported frames are unchanged whatever this says.
+              </p>
             </div>
           </>
         )}
@@ -791,25 +884,39 @@ function CompositionSettings({ close }: { close: () => void }): JSX.Element {
         )}
       </div>
 
-      <div className={styles.footer}>
-        <Button variant="secondary" size="md" onClick={close} style={{ minWidth: 90 }}>
-          Cancel
-        </Button>
-        <Button variant="primary" size="md" leftIcon={<Icon name="check" size="md" />} onClick={close} style={{ minWidth: 90 }}>
-          Done
-        </Button>
-      </div>
     </div>
   );
 }
 
-/** Open the Composition Settings dialog as a modal. */
+/**
+ * Open Composition Settings as a FLOATING tool window: every field applies
+ * live, so there is nothing to confirm and no reason to scrim the comp it is
+ * changing. Drag it beside the viewport; it comes back where it was parked.
+ * Enter and Done both just close it.
+ */
 export function openCompositionSettings(): void {
   openModal({
     id: 'composition-settings',
     title: 'Composition settings',
     size: 'md',
-    render: (close) => <CompositionSettings close={close} />,
+    variant: 'floating',
+    resizable: true,
+    render: () => <CompositionSettings />,
+    footer: (close) => (
+      <DialogFooter
+        secondary={
+          <Button variant="secondary" size="md" onClick={close}>
+            Cancel
+          </Button>
+        }
+        primary={
+          <Button variant="primary" size="md" leftIcon={<Icon name="check" size="md" />} onClick={close}>
+            Done
+          </Button>
+        }
+      />
+    ),
+    primaryAction: (close) => close(),
   });
 }
 

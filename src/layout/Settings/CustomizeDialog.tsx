@@ -40,10 +40,11 @@ import type { KeyChord } from '@app-types/common';
 import { AiSettingsSection } from './AiSettingsSection';
 import { UpdatesControl } from './UpdatesControl';
 import { ObjectMatteControl } from './ObjectMatteControl';
+import { FilesTab } from './FilesTab';
 import { aiEnabled } from '@core/config/edition';
 import styles from './CustomizeDialog.module.css';
 
-type Tab = 'shortcuts' | 'tabs' | 'appearance' | 'ai';
+type Tab = 'shortcuts' | 'tabs' | 'appearance' | 'files' | 'ai';
 
 /** Modifier-only keydowns aren't a chord — keep listening until a real key. */
 function isModifierKey(key: string): boolean {
@@ -451,7 +452,8 @@ function AppearanceTab(): JSX.Element {
   const uiScale = usePreferenceStore((s) => s.uiScale ?? 1);
   const buttonSize = usePreferenceStore((s) => s.buttonSize ?? 'md');
   const iconSize = usePreferenceStore((s) => s.iconSize ?? 'md');
-  const sidebarDensity = usePreferenceStore((s) => s.sidebarDensity ?? 'default');
+  const density = usePreferenceStore((s) => s.density ?? 'default');
+  const highContrast = usePreferenceStore((s) => s.highContrast);
   const reduceMotion = usePreferenceStore((s) => s.editorReduceMotion);
   const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
   const confirmOnClose = usePreferenceStore((s) => s.confirmOnClose);
@@ -522,12 +524,27 @@ function AppearanceTab(): JSX.Element {
           <div className={styles.settingRow}>
             <div className={styles.settingInfo}>
               <span className={styles.settingTitle}>Interface Theme</span>
-              <span className={styles.settingDesc}>Toggle between dark studio mode and high-contrast light mode.</span>
+              <span className={styles.settingDesc}>Toggle between the dark studio theme and the light theme.</span>
             </div>
             <Button variant="secondary" size="sm" onClick={() => getThemeManager().toggle()}>
               <Icon name="theme" size="sm" />
               <span>Toggle Dark / Light</span>
             </Button>
+          </div>
+
+          <div className={styles.switchRow}>
+            <div className={styles.settingInfo}>
+              <span className={styles.settingTitle}>High Contrast</span>
+              <span className={styles.settingDesc}>
+                Black ground, white text, visible borders and a thicker focus ring.
+                Follows the OS automatically when the theme is set to System.
+              </span>
+            </div>
+            <Switch
+              checked={highContrast}
+              onChange={(e) => setPref('highContrast', e.target.checked)}
+              aria-label="High contrast theme"
+            />
           </div>
         </div>
       </div>
@@ -735,28 +752,34 @@ function AppearanceTab(): JSX.Element {
 
           <div className={styles.settingRow}>
             <div className={styles.settingInfo}>
-              <span className={styles.settingTitle}>Library Asset Grid Density</span>
-              <span className={styles.settingDesc}>Item spacing inside Footage and Asset browsing galleries.</span>
+              <span className={styles.settingTitle}>Interface Density</span>
+              <span className={styles.settingDesc}>Row height, control height, label size and panel padding, together.</span>
             </div>
-            <div className={styles.segmented}>
+            <div className={styles.segmented} role="radiogroup" aria-label="Interface density">
               <button
                 type="button"
-                className={cn(styles.segItem, sidebarDensity === 'compact' && styles.segItemActive)}
-                onClick={() => setPref('sidebarDensity', 'compact')}
+                role="radio"
+                aria-checked={density === 'compact'}
+                className={cn(styles.segItem, density === 'compact' && styles.segItemActive)}
+                onClick={() => setPref('density', 'compact')}
               >
                 Compact
               </button>
               <button
                 type="button"
-                className={cn(styles.segItem, sidebarDensity === 'default' && styles.segItemActive)}
-                onClick={() => setPref('sidebarDensity', 'default')}
+                role="radio"
+                aria-checked={density === 'default'}
+                className={cn(styles.segItem, density === 'default' && styles.segItemActive)}
+                onClick={() => setPref('density', 'default')}
               >
                 Default
               </button>
               <button
                 type="button"
-                className={cn(styles.segItem, sidebarDensity === 'comfortable' && styles.segItemActive)}
-                onClick={() => setPref('sidebarDensity', 'comfortable')}
+                role="radio"
+                aria-checked={density === 'comfortable'}
+                className={cn(styles.segItem, density === 'comfortable' && styles.segItemActive)}
+                onClick={() => setPref('density', 'comfortable')}
               >
                 Comfortable
               </button>
@@ -876,6 +899,7 @@ function tabsForEdition(): ReadonlyArray<{ id: Tab; label: string; icon: IconNam
     { id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard' as IconName },
     { id: 'tabs', label: 'Workspaces', icon: 'layout' as IconName },
     { id: 'appearance', label: 'Appearance', icon: 'palette' as IconName },
+    { id: 'files', label: 'Files', icon: 'folder' as IconName },
     ...(aiEnabled() ? [{ id: 'ai' as const, label: 'AI Engine', icon: 'ai' as IconName }] : []),
   ];
 }
@@ -984,6 +1008,8 @@ function Customize({ initialTab = 'shortcuts' }: { initialTab?: Tab }): JSX.Elem
           <ShortcutsTab />
         ) : tab === 'tabs' ? (
           <WorkspacesTab />
+        ) : tab === 'files' ? (
+          <FilesTab />
         ) : tab === 'ai' ? (
           <div className={styles.section}><AiSettingsSection /></div>
         ) : (

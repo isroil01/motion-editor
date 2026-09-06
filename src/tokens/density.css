@@ -1,0 +1,57 @@
+/**
+ * Density — one attribute, four scales.
+ *
+ * `[data-density]` on the document root is written by `applyUiPreferences()`
+ * in stores/preferenceStore.ts from the `density` preference. Everything that
+ * should breathe or tighten with it reads one of these tokens rather than a
+ * `--control-height-*` or `--space-*` value directly:
+ *
+ *   --density-control-height   the default control (buttons, selects, fields)
+ *   --density-row-height       list / tree / table rows
+ *   --density-font-size        row and label text
+ *   --density-panel-padding    the inset of a panel body
+ *   --density-panel-gap        the gap between stacked panel sections
+ *
+ * The `default` tier is spelled out on `:root` as well, so a document with no
+ * attribute (tests, the CLI's headless render page, a storybook) gets the
+ * default rather than nothing.
+ *
+ * `--sidebar-item-padding` / `--sidebar-item-font-size` are the two runtime
+ * variables `applyUiPreferences` used to inject for the old `sidebarDensity`
+ * preference. They now derive from the tier here, so the one stylesheet that
+ * read them (EditorLayout/panels.module.css) keeps working unchanged.
+ */
+
+:root,
+[data-density="default"] {
+  --density-control-height: var(--control-height-md);
+  --density-row-height:     var(--control-height-row);
+  --density-font-size:      var(--font-size-sm);
+  --density-panel-padding:  var(--space-4);
+  --density-panel-gap:      var(--space-3);
+
+  --sidebar-item-padding:   var(--space-4) var(--space-5);
+  --sidebar-item-font-size: var(--font-size-sm);
+}
+
+[data-density="compact"] {
+  --density-control-height: var(--control-height-sm);
+  --density-row-height:     var(--control-height-md);
+  --density-font-size:      var(--font-size-xs);
+  --density-panel-padding:  var(--space-3);
+  --density-panel-gap:      var(--space-2);
+
+  --sidebar-item-padding:   var(--space-2) var(--space-4);
+  --sidebar-item-font-size: var(--font-size-xs);
+}
+
+[data-density="comfortable"] {
+  --density-control-height: var(--control-height-lg);
+  --density-row-height:     var(--control-height-lg);
+  --density-font-size:      var(--font-size-md);
+  --density-panel-padding:  var(--space-5);
+  --density-panel-gap:      var(--space-4);
+
+  --sidebar-item-padding:   var(--space-5) var(--space-6);
+  --sidebar-item-font-size: var(--font-size-md);
+}

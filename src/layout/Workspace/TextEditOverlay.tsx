@@ -21,7 +21,7 @@ import { updateNodeComponentProp } from '@core/inspector/InspectorAPI';
 import { readRuns, reindexRuns } from '@core/text/richText';
 import { defaultAnimation } from '@motion/animation';
 import { runAnimEdit } from '@core/animation/animationCommands';
-import { useProjectStore } from '@stores/projectStore';
+import { getTime as getPlayheadTime } from '@stores/playbackClockStore';
 import { getRemappedTime } from '@core/timeline/TimelineController';
 
 const num = (v: unknown, fb: number): number => (typeof v === 'number' ? v : fb);
@@ -194,8 +194,7 @@ export function TextEditOverlay(): JSX.Element | null {
     // the renderer reads the data track, so writing the static prop would be
     // an edit that changes nothing on screen.
     if (node && textComp && defaultAnimation.isDataAnimated(node.id, 'text.source')) {
-      const tab = useProjectStore.getState();
-      const t = tab.tabs[tab.activeTabId ?? '']?.time ?? 0;
+      const t = getPlayheadTime();
       const layerT = getRemappedTime(node.id, t);
       if (next !== defaultAnimation.sampleData(node.id, 'text.source', layerT)) {
         runAnimEdit('Edit Source Text keyframe', () => {

@@ -98,3 +98,29 @@ export function describeShapes(left: KeyframeShape, right: KeyframeShape): strin
   };
   return left === right ? name[left] : `${name[left]} in · ${name[right]} out`;
 }
+
+// ── Interpolation colour ───────────────────────────────────────────
+/** The four colour families `--color-timeline-kf-*` names. */
+export type KeyframeInterp = 'linear' | 'bezier' | 'hold' | 'auto';
+
+/**
+ * The `data-interp` a glyph carries, which the stylesheet colours through
+ * `--color-timeline-kf-<interp>`. The shape family and the colour family are
+ * the same partition under different names: the glyph says "hourglass", the
+ * token says "bezier", and both mean the eased kinds.
+ */
+export function interpOfShape(shape: KeyframeShape): KeyframeInterp {
+  return shape === 'ease' ? 'bezier' : shape;
+}
+
+/**
+ * Which colour a keyframe's diamond takes. The OUT side names the segment that
+ * leaves this key, which is the one the eye follows — except on the last
+ * keyframe, which has no out segment and shows the one that arrived.
+ */
+export function keyframeInterp(
+  shapes: { left: KeyframeShape; right: KeyframeShape },
+  isLast: boolean,
+): KeyframeInterp {
+  return interpOfShape(isLast ? shapes.left : shapes.right);
+}

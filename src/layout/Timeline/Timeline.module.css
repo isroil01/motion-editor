@@ -8,13 +8,11 @@
   display: grid;
   grid-template-columns: auto auto 1fr;
   /*
-   * Two rows now: the edit-tool row spans the full width above everything, and
-   * the header column / resizer / lanes fill the rest. `auto` rather than a
-   * fixed track so the row is exactly as tall as the buttons in it — its height
-   * is also a TS constant (`TIMELINE_TOOLS_HEIGHT`), because the lanes' filler
-   * height is derived from the panel height minus the chrome above them.
+   * One row: the header column / resizer / lanes. The edit-tool row that used
+   * to span above them is the PANEL's toolbar now (`BottomTimeline`), so this
+   * grid holds only the track list and its ruler.
    */
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -59,6 +57,11 @@
   /* The legend reads "TrkMat" now — AE's name for it — rather than a bare "T". */
   --tl-col-matte: 58px;
   --tl-col-parent: 120px;
+  /* In / Out / Duration, off by default. 72px each — the same number
+     `TIMELINE_EXTRA_COLUMNS` in `timelineColumns.ts` carries, and the two have
+     to agree or `headerWidthFor` sizes the header for a layout the rows do not
+     use. Five digits of tabular mono plus air. */
+  --tl-col-extra: 72px;
   /* One hairline between column groups, drawn as a left border with equal air
      on both sides. AE rules every group boundary, not just the one before
      Mode — without them the switches read as part of the layer name. */
@@ -86,8 +89,8 @@
    * ground. Same 2px dark rule the horizontal divisions use, so the panel's
    * boundaries are one system rather than three weights.
    *
-   * `.searchBarCol` continues this line upward through the sub-header row and
-   * must match it exactly.
+   * The panel's toolbar above is one flat row now, so this line starts at
+   * the ruler rather than continuing up through it.
    */
   border-right: 2px solid var(--color-timeline-ruler-border);
   box-shadow: none;
@@ -163,10 +166,20 @@
  * DOM order) while staying under `.durationHandle` at 25, which spans ruler
  * AND lanes and therefore cannot live inside a sticky box.
  */
-.rulerStack {
+/* The sticky wrapper. The RULER STACK inside it stays `relative` so its
+   absolutely-positioned overlays (cache bars, work-area band, the playhead
+   grabber) keep measuring from the ruler's own top edge — inserting the marker
+   lane above them would otherwise have shifted every one of those `top`
+   values by the lane's height. */
+.stickyChrome {
   position: sticky;
   top: 0;
   z-index: 20;
+  background: var(--color-timeline-ruler-bg);
+}
+
+.rulerStack {
+  position: relative;
   /* Not `overflow: hidden` — the cache bars deliberately overhang the ruler's
      bottom edge by 2-4px so they read as a strip attached to it. */
 }
@@ -328,6 +341,25 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
 }
 
+/* A locked layer's bar: still selectable, never draggable. The cursor is the
+   whole message — the drag used to start and be refused on release. */
+.clipLocked,
+.clipLocked:hover {
+  cursor: not-allowed;
+  filter: saturate(0.6);
+}
+
+/* The waveform, drawn under the label. Was an inline style block per bar. */
+.clipWave {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
 .clipSelected::before {
   background: var(--color-selection);
   opacity: 1;
@@ -386,7 +418,9 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 10px;
+  /* Set per bar by ClipBar from `clipHandleLayout`: 10px on a wide bar,
+     narrower on a bar that must keep a grabbable body. */
+  width: var(--clip-handle-w, 10px);
   cursor: ew-resize;
   z-index: 3;
   transition: background-color 100ms ease, opacity 100ms ease;
@@ -411,6 +445,11 @@
   opacity: 1;
   background-color: rgba(255, 255, 255, 0.18);
 }
+
+/* A bar narrower than three handle widths (`data-narrow`, set by ClipBar):
+   the handles shrink — via `--clip-handle-w` — so the BODY can be grabbed. At
+   10px each, two handles covered a 20px bar entirely and it could not be
+   moved; below the point where any body would be left they are not rendered. */
 
 .clipHandle:hover {
   opacity: 1;
@@ -546,12 +585,44 @@
 }
 
 
-/* Transparent hit padding — enlarged for comfortable grab & hold. */
+/* Transparent hit padding — a 24px square around the 12px glyph, so a
+   diamond is comfortable to hit without being drawn any bigger. */
 .keyframe::before {
   content: "";
   position: absolute;
-  inset: -8px;
+  inset: -6px;
   cursor: grab;
+}
+
+/* ── Interpolation colour (AE) ─────────────────────────────────────
+   `data-interp` names the OUT segment's family; the fill follows it so a row of
+   diamonds reads as its curve at a glance. Tokens: TIMELINE-KF-TOKENS in
+   domain.css. Hover / selection / drag states below override the fill. */
+.keyframe[data-interp='linear'] .keyframeGlyph path { fill: var(--color-timeline-kf-linear); }
+.keyframe[data-interp='bezier'] .keyframeGlyph path { fill: var(--color-timeline-kf-bezier); }
+.keyframe[data-interp='auto'] .keyframeGlyph path   { fill: var(--color-timeline-kf-auto); }
+.keyframe[data-interp='hold'] .keyframeGlyph path   { fill: var(--color-timeline-kf-hold); }
+
+/* A hold keyframe's TAIL — the flat stretch until the next key. A short bar
+   to the right of the glyph, in the hold colour, so a hold is legible even
+   when the diamond's right half is hidden under the selection ring. */
+.keyframe[data-hold]::after {
+  content: "";
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  width: 8px;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--color-timeline-kf-hold);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.keyframeLocked,
+.keyframeLocked::before,
+.keyframeLocked:hover {
+  cursor: not-allowed;
 }
 
 .keyframe:hover {
@@ -587,7 +658,10 @@
 
 .keyframeSelected .keyframeGlyph path {
   fill: var(--color-primary);
-  stroke: var(--color-primary);
+  /* A 2px RING in the selection colour, not just a fill change — a selected
+     linear key and an unselected bezier one used to be the same blue. */
+  stroke: var(--color-timeline-selected);
+  stroke-width: 2;
 }
 
 .keyframeRoving.keyframeSelected {
@@ -602,18 +676,124 @@
   pointer-events: none;
 }
 
-/* Only the flag at the top is interactive — its title tooltip works while the
-   full-height guide stays click-through so it never blocks lane interaction.
-   Centered on the marker line (fixes the prior left-edge offset). */
-.markerFlag {
+/* ── The marker LANE, above the ruler ────────────────────────────
+   The chips you can grab. The full-height `.marker` guide below stays
+   click-through, so nothing in the lanes competes with a gesture on a row. */
+.markerLane {
+  position: relative;
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.markerChip {
   position: absolute;
-  top: 0;
-  left: 0;
-  transform: translateX(-50%);
+  top: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 160px;
+  height: 14px;
+  padding: 0 4px 0 2px;
+  transform: translateX(-4px);
+  border-radius: 2px 6px 6px 2px;
+  background: var(--color-timeline-marker-blue);
+  color: var(--color-primary-foreground);
+  font-size: var(--font-size-micro, 10px);
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.markerChip:hover {
+  filter: brightness(1.15);
+}
+
+.markerChipDragging {
+  cursor: grabbing;
+  z-index: 2;
+  box-shadow: var(--shadow-md);
+}
+
+.markerChipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The editor. `position: fixed` in CLIENT coordinates because it is opened
+   from a chip inside a horizontally scrolling lane — anchored in lane content
+   coords it would be left behind by the first scroll under it. */
+.markerEditor {
+  position: fixed;
+  z-index: var(--z-index-popover);
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-size-sm);
+}
+
+.markerEditorRow {
   display: grid;
-  place-items: center;
-  pointer-events: auto;
-  cursor: default;
+  grid-template-columns: 64px 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+.markerEditorRow input {
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 3px);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.markerSwatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.markerSwatch {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 3px);
+  cursor: pointer;
+}
+
+.markerSwatchActive {
+  border-color: var(--color-selection);
+  box-shadow: 0 0 0 2px var(--color-selection);
+}
+
+.markerEditorActions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.markerEditorActions button {
+  padding: 3px 10px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 3px);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.markerEditorActions button:hover {
+  background: var(--color-hover);
 }
 
 /* A LAYER marker — a small pennant sitting on its own layer's row, distinct
@@ -731,6 +911,24 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+/* The layer's LABEL colour, as a 3px bar down the row's left edge — the one
+   place the colour was set (`--track-color`) but never read. `transparent`
+   for an unlabelled layer draws nothing. */
+.trackHeader::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--track-color, transparent);
+  pointer-events: none;
+}
+
+.trackHeader[data-locked] .dragHandle {
+  cursor: not-allowed;
+}
+
 .trackHeaderSelected {
   background: rgba(41, 136, 255, 0.12);
 }
@@ -813,6 +1011,38 @@
   margin-left: var(--tl-col-divider-space);
   padding-left: var(--tl-col-divider-space);
   border-left: var(--tl-col-rule);
+}
+
+/**
+ * In / Out / Duration — the optional frame columns.
+ *
+ * Right-aligned mono, because they are a column of NUMBERS to be compared down
+ * the panel, and left-aligned digits of differing width do not line up on the
+ * place value. Widths mirror `TIMELINE_EXTRA_COLUMNS` in `timelineColumns.ts`
+ * (72px + the gap and rule `extraColumnsWidth` accounts for) — the two halves
+ * of the column model have to agree or `headerWidthFor` sizes the header for a
+ * layout the rows do not use.
+ */
+.extraCol,
+.colHeadExtra {
+  width: var(--tl-col-extra);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  margin-left: var(--tl-col-divider-space);
+  padding-left: var(--tl-col-divider-space);
+  border-left: var(--tl-col-rule);
+}
+
+.colHeadExtra {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-sans);
 }
 
 /**
@@ -1744,20 +1974,6 @@
 }
 
 
-/* ── Edit-tool row ────────────────────────────────────────────────
-   Spans both columns above the ruler. It carries the panel's top boundary, so
-   it uses the same 2px dark rule the header/lanes division does rather than a
-   third weight of hairline. */
-.toolRow {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  background: var(--color-panel);
-  border-bottom: 2px solid var(--color-timeline-ruler-border);
-  overflow: hidden;
-}
-
 /* ── Razor guide ──────────────────────────────────────────────────
    Where a click would cut. Deliberately NOT one of the snap-indicator colours:
    those report where a drag landed, this predicts where a click will land, and
@@ -1960,8 +2176,9 @@
 .transitionError {
   position: absolute;
   z-index: 61;
-  /* Just under the tool row — `TIMELINE_TOOLS_HEIGHT` in TS, 30px. */
-  top: 34px;
+  /* Just under the ruler's top edge — the tool row it used to sit under is
+     the panel's toolbar now, outside this component. */
+  top: var(--space-1);
   left: var(--space-3);
   right: var(--space-3);
   padding: var(--space-1) var(--space-3);
@@ -1972,4 +2189,191 @@
   font-size: var(--font-size-micro);
   line-height: 1.45;
   cursor: pointer;
+}
+
+/* ── "What changed" heat ─────────────────────────────────────────
+   A tint drawn OVER the rows, never a property of a row: a clip bar is
+   memoised precisely so it does not re-render for something it does not
+   depend on, and a `hot` prop would defeat that for every bar on every AI
+   run. Both are click-through — the answer to "what changed" must never sit
+   between the pointer and the thing it is pointing out. */
+.heatClip {
+  position: absolute;
+  border-radius: 4px;
+  background: var(--color-timeline-heat);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning, #e0a63a) 80%, transparent);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.heatKeyframe {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  background: var(--color-timeline-heat);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ── Transcript lane ─────────────────────────────────────────────
+   Chips at the words' own times. Under the ruler, inside the sticky chrome,
+   so the words stay beside the picture they describe at any scroll. */
+.transcriptLane {
+  position: relative;
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.transcriptWord {
+  position: absolute;
+  top: 2px;
+  height: 16px;
+  padding: 0 3px;
+  border: none;
+  border-radius: 2px;
+  background: var(--color-timeline-transcript-word);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro, 10px);
+  line-height: 16px;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.transcriptWord:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+.transcriptWordSelected {
+  background: var(--color-timeline-transcript-word-selected);
+  color: var(--color-primary-foreground);
+}
+
+/* An estimated timing is drawn as such rather than quietly: the chip is
+   positioned by dividing a sentence across its words, and a user cutting to
+   the frame has to know which chips are a measurement and which are a guess. */
+.transcriptWordEstimated {
+  border-bottom: 1px dotted var(--color-text-tertiary);
+}
+
+.transcriptWordText {
+  display: block;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.transcriptDelete {
+  position: absolute;
+  top: 1px;
+  height: 18px;
+  padding: 0 8px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm, 3px);
+  background: var(--color-surface-1);
+  color: var(--color-danger);
+  font-size: var(--font-size-micro, 10px);
+  cursor: pointer;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.transcriptDelete:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* ── The pinned category heading ─────────────────────────────────
+   One extra copy of the heading, drawn over the rows it names. Opaque and
+   shadowed so it reads as sitting ABOVE them rather than as a duplicate row
+   that has somehow got out of order. */
+.categoryHeaderSticky {
+  background: var(--color-surface-2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Row height grip ─────────────────────────────────────────────
+   On the seam where the header column meets the lanes, so the two size
+   gestures — column width, row height — share one edge. */
+.rowHeightGrip {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 16px;
+  color: var(--color-text-tertiary);
+  cursor: ns-resize;
+  opacity: 0.5;
+  z-index: 1;
+}
+
+.rowHeightGrip:hover {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+/* ── Quiet switches ──────────────────────────────────────────────
+   Seven glyphs per row that are OFF on almost every layer read as noise at a
+   glance. `visibility`, not `display`, so the column keeps its width and the
+   row does not reflow as the pointer crosses it — a track list that shifts
+   sideways under the cursor is worse than one that is busy. */
+.aeSwitchesCol[data-quiet] > * {
+  visibility: hidden;
+}
+
+.trackHeader:hover .aeSwitchesCol[data-quiet] > *,
+.aeSwitchesCol[data-quiet]:focus-within > * {
+  visibility: visible;
+}
+
+.switchPin {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.switchPin:hover {
+  color: var(--color-text-primary);
+}
+
+.switchPin[data-on] {
+  color: var(--color-primary);
+}
+
+/* A pinned row keeps everything — including the control that unpins it,
+   which is otherwise the one thing you cannot reach without hovering the row
+   you just told to stop needing a hover. */
+.aeSwitchesCol:not([data-quiet]) .switchPin {
+  visibility: visible;
+}
+
+/* ── Trim-handle hit region ──────────────────────────────────────
+   The handle DRAWS as a 10px edge and HITS as ~24. The outward half of the
+   pad is clipped by the bar's own `overflow: hidden`, so the extra reach is
+   inward — which is the side the pointer approaches from anyway.
+
+   On a narrow bar the pad collapses with the handle: below three handle
+   widths the body would otherwise be unreachable, and moving a clip is the
+   gesture you lose. That precedence is the same rule `[data-narrow]` states
+   for the visual handle above. */
+.clipHandle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -7px;
+}
+
+.clip[data-narrow] .clipHandle::before {
+  inset: 0;
 }

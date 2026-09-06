@@ -5,9 +5,10 @@
  * The `@motion/timeline` engine (via {@link TimelineController}) is the single
  * authority for `time` / `playing`; it advances its own playhead on `tick(dtMs)`
  * (looping within its loop range or auto-pausing at the end) and mirrors the
- * result into the workspace store, which the rest of the UI reads. This hook is
- * just the wall-clock pump: on each frame while playing it feeds the engine the
- * elapsed milliseconds.
+ * result into `playbackClockStore` — the transient clock the UI reads through
+ * `useCurrentTime` — with the project store's tab record refreshed only at
+ * coarse moments. This hook is just the wall-clock pump: on each frame while
+ * playing it feeds the engine the elapsed milliseconds.
  *
  * Scheduling is visibility-aware: requestAnimationFrame while visible (smooth,
  * vsync-aligned), falling back to a timer when the window is hidden — rAF is

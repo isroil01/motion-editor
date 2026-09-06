@@ -69,6 +69,22 @@ export interface RegionOfInterest {
 /** AE's Grid Style options (Preferences → Grids & Guides). */
 export type GridStyle = 'lines' | 'dashed' | 'dots';
 
+/**
+ * A named viewpoint — the camera the viewport looks through plus the pan/zoom
+ * it is framed at, and for a custom view its stored orbit. Saved per
+ * COMPOSITION (keyed by comp id) and persisted in the document beside the
+ * rest of the guides settings, so a project reopens with its bookmarks.
+ */
+export interface CameraBookmark {
+  /** 1–9: the `Ctrl+Alt+<slot>` key that recalls it. */
+  slot: number;
+  name: string;
+  mode: Camera3dMode;
+  framing: { center: { x: number; y: number }; zoom: number };
+  /** Present when `mode` is a custom view — its orbit at the time of saving. */
+  customView?: CustomViewParams;
+}
+
 export interface GuidesSettings {
   rulers: boolean;
   /**
@@ -116,6 +132,14 @@ export interface GuidesSettings {
   /** Motion-path frame-dot size: subtle / normal / bold ('off' hides dots but
    *  keeps the curve). Pro users tune this to taste. */
   motionPathDots: 'off' | 'small' | 'medium' | 'large';
+  /** Camera bookmarks, comp id → slots. Absent on older documents. */
+  cameraBookmarks?: Record<string, CameraBookmark[]>;
+  /**
+   * Opacity applied to the viewport's reference chrome — guides, grid, the
+   * 3D gizmo and smart guides — 0.2…1. Persisted with the guides because it is
+   * a property of how THIS document's overlays read, not of the machine.
+   */
+  overlayOpacity?: number;
 }
 
 export type Gizmo3dState = 'universal' | 'position' | 'scale' | 'rotation';
@@ -183,6 +207,16 @@ interface GuidesStore extends GuidesSettings {
   smartGuides: boolean;
   /** Active left-drag camera tool (C-key cycling), 'none' = selection. */
   cameraTool: CameraTool;
+  /**
+   * Whether user guides are DRAWN (and grabbable). Locking is per guide in the
+   * engine (`Guides.setLocked`); this is the View ▸ Show Guides switch, which
+   * AE keeps separate from lock. Session state.
+   */
+  guidesVisible: boolean;
+  /** See `GuidesSettings.cameraBookmarks`. */
+  cameraBookmarks: Record<string, CameraBookmark[]>;
+  /** See `GuidesSettings.overlayOpacity`. */
+  overlayOpacity: number;
 
   settings: () => GuidesSettings;
   restore: (s: Partial<GuidesSettings>) => void;
@@ -233,8 +267,21 @@ interface GuidesStore extends GuidesSettings {
   setChannel: (channel: ViewChannel) => void;
   toggleMotionPath: () => void;
   setMotionPathDots: (size: GuidesSettings['motionPathDots']) => void;
+  toggleGuidesVisible: () => void;
+  setGuidesVisible: (on: boolean) => void;
+  setOverlayOpacity: (opacity: number) => void;
+  /** Save (replace) a bookmark slot for a comp. */
+  saveCameraBookmark: (compId: string, bookmark: CameraBookmark) => void;
+  removeCameraBookmark: (compId: string, slot: number) => void;
+  renameCameraBookmark: (compId: string, slot: number, name: string) => void;
   /** Stable string that changes whenever any guide toggles (render key). */
   key: () => string;
+}
+
+/** Clamp an overlay opacity into the range the painters honour. */
+export function clampOverlayOpacity(v: number): number {
+  if (!Number.isFinite(v)) return 1;
+  return Math.max(0.2, Math.min(1, v));
 }
 
 /**
@@ -266,6 +313,33 @@ export const DEFAULT_GUIDES_SETTINGS: GuidesSettings = {
   motionPathDots: 'small',
 };
 
+/** Keep only well-formed bookmarks — a document is untrusted input. */
+function sanitizeBookmarks(raw: unknown): Record<string, CameraBookmark[]> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, CameraBookmark[]> = {};
+  for (const [compId, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue;
+    const ok: CameraBookmark[] = [];
+    for (const b of list as unknown[]) {
+      if (!b || typeof b !== 'object') continue;
+      const bm = b as Partial<CameraBookmark>;
+      if (typeof bm.slot !== 'number' || bm.slot < 1 || bm.slot > 9) continue;
+      if (typeof bm.mode !== 'string') continue;
+      const f = bm.framing;
+      if (!f || typeof f.zoom !== 'number' || !f.center || typeof f.center.x !== 'number' || typeof f.center.y !== 'number') continue;
+      ok.push({
+        slot: Math.round(bm.slot),
+        name: typeof bm.name === 'string' ? bm.name : `Bookmark ${bm.slot}`,
+        mode: bm.mode as Camera3dMode,
+        framing: { center: { x: f.center.x, y: f.center.y }, zoom: f.zoom },
+        ...(bm.customView ? { customView: bm.customView } : {}),
+      });
+    }
+    if (ok.length) out[compId] = ok.sort((a, c) => a.slot - c.slot);
+  }
+  return out;
+}
+
 export const useGuidesStore = create<GuidesStore>((set, get) => ({
   ...DEFAULT_GUIDES_SETTINGS,
   camera3dMode: 'active',
@@ -284,6 +358,36 @@ export const useGuidesStore = create<GuidesStore>((set, get) => ({
   draft3d: false,
   smartGuides: true,
   cameraTool: 'none',
+  guidesVisible: true,
+  cameraBookmarks: {},
+  overlayOpacity: 1,
+
+  toggleGuidesVisible: () => set((s) => ({ guidesVisible: !s.guidesVisible })),
+  setGuidesVisible: (on) => set({ guidesVisible: on }),
+  setOverlayOpacity: (opacity) => set({ overlayOpacity: clampOverlayOpacity(opacity) }),
+  saveCameraBookmark: (compId, bookmark) =>
+    set((s) => {
+      const slot = Math.max(1, Math.min(9, Math.round(bookmark.slot)));
+      const list = (s.cameraBookmarks[compId] ?? []).filter((b) => b.slot !== slot);
+      list.push({ ...bookmark, slot });
+      list.sort((a, b) => a.slot - b.slot);
+      return { cameraBookmarks: { ...s.cameraBookmarks, [compId]: list } };
+    }),
+  removeCameraBookmark: (compId, slot) =>
+    set((s) => {
+      const list = (s.cameraBookmarks[compId] ?? []).filter((b) => b.slot !== slot);
+      const next = { ...s.cameraBookmarks };
+      if (list.length) next[compId] = list;
+      else delete next[compId];
+      return { cameraBookmarks: next };
+    }),
+  renameCameraBookmark: (compId, slot, name) =>
+    set((s) => ({
+      cameraBookmarks: {
+        ...s.cameraBookmarks,
+        [compId]: (s.cameraBookmarks[compId] ?? []).map((b) => (b.slot === slot ? { ...b, name } : b)),
+      },
+    })),
 
   toggleRulers: () => set((s) => ({ rulers: !s.rulers })),
   toggleGrid: () => set((s) => ({ grid: !s.grid })),
@@ -339,10 +443,15 @@ export const useGuidesStore = create<GuidesStore>((set, get) => ({
     const {
       rulers, grid, gridSpacing, gridSubdivisions, snapToGrid, gridColor, gridStyle,
       proportionalGrid, proportionalColumns, proportionalRows, safeArea, motionPathVisible, motionPathDots,
+      cameraBookmarks, overlayOpacity,
     } = get();
     return {
       rulers, grid, gridSpacing, gridSubdivisions, snapToGrid, gridColor, gridStyle,
       proportionalGrid, proportionalColumns, proportionalRows, safeArea, motionPathVisible, motionPathDots,
+      // Absent when empty / default, so a document that never used them reads
+      // back byte-identical to one written before they existed.
+      ...(Object.keys(cameraBookmarks).length ? { cameraBookmarks } : {}),
+      ...(overlayOpacity !== 1 ? { overlayOpacity } : {}),
     };
   },
   restore: (s) => {
@@ -363,6 +472,11 @@ export const useGuidesStore = create<GuidesStore>((set, get) => ({
     if (typeof s.proportionalColumns === 'number') get().setProportionalColumns(s.proportionalColumns);
     if (typeof s.proportionalRows === 'number') get().setProportionalRows(s.proportionalRows);
     if (typeof s.gridColor === 'string') get().setGridColor(s.gridColor);
+    if (typeof s.overlayOpacity === 'number') get().setOverlayOpacity(s.overlayOpacity);
+    else set({ overlayOpacity: 1 });
+    // Bookmarks are replaced wholesale: a document carries its own set, and a
+    // blank document carries none.
+    set({ cameraBookmarks: sanitizeBookmarks(s.cameraBookmarks) });
     // Legacy projects stored one `gridDivisions` (cells per axis) with no
     // absolute/proportional split. That value only ever described a
     // comp-relative division, so it restores onto the PROPORTIONAL grid — the

@@ -6,18 +6,27 @@
  */
 
 [data-theme="light"] {
-  /* ── Surfaces (light → elevated) ───────────────────────────── */
-  --color-background:        var(--color-slate-50);
-  --color-surface-0:         var(--color-slate-0);
-  --color-surface-1:         var(--color-slate-50);
-  --color-surface-2:         var(--color-slate-100);
-  --color-surface-3:         var(--color-slate-200);
-  --color-surface-raised:    var(--color-slate-0);
-  --color-panel:             var(--color-slate-50);
-  --color-panel-header:      var(--color-slate-50);
-  --color-toolbar:           var(--color-slate-50);
-  --color-statusbar:         var(--color-slate-100);
-  --color-titlebar:          var(--color-slate-0);
+  /* ── Surface contract (see dark.css) — each level one step DARKER ── */
+  --surface-0:        var(--color-slate-0);     /* #ffffff */
+  --surface-1:        var(--color-slate-50);    /* #f5f6f9 */
+  --surface-2:        var(--color-slate-100);   /* #ebedf2 */
+  --surface-3:        var(--color-slate-150);   /* #e2e5ec */
+  --surface-hover:    var(--color-black-a04);
+  --surface-active:   var(--color-black-a08);
+  --surface-selected: var(--color-primary-subtle);
+
+  /* ── Surfaces (aliases onto the contract) ──────────────────── */
+  --color-background:        var(--surface-1);
+  --color-surface-0:         var(--surface-0);
+  --color-surface-1:         var(--surface-1);
+  --color-surface-2:         var(--surface-2);
+  --color-surface-3:         var(--surface-3);
+  --color-surface-raised:    var(--surface-0);  /* light popovers stay white */
+  --color-panel:             var(--surface-1);
+  --color-panel-header:      var(--surface-1);
+  --color-toolbar:           var(--surface-1);
+  --color-statusbar:         var(--surface-2);
+  --color-titlebar:          var(--surface-0);
   --color-workspace:         var(--color-slate-200);
   --color-pasteboard:        #202020; /* comp surround — one fixed NEUTRAL (zero blue
                                           tint), shared across themes; not
@@ -44,8 +53,8 @@
   --color-text-disabled:     var(--color-slate-300);
 
   /* ── Interactive states ────────────────────────────────────── */
-  --color-hover:             var(--color-black-a04);
-  --color-active:            var(--color-black-a08);
+  --color-hover:             var(--surface-hover);
+  --color-active:            var(--surface-active);
   --color-selected:          var(--color-selection);
   --color-selected-hover:    var(--color-selection-hover);
   --color-pressed:           var(--color-black-a16);
@@ -87,9 +96,9 @@
   --color-modified:          var(--color-amber-600);
 
   /* ── Status (semantic only) ────────────────────────────────── */
-  --color-success:           #1f9e6d;
+  --color-success:           var(--color-emerald-600);
   --color-warning:           var(--color-amber-600);
-  --color-danger:            #d63d4e;
+  --color-danger:            var(--color-rose-600);
   --color-info:              var(--color-azure-600);
 
   /* ── Focus / accessibility ─────────────────────────────────── */
@@ -97,6 +106,6 @@
 
   /* ── Overlays ──────────────────────────────────────────────── */
   --color-overlay-scrim:     rgba(15, 20, 30, 0.4);
-  --color-overlay-hover:     var(--color-black-a04);
-  --color-overlay-active:    var(--color-black-a08);
+  --color-overlay-hover:     var(--surface-hover);
+  --color-overlay-active:    var(--surface-active);
 }

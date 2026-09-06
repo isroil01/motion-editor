@@ -435,10 +435,38 @@ describe('warnings', () => {
     const w = planLottieImport(json).warnings;
     expect(w.some((s) => /mask/i.test(s))).toBe(true);
     expect(w.some((s) => /blend mode/i.test(s))).toBe(true);
-    expect(w.some((s) => /trim-path/i.test(s))).toBe(true);
+    // Trim paths IMPORT now (2026-09-05) — no warning for them.
+    expect(w.some((s) => /trim-path/i.test(s))).toBe(false);
     expect(w.some((s) => /repeater/i.test(s))).toBe(true);
     expect(w.some((s) => /time stretch/i.test(s))).toBe(true);
-    // Deduplicated: a file with forty identical trim-paths says it once.
+    // Deduplicated: a file with forty identical repeaters says it once.
     expect(new Set(w).size).toBe(w.length);
+  });
+});
+
+describe('trim paths', () => {
+  it('a `tm` becomes a trim on every drawable in its group, offset in percent', () => {
+    const json: LottieJson = {
+      fr: 30, op: 60,
+      layers: [
+        { ty: 4, ind: 1, nm: 'A',
+          shapes: [{ ty: 'gr', it: [
+            path(0), path(10),
+            { ty: 'tm', s: { a: 0, k: 10 }, e: { a: 1, k: [{ t: 0, s: [0] }, { t: 60, s: [100] }] }, o: { a: 0, k: 180 }, m: 2 },
+          ] }] },
+      ],
+    };
+    const plan = planLottieImport(json);
+    const shapes = plan.layers.filter((l) => l.kind === 'shape');
+    expect(shapes.length).toBe(2);
+    for (const s of shapes) {
+      expect(s.trim).toBeDefined();
+      expect(s.trim!.start).toBe(10);
+      expect(s.trim!.end).toBe(0); // first keyframe of the animated end
+      expect(s.trim!.offset).toBeCloseTo(50); // 180° = half a turn = 50 %
+      expect(s.trim!.multiple).toBe('individually');
+      expect(s.trim!.tracks.map((t) => t.prop)).toEqual(['trim.end']);
+      expect(s.trim!.tracks[0]!.keyframes.map((k) => [k.t, k.value])).toEqual([[0, 0], [2, 100]]);
+    }
   });
 });

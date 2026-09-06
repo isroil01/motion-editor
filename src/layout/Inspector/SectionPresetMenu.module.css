@@ -1,0 +1,67 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  flex: none;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--control-height-2xs);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-family: inherit;
+  font-size: var(--font-size-micro);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+}
+
+.triggerText {
+  line-height: 1;
+}
+
+.nameRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.nameInput {
+  width: 110px;
+  height: var(--control-height-2xs);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-field-border);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-micro);
+}
+
+.nameBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.nameBtn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+}

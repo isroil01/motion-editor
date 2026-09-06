@@ -146,6 +146,7 @@ function ProjectLoader({ projectId }: { projectId: string }): null {
 import { Suspense, lazy, useState } from 'react';
 import { LoadingScreen } from '@components/LoadingScreen';
 import { StartScreen } from '@layout/Start/StartScreen';
+import { setStartScreenVisible } from '@stores/onboardingStore';
 import { cloudProjectsEnabled } from '@core/config/edition';
 
 const LazyEditorShell = lazy(() => import('../App').then(m => ({ default: m.EditorShell })));
@@ -167,7 +168,14 @@ function LocalStart(): JSX.Element | null {
   // subscribing would re-show the screen the moment a project is CLOSED —
   // mid-session, over a canvas the user is still looking at.
   const [hadProject] = useState(() => getProjectManager().getState().current !== null);
-  if (cloudProjectsEnabled() || dismissed || hadProject) return null;
+  const visible = !(cloudProjectsEnabled() || dismissed || hadProject);
+  // The onboarding tour must not auto-start behind this screen; tell the
+  // store while it is up and again when it goes (dismissal or unmount).
+  useEffect(() => {
+    setStartScreenVisible(visible);
+    return () => setStartScreenVisible(false);
+  }, [visible]);
+  if (!visible) return null;
   return <StartScreen onDismiss={() => setDismissed(true)} />;
 }
 

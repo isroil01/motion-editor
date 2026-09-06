@@ -80,6 +80,8 @@ interface LottieShapeItem {
   p?: LottieProp; // position (tr) / centre (rc, el)
   a?: LottieProp; // anchor (tr)
   sk?: LottieProp; // skew (tr) — warned, not applied
+  /** Trim Paths mode (tm): 1 = simultaneously, 2 = individually. */
+  m?: number;
   nm?: string;
 }
 interface LottieLayer {
@@ -166,6 +168,20 @@ export interface PlannedFill {
   stops?: PlannedStop[];
   opacityStops?: Array<{ offset: number; opacity: number }>;
 }
+/**
+ * A Lottie `tm` (Trim Paths) in force for a drawable — the editor's trim
+ * path operator. Start/end/offset are the editor's units (all percent; Lottie's
+ * offset is degrees, 360 = one full turn, converted here). Animated channels
+ * arrive as tracks whose props are `trim.start` / `trim.end` / `trim.offset`;
+ * the apply pass re-keys them onto the operator it creates.
+ */
+export interface PlannedTrim {
+  start: number;
+  end: number;
+  offset: number;
+  multiple: 'individually' | 'simultaneously';
+  tracks: PlannedScalarTrack[];
+}
 export interface PlannedStroke {
   color: string;
   width: number;
@@ -196,6 +212,8 @@ export interface PlannedLayer {
   fill?: PlannedFill;
   /** Resolved stroke. */
   stroke?: PlannedStroke;
+  /** Trim Paths in force for this drawable (Lottie `tm`). */
+  trim?: PlannedTrim;
   /**
    * Visibility window in COMPOSITION SECONDS, from the layer's `ip`/`op`
    * (offset by any enclosing precomp `st`, and clipped to the precomp's own
@@ -386,6 +404,7 @@ function planGradient(
 interface PaintScope {
   fill?: PlannedFill;
   stroke?: PlannedStroke;
+  trim?: PlannedTrim;
 }
 
 /** Local bbox of a drawable, for normalising radial-gradient geometry. */
@@ -484,9 +503,26 @@ function planShapeItems(
         }
         break;
       }
-      case 'tm':
-        ctx.warnings.push(`Layer "${ctx.hostName}": trim-path animation not imported (the full path is drawn).`);
+      case 'tm': {
+        // Trim Paths → the editor's trim operator. Percent in, percent out;
+        // the offset is Lottie degrees, so a full 360° turn is 100 %.
+        const tracks: PlannedScalarTrack[] = [];
+        const s = channel(it.s, 0, fr);
+        const e = channel(it.e, 0, fr);
+        const o = channel(it.o, 0, fr, 100 / 360);
+        if (s.kfs && s.kfs.length >= 2) tracks.push({ prop: 'trim.start', keyframes: s.kfs });
+        if (e.kfs && e.kfs.length >= 2) tracks.push({ prop: 'trim.end', keyframes: e.kfs });
+        if (o.kfs && o.kfs.length >= 2) tracks.push({ prop: 'trim.offset', keyframes: o.kfs });
+        scope.trim = {
+          start: staticOf(it.s, 0, fr, 0),
+          end: staticOf(it.e, 0, fr, 100),
+          offset: staticOf(it.o, 0, fr, 0) * (100 / 360),
+          // Lottie `m`: 1 = simultaneously (default), 2 = individually.
+          multiple: it.m === 2 ? 'individually' : 'simultaneously',
+          tracks,
+        };
         break;
+      }
       case 'rp':
         ctx.warnings.push(`Layer "${ctx.hostName}": repeater not imported (one copy is drawn).`);
         break;
@@ -593,6 +629,7 @@ function planShapeItems(
       node.staticProps.fill = fill.color; // flat fallback for solid readers
     }
     if (scope.stroke) node.stroke = scope.stroke;
+    if (scope.trim) node.trim = scope.trim;
 
     ctx.out.push(node);
     ctx.produced.push(node);
@@ -1052,6 +1089,9 @@ function planScope(
         if (only.pointsTrack) layer.pointsTrack = only.pointsTrack;
         if (only.fill) layer.fill = only.fill;
         if (only.stroke) layer.stroke = only.stroke;
+        // The trim rides along too — a single trimmed path is THE draw-on
+        // case, and the collapse used to drop it on the floor.
+        if (only.trim) layer.trim = only.trim;
         // An `rc`/`el` centred inside its layer keeps that offset.
         layer.x += only.x;
         layer.y += only.y;

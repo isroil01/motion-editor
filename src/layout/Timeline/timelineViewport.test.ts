@@ -1,6 +1,7 @@
 import {
   fitPixelsPerSecond,
   getTimelineViewport,
+  setTimelineLaneGeometry,
   setTimelineViewportWidth,
   subscribeTimelineViewport,
   registerTimelineScroll,
@@ -75,6 +76,30 @@ describe('the viewport store', () => {
   it('never reports a negative width', () => {
     setTimelineViewportWidth(-40);
     expect(getTimelineViewport().width).toBe(0);
+  });
+
+  it('carries the lanes\' left edge and overlay gutter, and clears them with the width', () => {
+    setTimelineLaneGeometry({ width: 640.4, left: 312.6, gutter: 12 });
+    expect(getTimelineViewport()).toEqual({ width: 640, left: 313, gutter: 12 });
+    // A width-only publish keeps the rest — the fit code only knows a width.
+    setTimelineViewportWidth(700);
+    expect(getTimelineViewport()).toEqual({ width: 700, left: 313, gutter: 12 });
+    // Nothing keeps positioning against a panel that has gone.
+    setTimelineViewportWidth(0);
+    expect(getTimelineViewport()).toEqual({ width: 0, left: 0, gutter: 0 });
+    setTimelineLaneGeometry({ width: 0, left: 500, gutter: 4 });
+    expect(getTimelineViewport()).toEqual({ width: 0, left: 0, gutter: 0 });
+  });
+
+  it('does not notify when the geometry is unchanged', () => {
+    setTimelineLaneGeometry({ width: 500, left: 100, gutter: 0 });
+    let calls = 0;
+    const off = subscribeTimelineViewport(() => calls++);
+    setTimelineLaneGeometry({ width: 500.2, left: 100.4, gutter: 0 });
+    expect(calls).toBe(0);
+    setTimelineLaneGeometry({ width: 500, left: 101, gutter: 0 });
+    expect(calls).toBe(1);
+    off();
   });
 });
 

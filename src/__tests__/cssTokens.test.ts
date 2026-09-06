@@ -28,13 +28,12 @@ const ROOT = join(__dirname, '..');
 /**
  * Custom properties that are set at RUNTIME rather than in a stylesheet, so a
  * static scan cannot see their definition.
- *   • the three density vars written by `applyUiPreferences`
  *   • `--app-accent`, written by the accent-customization setting
  *   • Radix's own positioning vars, written by the popper on mount
+ * (The two `--sidebar-item-*` density vars used to be here; they are declared
+ * per `[data-density]` tier in tokens/density.css now.)
  */
 const RUNTIME_DEFINED = new Set([
-  '--sidebar-item-padding',
-  '--sidebar-item-font-size',
   '--app-accent',
 ]);
 const RUNTIME_PREFIXES = ['--radix-'];
@@ -99,6 +98,29 @@ describe('CSS custom properties', () => {
     expect(globalTokens).toContain('--font-family-mono');
     expect(globalTokens).toContain('--z-index-modal');
     expect(globalTokens).toContain('--space-2');
+    expect(globalTokens).toContain('--surface-3');
+    expect(globalTokens).toContain('--opacity-disabled');
+    expect(globalTokens).toContain('--density-row-height');
+    expect(globalTokens).toContain('--border-width-control');
+    expect(globalTokens).toContain('--color-axis-x');
+    expect(globalTokens).toContain('--color-filetype-video');
+  });
+
+  it('imports every token file from global.css, domain last', () => {
+    // A token file that exists but is not imported defines nothing. The order
+    // matters too: themes read primitives, domain reads themes.
+    const globalCss = readFileSync(join(ROOT, 'styles', 'global.css'), 'utf8');
+    const imports = [...globalCss.matchAll(/@import\s+"([^"]+)";/g)].map((m) => m[1]!);
+    for (const entry of readdirSync(join(ROOT, 'tokens'))) {
+      if (entry.endsWith('.css')) expect(imports).toContain(`../tokens/${entry}`);
+    }
+    for (const entry of readdirSync(join(ROOT, 'themes'))) {
+      if (entry.endsWith('.css')) expect(imports).toContain(`../themes/${entry}`);
+    }
+    expect(imports[imports.length - 1]).toBe('../tokens/domain.css');
+    const firstTheme = imports.findIndex((p) => p.startsWith('../themes/'));
+    const lastPrimitive = imports.findIndex((p) => p === '../tokens/density.css');
+    expect(lastPrimitive).toBeLessThan(firstTheme);
   });
 
   /**
@@ -118,6 +140,7 @@ describe('CSS custom properties', () => {
     const GLOBAL_NAMESPACES = [
       '--color-', '--font-', '--space-', '--radius-',
       '--shadow-', '--motion-', '--z-', '--bar-', '--control-', '--icon-',
+      '--surface-', '--opacity-', '--border-width-', '--density-', '--line-height-',
     ];
     const dangling: string[] = [];
 

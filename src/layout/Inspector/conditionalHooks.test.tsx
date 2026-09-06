@@ -52,6 +52,22 @@ import type { SceneNode } from '@core/types';
  * directory. `require` rather than `import` because the list is only known at
  * run time.
  */
+/**
+ * The plain function behind a component export, or null if it is not one.
+ *
+ * `React.memo(Fn)` and `React.forwardRef(Fn)` are objects wrapping a
+ * function, so `typeof x === "function"` answers "no" for a perfectly real
+ * component. Discovery suites that ask the naive question shrink silently the
+ * day a section is memoized — which is the one failure mode a discovery suite
+ * must not have.
+ */
+function unwrapComponent(value: unknown): ((...args: never[]) => unknown) | null {
+  if (typeof value === "function") return value as (...args: never[]) => unknown;
+  const inner = (value as { type?: unknown; render?: unknown } | null)?.type
+    ?? (value as { render?: unknown } | null)?.render;
+  return typeof inner === "function" ? (inner as (...args: never[]) => unknown) : null;
+}
+
 function discoverSections(): Array<[string, React.ComponentType<{ nodeId: string }>]> {
   const dir = __dirname;
   const out: Array<[string, React.ComponentType<{ nodeId: string }>]> = [];
@@ -59,11 +75,17 @@ function discoverSections(): Array<[string, React.ComponentType<{ nodeId: string
     if (!file.endsWith(".tsx") || file.includes(".test.")) continue;
     const mod = require(path.join(dir, file)) as Record<string, unknown>;
     for (const [name, value] of Object.entries(mod)) {
-      if (typeof value !== "function") continue;
+      // A memoized section is an OBJECT, not a function. Unwrapping it here is
+      // load-bearing: a plain typeof check silently drops every section that
+      // gains `React.memo`, and a discovery suite that quietly stops seeing its
+      // subjects still passes. The wrapper is what gets rendered; the inner
+      // function is what gets read.
+      const inner = unwrapComponent(value);
+      if (!inner) continue;
       if (!/^[A-Z]/.test(name)) continue;
       // The prop name is the contract this suite exercises: a section that does
       // not take a nodeId cannot be rendered with a missing node.
-      const src = (value as { toString(): string }).toString();
+      const src = inner.toString();
       if (!/nodeId/.test(src)) continue;
       out.push([`${file.replace(/.tsx$/, "")}.${name}`, value as React.ComponentType<{ nodeId: string }>]);
     }
@@ -115,29 +137,50 @@ describe("the discovery found real subjects", () => {
   });
 });
 
+/**
+ * Props beyond `nodeId` that a subject needs before it can render at all.
+ *
+ * `MultiPropertyRow` is a ROW, not a section: it describes ONE property, so
+ * without a `prop` it has nothing to resolve and throws for a reason that has
+ * nothing to do with a missing node. Supplying the prop keeps it IN this
+ * suite — it is the component every multi-selection row goes through, and
+ * "the selected layer was deleted" is exactly the situation it has to
+ * survive — rather than exempting it and losing the coverage.
+ */
+const EXTRA_PROPS: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  "MultiPropertyRow.MultiPropertyRow": { prop: "opacity" },
+  // The stopwatch + navigator control every non-PropertyRow row shares. Same
+  // argument as MultiPropertyRow: it governs named tracks, so it needs them.
+  "AnimToggle.AnimToggle": { tracks: ["opacity"], label: "Opacity", animated: false, onToggle: () => {} },
+};
+
 describe.each(SECTIONS)('%s survives its node disappearing mid-session', (_name, Section) => {
+  /** `nodeId` plus whatever else this subject needs — see EXTRA_PROPS. */
+  const propsFor = (nodeId: string): { nodeId: string } =>
+    ({ nodeId, ...(EXTRA_PROPS[_name] ?? {}) });
+
   it('renders with the node present, then again after it is deleted', () => {
     defaultSceneGraph.addNode(textNode(ID));
     useSelectionStore.setState({ ids: [ID] } as never);
 
-    const view = render(<Section nodeId={ID} />);
+    const view = render(<Section {...propsFor(ID)} />);
     // The node goes away while the panel is still mounted and still pointed at it
     // — exactly what deleting a selected layer does.
     defaultSceneGraph.removeNode(ID);
 
     // Before the fix this threw "Rendered fewer hooks than expected".
-    expect(() => view.rerender(<Section nodeId={ID} />)).not.toThrow();
+    expect(() => view.rerender(<Section {...propsFor(ID)} />)).not.toThrow();
   });
 
   it('renders for a node id that never existed', () => {
     useSelectionStore.setState({ ids: [] } as never);
-    expect(() => render(<Section nodeId="no_such_node" />)).not.toThrow();
+    expect(() => render(<Section {...propsFor('no_such_node')} />)).not.toThrow();
   });
 
   it('mounting straight onto a missing node, then a real one, is stable', () => {
     // The reverse order: hook count must not change when the node APPEARS either.
-    const view = render(<Section nodeId={ID} />);
+    const view = render(<Section {...propsFor(ID)} />);
     defaultSceneGraph.addNode(textNode(ID));
-    expect(() => view.rerender(<Section nodeId={ID} />)).not.toThrow();
+    expect(() => view.rerender(<Section {...propsFor(ID)} />)).not.toThrow();
   });
 });

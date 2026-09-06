@@ -23,8 +23,9 @@ import { insertPathNode, outlineExtent } from '@core/scene/sceneInsert';
 import { setNodeFill, makeStop, type FillPaint, type OpacityStop } from '@core/paint/fill';
 import { setNodeStroke, defaultStroke } from '@core/paint/stroke';
 import { setNodeMatte } from '@core/effects/matte';
+import { addPathOp, defaultTrimOp, pathOpPropPath } from '@core/scene/pathOps';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
-import type { ImportPlan, PlannedFill, PlannedKind, PlannedLayer } from './lottieImport';
+import type { ImportPlan, PlannedFill, PlannedKind, PlannedLayer, PlannedScalarTrack } from './lottieImport';
 
 /** Facade `create` accepts these kind strings; map plan kinds onto them. */
 function facadeKind(kind: PlannedKind): string {
@@ -177,18 +178,38 @@ export function applyImportPlan(
       setNodeStroke(nodeId, { ...defaultStroke(L.stroke.color), width: L.stroke.width, opacity: L.stroke.opacity });
     }
 
-    for (const tr of L.scalarTracks) {
-      const shift = tr.prop === 'x' ? lox : tr.prop === 'y' ? loy : 0;
-      const key = `${nodeId} ${tr.prop}`;
-      const kfs: Keyframe[] = tr.keyframes.map((kf) => ({
-        // The facade owns the comp→layer time conversion; going through it
-        // keeps this identical to the per-keyframe path it replaces.
+    // The facade owns the comp→layer time conversion; going through it keeps
+    // this identical to the per-keyframe path it replaces.
+    const toKeyframes = (planned: ReadonlyArray<PlannedScalarTrack['keyframes'][number]>, shift: number): Keyframe[] =>
+      planned.map((kf) => ({
         t: ctx.time.toLayerTime(nodeId, kf.t),
         value: kf.value + shift,
         easing: kf.easing as EasingKind,
         ...(kf.easing === 'bezier' && kf.bezier ? { bezier: kf.bezier } : {}),
       }));
-      tracks.set(key, { nodeId, prop: tr.prop, keyframes: kfs });
+
+    for (const tr of L.scalarTracks) {
+      const shift = tr.prop === 'x' ? lox : tr.prop === 'y' ? loy : 0;
+      tracks.set(`${nodeId} ${tr.prop}`, { nodeId, prop: tr.prop, keyframes: toKeyframes(tr.keyframes, shift) });
+    }
+
+    // Trim Paths: one trim operator on the drawable, its animated channels
+    // keyed onto the operator's own id-scoped prop paths — the same tracks
+    // the Path Operators card and the timeline's Contents tree edit.
+    if (L.trim && L.kind === 'shape') {
+      const op = {
+        ...defaultTrimOp(),
+        start: L.trim.start,
+        end: L.trim.end,
+        offset: L.trim.offset,
+        trimMultiple: L.trim.multiple,
+      };
+      addPathOp(nodeId, op);
+      for (const tr of L.trim.tracks) {
+        const param = tr.prop.slice('trim.'.length) as 'start' | 'end' | 'offset';
+        const prop = pathOpPropPath(op.id, param);
+        tracks.set(`${nodeId} ${prop}`, { nodeId, prop, keyframes: toKeyframes(tr.keyframes, 0) });
+      }
     }
 
     if (L.pointsTrack && L.pointsTrack.keyframes.length > 1) {

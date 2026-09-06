@@ -1,0 +1,87 @@
+.root {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: var(--border-width-control) solid var(--color-border);
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  color: var(--color-text-primary);
+}
+
+/* Level is carried by the icon colour (semantic, meaningful) — not a
+   decorative side stripe. */
+.icon {
+  display: grid;
+  place-items: center;
+  height: var(--line-height-sm);
+  color: var(--color-text-tertiary);
+  flex: none;
+}
+
+.root[data-level='success'] .icon { color: var(--color-success); }
+.root[data-level='warning'] .icon { color: var(--color-warning); }
+.root[data-level='error']   .icon { color: var(--color-danger); }
+.root[data-level='info']    .icon { color: var(--color-info); }
+
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.message {
+  overflow-wrap: anywhere;
+}
+
+.detail {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+  overflow-wrap: anywhere;
+}
+
+.progress {
+  margin-top: var(--space-1);
+}
+
+/* The toast's one inline action. Reads as a button without shouting — it
+   sits next to a dismiss X and must not compete with the message. */
+.action {
+  flex: none;
+  align-self: center;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: var(--border-width-control) solid var(--color-border-strong);
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--motion-hover-transition);
+}
+
+.action:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.action:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.dismiss {
+  flex: none;
+  align-self: center;
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0;
+}

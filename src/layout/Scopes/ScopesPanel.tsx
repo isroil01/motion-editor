@@ -43,9 +43,12 @@ import {
   parade,
   vectorscope,
   waveform,
+  chroma709,
+  VECTORSCOPE_MAX_CHROMA,
   type ScopeAccum,
   type ScopeTheme,
 } from '@core/video/scopes';
+import { useInfoStore } from '@stores/infoStore';
 import {
   DEFAULT_FRAME_TAP_HZ,
   setFrameTapInterval,
@@ -189,6 +192,7 @@ function ScopePlot({ kind, waveMode, subscribe }: ScopePlotProps): JSX.Element {
       if (!ctx) return;
       const theme = scopeThemeOf(canvas.parentElement ?? canvas);
       drawScope(ctx, accumulateFor(kind, frameRef.current, waveMode), theme, { width: w, height: h, dpr });
+      if (kind === 'vectorscope') drawProbeMarker(ctx, theme, { width: w, height: h, dpr });
     };
 
     const onFrame: FrameListener = (frame) => {
@@ -197,6 +201,12 @@ function ScopePlot({ kind, waveMode, subscribe }: ScopePlotProps): JSX.Element {
     };
 
     const off = subscribe(onFrame);
+    // Click-to-probe: the pixel under the pointer in the viewport gets a
+    // marker on the vectorscope, which is what turns two panels into one
+    // tool — "that skin tone, THERE on the line". Only the vectorscope needs
+    // to repaint on a probe move, so the other three never subscribe.
+    const offProbe =
+      kind === 'vectorscope' ? useInfoStore.subscribe(() => paint()) : (): void => {};
     let observer: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       observer = new ResizeObserver(() => paint());
@@ -206,6 +216,7 @@ function ScopePlot({ kind, waveMode, subscribe }: ScopePlotProps): JSX.Element {
 
     return () => {
       off();
+      offProbe();
       observer?.disconnect();
     };
   }, [kind, waveMode, subscribe]);
@@ -216,6 +227,67 @@ function ScopePlot({ kind, waveMode, subscribe }: ScopePlotProps): JSX.Element {
       <span className={styles.cellLabel}>{KIND_LABEL[kind]}</span>
     </div>
   );
+}
+
+/**
+ * The pixel probe, marked on the vectorscope.
+ *
+ * The viewport already samples the pixel under the pointer into `infoStore`
+ * for the status bar's readout. Plotting that same sample here is the
+ * click-to-probe link between the two panels: hover a face and its chroma
+ * appears on the skin-tone line, which is the reading colourists actually
+ * want and the reason the two panels are worth docking together.
+ *
+ * The geometry is a deliberate mirror of `drawVectorscope`'s — the same 6px
+ * pad, the same centred square, the same `VECTORSCOPE_MAX_CHROMA` radius
+ * scale — rather than an export from `core/video/scopes.ts`, so the core
+ * module stays a pure frame→raster transform with no notion of a cursor.
+ */
+function drawProbeMarker(
+  ctx: CanvasRenderingContext2D,
+  theme: ScopeTheme,
+  vp: { width: number; height: number; dpr: number },
+): void {
+  const probe = useInfoStore.getState();
+  if (!probe.present || !probe.rgba) return;
+  if (vp.width < 2 || vp.height < 2) return;
+  const pad = Math.round(6 * vp.dpr);
+  const edge = Math.min(vp.width, vp.height) - 2 * pad;
+  if (edge <= 4) return;
+  const half = edge / 2;
+  const cx = (vp.width - edge) / 2 + half;
+  const cy = (vp.height - edge) / 2 + half;
+
+  const { cb, cr } = chroma709(probe.rgba.r / 255, probe.rgba.g / 255, probe.rgba.b / 255);
+  const x = cx + (cb / VECTORSCOPE_MAX_CHROMA) * half;
+  // +Cr (red) points UP, as in `vectorscopeXY`.
+  const y = cy - (cr / VECTORSCOPE_MAX_CHROMA) * half;
+  // A probe outside the faceplate is a super-saturated pixel; clamping it to
+  // the rim would claim a saturation it does not have, so it is simply not
+  // drawn and the reading stays honest.
+  if (Math.hypot(x - cx, y - cy) > half) return;
+
+  const r = Math.max(3, 4 * vp.dpr);
+  ctx.save();
+  // Two rings: a dark one for contrast against a bright trace, a light one on
+  // top. The same halo trick the viewport overlays use, for the same reason.
+  ctx.lineWidth = Math.max(1, 3 * vp.dpr);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.moveTo(x - r * 2, y);
+  ctx.lineTo(x - r, y);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + r * 2, y);
+  ctx.moveTo(x, y - r * 2);
+  ctx.lineTo(x, y - r);
+  ctx.moveTo(x, y + r);
+  ctx.lineTo(x, y + r * 2);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, vp.dpr);
+  ctx.strokeStyle = theme.graticule;
+  ctx.stroke();
+  ctx.restore();
 }
 
 // ── Panel ────────────────────────────────────────────────────────────

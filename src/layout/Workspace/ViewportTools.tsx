@@ -1,23 +1,27 @@
 /**
- * The composition's tools — motion path, the 3D switch, auto-keyframe, view
- * options, zoom, pop out — plus the two status badges that say why the viewport
- * may not be showing what you expect.
+ * The composition's SCENE tools — motion path (+ auto-bezier / straighten when
+ * a path is selected), the 3D switch, auto-keyframe — plus the two status
+ * badges that say why the viewport may not be showing what you expect.
  *
- * **This renders in the TIMELINE's tool row, beside the trim buttons.** There is
- * no bar above the canvas and no floating pill over the stage any more. Both are
- * gone deliberately, and the reasoning belongs here because the instinct is to
- * put them back:
+ * **This renders in the transport bar, right of the play cluster.** What acts
+ * on how the frame is SHOWN (layout, channel, resolution, preview, LUT,
+ * overlays, snapshot compare, display mode, bookmarks, pop out) is
+ * `ViewportDisplayControls`, the next cluster to the right in the same row. The View
+ * Options menu that used to render from here is gone: its rows all have one
+ * home each now, and the two it had that were duplicates of the buttons in
+ * this very cluster (Motion Paths, Auto-Keyframe) ARE those buttons.
  *
- *  • The bar above the canvas (`ViewportHeader`) held the composition's name and
- *    these two badges. The name moved to the Scene tab — a row that already
- *    exists, and one that is now named after the thing it contains. What was
- *    left was 32px of chrome across the whole viewport holding two badges that
- *    are usually both hidden: a permanent cost for an occasional message.
- *  • The tools were a pill floating over the bottom-left of the stage. A pill
- *    over the canvas covers the canvas, and covers a different part of it at
- *    every zoom level. Every other control that acts on time and layers — play,
- *    split, trim — was already in one row at the top of the timeline, so these
- *    join it instead of being the one cluster that lives somewhere else.
+ * The history, because the instinct is to move things back and forth:
+ *
+ *  • An earlier header bar held the composition's NAME plus these two badges,
+ *    and was removed for it: 32px across the whole viewport for a name the
+ *    Scene tab already shows and two badges that are usually both hidden.
+ *  • These tools were once a pill floating over the bottom-left of the stage.
+ *    A pill over the canvas covers the canvas, and covers a different part of
+ *    it at every zoom level.
+ *
+ * The Free/Fixed camera lock is NOT here and never was in this file's lifetime
+ * — it is `Tabs/EditorTabs.tsx`.
  *
  * The badges keep `--control-height-xs`, a step below the buttons around them:
  * that size difference is what says which things in the row you can click.
@@ -33,7 +37,6 @@ import { hasPositionAnimation, smoothMotionPath, straightenMotionPath, hasPathTa
 import { runAnimEdit } from '@core/animation/animationCommands';
 import { defaultAnimation } from '@motion/animation';
 import { usePreferenceStore } from '@stores/preferenceStore';
-import { ViewControls } from '@layout/TopNav/ViewControls';
 import { useRenderBackendStore } from '@stores/renderBackendStore';
 import styles from './ViewportTools.module.css';
 
@@ -73,10 +76,11 @@ function ViewportStatus(): JSX.Element | null {
         <button
           className={styles.headerBtn}
           onClick={() => setCamera3dMode('active')}
+          aria-label={`Viewing through ${CAMERA_VIEW_LABEL[camera3dMode]} — return to the Active Camera`}
           title="Viewing through a 3D view — click to return to Active Camera (1)"
         >
           <Icon name="camera" size="sm" />
-          <span style={{ marginLeft: 4 }}>{CAMERA_VIEW_LABEL[camera3dMode]}</span>
+          <span className={styles.viewName}>{CAMERA_VIEW_LABEL[camera3dMode]}</span>
         </button>
       )}
 
@@ -100,11 +104,11 @@ function ViewportStatus(): JSX.Element | null {
 }
 
 /**
- * The composition's action controls, rendered in the timeline's tool row.
+ * The composition's action controls, rendered in the transport bar.
  *
- * Transport, split/trim and preview quality are deliberately NOT duplicated
- * here — they are in the same row already, immediately to the left. Two copies
- * of the same control drift apart and double the surface to keep in sync.
+ * Transport, split/trim and zoom are deliberately NOT duplicated here — they
+ * are in the same row already, either side. Two copies of the same control
+ * drift apart and double the surface to keep in sync.
  */
 export function ViewportTools(): JSX.Element {
   const motionPathVisible = useGuidesStore((s) => s.motionPathVisible);
@@ -161,6 +165,7 @@ export function ViewportTools(): JSX.Element {
           <button
             className={`${styles.headerBtn} ${motionPathVisible ? styles.headerBtnActive : ''}`}
             onClick={toggleMotionPath}
+            aria-label="Show motion path"
             aria-pressed={motionPathVisible}
             title={motionPathVisible ? 'Hide Motion Path (Ctrl+Alt+M)' : 'Show Motion Path (Ctrl+Alt+M)'}
           >
@@ -169,6 +174,7 @@ export function ViewportTools(): JSX.Element {
           <button
             className={styles.headerBtn}
             onClick={() => singleId && runAnimEdit('Smooth motion path', () => smoothMotionPath(singleId!))}
+            aria-label="Auto-Bezier — smooth the path through all keyframes"
             title="Auto-Bezier: smooth path through all keyframes (Ctrl+Alt+S)"
           >
             <Icon name="curvature" size="md" />
@@ -177,6 +183,7 @@ export function ViewportTools(): JSX.Element {
             <button
               className={styles.headerBtn}
               onClick={() => singleId && runAnimEdit('Straighten motion path', () => straightenMotionPath(singleId!))}
+              aria-label="Straighten — remove the spatial tangents"
               title="Straighten: remove spatial tangents"
             >
               <Icon name="line" size="md" />
@@ -204,6 +211,7 @@ export function ViewportTools(): JSX.Element {
           <button
             className={`${styles.headerBtn} ${all3DOn ? styles.headerBtnActive : ''}`}
             onClick={toggleSelection3D}
+            aria-label={all3DOn ? 'Disable 3D on the selection' : 'Make the selection 3D'}
             aria-pressed={all3DOn}
             title={
               all3DOn
@@ -217,28 +225,17 @@ export function ViewportTools(): JSX.Element {
         </div>
       )}
 
-      {/* Zoom, fit, and view controls (grid/rulers/safe/channel/resolution) */}
+      {/* Auto-keyframe: the stopwatch, lit and labelled REC while armed. */}
       <div className={styles.group}>
         <button
           className={`${styles.headerBtn} ${autoKeyframe ? styles.headerBtnActive : ''}`}
           onClick={toggleAutoKeyframe}
+          aria-label="Auto-Keyframe mode"
           aria-pressed={autoKeyframe}
           title={autoKeyframe ? 'Auto-Keyframe Mode is ON (Click to turn OFF)' : 'Auto-Keyframe Mode is OFF (Click to turn ON)'}
         >
           <Icon name="stopwatch" size="md" />
           {autoKeyframe && <span className={styles.recLabel}>REC</span>}
-        </button>
-        <ViewControls />
-        <button
-          className={`${styles.headerBtn} ${styles.popOut}`}
-          onClick={() => {
-            const url = `${window.location.origin}${window.location.pathname}#/popout/viewport`;
-            window.open(url, 'popout-viewport', 'width=1280,height=720,resizable=yes');
-          }}
-          title="Pop Out Viewport Preview into Window"
-          style={{ marginLeft: 4 }}
-        >
-          <Icon name="pop-out" size="md" />
         </button>
       </div>
     </div>

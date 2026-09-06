@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, dialog, Menu, protocol, net, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, shell, dialog, Menu, protocol, net, type WebContents } from 'electron';
 import { handle, on } from './ipcGuard';
 import path from 'node:path';
 import { readFile, writeFile, mkdir, rename, unlink, readdir, access, rm, copyFile, stat } from 'node:fs/promises';
@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { shouldStartBackend, startBackend, stopBackend } from './backend';
 import { registerIndexIpc } from './localIndexDb';
 import { registerThumbIpc } from './thumbCache';
+import { registerRevealIpc } from './ipc/reveal';
 import { registerAiKeyIpc } from './aiKeyVault';
 import { registerAiProxyIpc, abortAllStreams } from './aiProxy';
 import { registerMediaKeyIpc } from './mediaKeyVault';
@@ -17,6 +18,7 @@ import { registerPluginNetIpc } from './pluginNet';
 import { aiEnabled, pluginsEnabled, assertRendererEditionMatches } from './edition';
 import { parseProbeJson, type ProbeJson } from './mediaProbeParse';
 import { checkForUpdatesInteractive, initAutoUpdate } from './updater';
+import { nativeTemplateFromGroups, sanitizeMenuGroups, type NativeMenuGroupSpec, type NativeMenuOptions } from './nativeMenu';
 import { CLI_HELP, cliArgs, parseCli, type CliInvocation } from './cliArgs';
 import { runCliAndExit } from './cliRender';
 import {
@@ -1106,75 +1108,57 @@ function registerRenderIpc(): void {
  * Native application menu. Items forward a command id to the renderer, which
  * executes it through the same CommandSystem the in-app UI uses — so the menu
  * never duplicates behaviour, it just triggers commands.
+ *
+ * GENERATED FROM THE RENDERER'S MENU MODEL. The renderer serialises
+ * `menuModel.ts` (labels, chords, submenus, visibility and checked state all
+ * evaluated) and sends it over `menu:setTemplate`; `electron/nativeMenu.ts`
+ * validates it and adds the roles only main can own. Until the first
+ * template arrives — the window's first paint, before the renderer has booted
+ * — a minimal bootstrap menu holds the slot so Alt never shows an empty bar.
+ * The hand-maintained item list this replaced had already drifted from the
+ * in-app menu ("Save to Computer…" for what the app calls "Save Portable
+ * Copy…"), which is the whole reason it is generated now.
  */
-function buildApplicationMenu(win: BrowserWindow): void {
+function buildApplicationMenu(win: BrowserWindow, groups?: ReadonlyArray<NativeMenuGroupSpec>): void {
   const cmd = (id: string) => () => win.webContents.send('menu:command', id);
-
-  const template: MenuItemConstructorOptions[] = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+  const opts: NativeMenuOptions = {
+    platform: process.platform,
+    isDev,
+    version: app.getVersion(),
+    cmd,
+    checkForUpdates: () => checkForUpdatesInteractive(win),
+  };
+  const bootstrap: NativeMenuGroupSpec[] = [
     {
+      id: 'file',
       label: 'File',
-      submenu: [
-        { label: 'New Project', accelerator: 'CmdOrCtrl+N', click: cmd('project.new') },
-        { label: 'Open Project…', accelerator: 'CmdOrCtrl+O', click: cmd('project.open') },
+      items: [
+        { label: 'New Project', commandId: 'project.new', accelerator: 'CmdOrCtrl+N' },
+        { label: 'Open Project…', commandId: 'project.open', accelerator: 'CmdOrCtrl+O' },
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: cmd('project.save') },
-        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: cmd('project.saveAs') },
-        { label: 'Save to Computer…', click: cmd('project.saveToComputer') },
-        { type: 'separator' },
-        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
+        { label: 'Save', commandId: 'project.save', accelerator: 'CmdOrCtrl+S' },
       ],
     },
-    {
-      label: 'Edit',
-      submenu: [
-        { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: cmd('edit.undo') },
-        { label: 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', click: cmd('edit.redo') },
-        { type: 'separator' },
-        { label: 'Select All', accelerator: 'CmdOrCtrl+A', click: cmd('edit.selectAll') },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Toggle Scene Panel', click: cmd('view.toggleLeftSidebar') },
-        { label: 'Toggle Inspector', click: cmd('view.toggleRightInspector') },
-        { label: 'Toggle Timeline', click: cmd('view.toggleTimeline') },
-        { type: 'separator' },
-        { label: 'Reset Layout', click: cmd('layout.reset') },
-        { label: 'Switch Theme', click: cmd('theme.switch') },
-        // Reload + DevTools are developer affordances only — omitted from shipped
-        // builds so end users get no inspector and no accidental hard reload.
-        ...(isDev
-          ? ([{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[])
-          : []),
-      ],
-    },
-    {
-      // The native menubar is normally hidden (`autoHideMenuBar`), so the
-      // in-app menu is the real one — that is where a plugin's own commands and
-      // panel appear, assembled from what is installed. This entry exists so
-      // the two menus do not disagree about whether the app HAS plugins for a
-      // user who reaches for Alt.
-      label: 'Plugins',
-      submenu: [
-        { label: 'Manage Plugins…', click: cmd('view.plugins') },
-      ],
-    },
-    { role: 'windowMenu' },
-    {
-      role: 'help',
-      submenu: [
-        // Not a command forwarded to the renderer: updating is the shell's job,
-        // and the renderer is what gets replaced.
-        { label: 'Check for Updates…', click: () => checkForUpdatesInteractive(win) },
-        { type: 'separator' },
-        { label: `Version ${app.getVersion()}`, enabled: false },
-      ],
-    },
+    { id: 'view', label: 'View', items: [{ label: 'Command Palette', commandId: 'view.commandPalette' }] },
+    { id: 'help', label: 'Help', items: [{ label: 'About Premation', commandId: 'help.about' }] },
   ];
-
+  const template = nativeTemplateFromGroups(groups ?? bootstrap, opts);
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/**
+ * `menu:setTemplate` — the renderer's serialised menu model. Only the main
+ * window may set the application menu; a pop-out sending this is ignored.
+ */
+function registerMenuIpc(): void {
+  handle('menu:setTemplate', async (e, raw: unknown) => {
+    const win = mainWindow;
+    if (!win || e.sender !== win.webContents) return { ok: false };
+    const groups = sanitizeMenuGroups(raw);
+    if (!groups) return { ok: false };
+    buildApplicationMenu(win, groups);
+    return { ok: true };
+  });
 }
 
 /**
@@ -1538,6 +1522,7 @@ app.whenReady().then(() => {
   registerBlobIpc();
   registerIndexIpc(app);
   registerThumbIpc(app);
+  registerRevealIpc();
   registerRenderIpc();
   registerPopoutIpc();
   registerOAuthIpc();
@@ -1593,6 +1578,7 @@ app.whenReady().then(() => {
   }
 
   registerEditionReportIpc();
+  registerMenuIpc();
 
   // A normal build is a CLIENT: it talks to a deployed motion-back at the origin
   // baked in by VITE_BACKEND_ORIGIN, or to one you run yourself on localhost:4000

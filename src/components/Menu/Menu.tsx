@@ -127,6 +127,8 @@ export function Menu({ children, className, onItemActivate, ariaLabel, noScroll,
           resolvedSpacious && styles.spacious,
           className,
         )}
+        data-no-scroll={resolvedNoScroll || undefined}
+        data-spacious={resolvedSpacious || undefined}
         onKeyDown={onKeyDown}
       >
         {Children.map(children, (child) => child)}
@@ -322,6 +324,22 @@ export function MenuSeparator(): JSX.Element {
 
 export function MenuLabel({ children }: { children: ReactNode }): JSX.Element {
   return <div className={styles.label}>{children}</div>;
+}
+
+// ── MenuCustomRow ──────────────────────────────────────────────────
+
+/**
+ * A non-command row (a slider, a readout). `role="none"` keeps it out of the
+ * menu's item count for assistive tech; whatever is inside carries its own
+ * role and label. The menu's arrow-key walk skips it unless the content is
+ * focusable, which a range input is.
+ */
+export function MenuCustomRow({ id, children }: { id: string; children: ReactNode }): JSX.Element {
+  return (
+    <div id={id} role="none" className={styles.customRow} data-menu-custom="">
+      {children}
+    </div>
+  );
 }
 
 // ── MenuCheckbox ───────────────────────────────────────────────────

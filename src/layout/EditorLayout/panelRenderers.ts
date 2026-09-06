@@ -22,6 +22,7 @@ import { MotionPresetsPanel } from '@layout/Motion/MotionPresetsPanel';
 import { EffectsPanel } from '@layout/Effects/EffectsPanel';
 import { EffectControlsPanel } from '@layout/Effects/EffectControlsPanel';
 import { RenderQueuePanel } from '@layout/RenderQueue/RenderQueuePanel';
+import { ExportPanel } from '@layout/Export/ExportPanel';
 import { PluginsDockPanel, pluginPanelRenderers } from '@layout/Plugins/PluginPanel';
 import { PluginsMarketplacePanel } from '@layout/Plugins/PluginsMarketplacePanel';
 import { SwatchesPanel } from '@layout/Swatches';
@@ -77,6 +78,7 @@ export const PANEL_COMPONENTS: Readonly<Record<string, ComponentType>> = {
   effectControls: EffectControlsPanel,
   history: HistoryPanel,
   renderQueue: RenderQueuePanel,
+  export: ExportPanel,
   plugins: PluginsDockPanel,
   marketplace: PluginsMarketplacePanel,
   // ── Asset Library (one tab, sections inside) ─────────────────────────

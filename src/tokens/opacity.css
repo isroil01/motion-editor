@@ -1,0 +1,26 @@
+/**
+ * Opacity scale. The three states chrome fades to, and nothing else.
+ *
+ * Before this existed the library used 0.35, 0.4, 0.45, 0.5 and 0.6 for the
+ * same "disabled" idea in five components. One value per meaning:
+ *
+ *   disabled — a control that exists but cannot be used right now
+ *   muted    — secondary chrome that should recede (hints, counts, spacers)
+ *   ghost    — barely there: drag previews, placeholder art, inactive rails
+ */
+
+:root {
+  --opacity-disabled: 0.4;
+  --opacity-muted:    0.6;
+  --opacity-ghost:    0.25;
+  --opacity-full:     1;
+}
+
+/* The high-contrast theme cannot rely on a 40% fade reading as "disabled" —
+   it lifts the floor so disabled text still clears 3:1. */
+[data-theme="high-contrast"],
+[data-contrast="more"] {
+  --opacity-disabled: 0.55;
+  --opacity-muted:    0.75;
+  --opacity-ghost:    0.4;
+}

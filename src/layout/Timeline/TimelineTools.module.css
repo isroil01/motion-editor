@@ -1,36 +1,58 @@
 /*
- * The timeline edit-tool row.
+ * The timeline edit tools, in the panel's toolbar row.
  *
- * Sized and coloured off the same tokens `ViewportTools` uses, because the two
- * rows sit a few pixels apart in the same panel stack and a second set of
- * button metrics would read as a second kind of control. What differs is
- * deliberate: these five are a radio group, so they share one strip with no
- * gaps between them and say "one of five" rather than "five toggles that happen
- * to be adjacent".
+ * Sized to the toolbar's other icon toggles (`--control-height-sm`), because
+ * the row is one row and a second set of button metrics would read as a second
+ * kind of control. What differs is deliberate: these five are a radio group, so
+ * they share one strip with no gaps between them and say "one of five" rather
+ * than "five toggles that happen to be adjacent".
  */
 
 .tools {
-  --tl-tool-size: var(--control-height-md);
+  --tl-tool-size: var(--control-height-sm);
 
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  flex-wrap: nowrap;
+  gap: var(--space-1);
   height: 100%;
-  padding: 0 var(--space-2);
+  padding: 0;
   font-size: var(--font-size-xs);
   font-family: var(--font-family-sans);
   user-select: none;
   white-space: nowrap;
   flex-shrink: 0;
-  container-type: inline-size;
-  container-name: tl-tools;
+}
+
+/*
+ * The five edit tools, as their own group.
+ *
+ * The two switches beside them (snap, playhead follow) are NOT one of five, so
+ * they live outside `role="radiogroup"` — inside it they would join the arrow
+ * -key traversal and be announced as a sixth and seventh choice of tool.
+ */
+.toolGroup {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* Separates the "which gesture" tools from the "how does it behave" switches.
+   One hairline, not a gap — a gap alone reads as slack in the row. */
+.toolsDivider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border-subtle);
+  flex-shrink: 0;
 }
 
 .toolBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--tl-tool-size);
+  min-width: var(--tl-tool-size);
   height: var(--tl-tool-size);
   padding: 0;
   background: transparent;
@@ -75,22 +97,7 @@
   color: var(--color-primary);
 }
 
-.modeLabel {
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-micro);
-  letter-spacing: var(--letter-spacing-wide);
-  text-transform: uppercase;
-  white-space: nowrap;
-  padding-left: var(--space-1);
-}
-
-/*
- * On a narrow panel the word goes before any button does — every tool must stay
- * reachable, and the name is in each button's tooltip and in the command
- * palette too, so nothing becomes unfindable when it is dropped.
- */
-@container tl-tools (max-width: 300px) {
-  .modeLabel {
-    display: none;
-  }
+/* The disclosure chevron on the menu form's trigger. */
+.chevron {
+  opacity: 0.6;
 }

@@ -6,8 +6,13 @@
  *
  * Behaviour:
  *   - Disabled state is visible and removes pointer events.
- *   - Loading state replaces label with a spinner.
- *   - `as` prop allows polymorphic root (button | a).
+ *   - Loading state replaces label with a spinner (label stays in the
+ *     accessible name; `aria-busy` announces the wait).
+ *   - `icon` (alias of `leftIcon`) and `iconOnly` — a square button whose
+ *     label is visually hidden but still read, so the 279 local `.button`
+ *     classes in src/layout can migrate mechanically: `<button className=
+ *     {styles.iconBtn}><Icon/></button>` becomes `<Button iconOnly icon=…>
+ *     Label</Button>`.
  *   - Forwards ref for parent focus management.
  */
 
@@ -26,8 +31,15 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   size?: Size;
   loading?: boolean;
   fullWidth?: boolean;
+  /** Leading icon. `icon` and `leftIcon` are the same slot; `icon` wins if both are given. */
+  icon?: ReactNode;
   leftIcon?: ReactNode;
   rightIcon?: ReactNode;
+  /**
+   * Square, icon-only. The children are still REQUIRED — they become the
+   * accessible name (visually hidden) unless an `aria-label` is passed.
+   */
+  iconOnly?: boolean;
   type?: 'button' | 'submit' | 'reset';
 }
 
@@ -39,8 +51,10 @@ function ButtonInner(
     size = 'md',
     loading = false,
     fullWidth = false,
+    icon,
     leftIcon,
     rightIcon,
+    iconOnly = false,
     disabled,
     className,
     style,
@@ -55,6 +69,7 @@ function ButtonInner(
   const mergedStyle = scaleMult !== 1 ? { transform: `scale(${scaleMult})`, transformOrigin: 'center center', ...style } : style;
 
   const isDisabled = disabled || loading;
+  const leading = icon ?? leftIcon;
   return (
     <button
       ref={ref}
@@ -64,18 +79,20 @@ function ButtonInner(
       data-loading={loading || undefined}
       data-variant={variant}
       data-size={size}
+      data-icon-only={iconOnly || undefined}
       style={mergedStyle}
       className={cn(
         styles.root,
         fullWidth && styles.fullWidth,
         loading && styles.loading,
+        iconOnly && styles.iconOnly,
         className,
       )}
       {...rest}
     >
-      {leftIcon ? <span className={styles.icon}>{leftIcon}</span> : null}
-      <span className={styles.label}>{children}</span>
-      {rightIcon ? <span className={styles.icon}>{rightIcon}</span> : null}
+      {leading ? <span className={styles.icon}>{leading}</span> : null}
+      <span className={cn(styles.label, iconOnly && styles.srOnly)}>{children}</span>
+      {rightIcon && !iconOnly ? <span className={styles.icon}>{rightIcon}</span> : null}
       {loading ? <span className={styles.spinner} aria-hidden /> : null}
     </button>
   );

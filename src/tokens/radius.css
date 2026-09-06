@@ -19,4 +19,18 @@
   --radius-panel:   0px;
   --radius-surface: 8px;
   --radius-dialog:  12px;
+
+  /* ── Border widths ────────────────────────────────────────────
+     hairline — every chrome seam and control edge (the default)
+     thin     — emphasised edges: selected rows, focused fields
+     thick    — the focus ring and the high-contrast theme's borders */
+  --border-width-none:     0;
+  --border-width-hairline: 1px;
+  --border-width-thin:     1.5px;
+  --border-width-thick:    2px;
+  --border-width-heavy:    3px;
+  /* What a chrome border is drawn with by default. The high-contrast theme
+     raises this so every seam thickens at once. */
+  --border-width-control:  var(--border-width-hairline);
+  --border-width-focus:    var(--border-width-thick);
 }

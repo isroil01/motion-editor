@@ -28,7 +28,7 @@ import { Icon } from '@components/Icon';
 import { Switch } from '@components/Switch';
 import { ValueField } from '@components/ValueField';
 import { useAnimationRevision } from '@hooks/useAnimationRevision';
-import { useWorkspaceStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useUIStore } from '@stores/uiStore';
 import { bumpScene } from '@stores/sceneStore';
 import { useBounceStore } from '@stores/bounceStore';
@@ -114,8 +114,7 @@ export function BounceSection({ nodeId }: { nodeId: string }): JSX.Element {
   // Existing" would stay greyed out after the user animated the layer from
   // anywhere else, and light up only when something unrelated re-rendered.
   useAnimationRevision();
-  const activeTabId = useWorkspaceStore((s) => s.activeTabId);
-  const playhead = useWorkspaceStore((s) => (activeTabId ? s.tabs[activeTabId]?.time : 0) ?? 0);
+  const playhead = useCurrentTime();
 
   const bounce = useBounceStore((s) => s.bounce);
   const drop = useBounceStore((s) => s.drop);

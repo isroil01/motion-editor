@@ -108,7 +108,7 @@ describe('weight-paint stroke undo', () => {
     const utils = render(<BoneOverlay />);
     const { container } = utils;
     // Select a bone, then engage the brush.
-    const boneG = container.querySelector('polygon[stroke="#ffaa00"]')!.parentElement!;
+    const boneG = container.querySelector('polygon[stroke="var(--color-overlay-rig-bone)"]')!.parentElement!;
     fireEvent.pointerDown(boneG, { clientX: -60, clientY: 0, pointerId: 1 });
     fireEvent.pointerUp(container.querySelector('svg')!, { clientX: -60, clientY: 0, pointerId: 1 });
     return utils;

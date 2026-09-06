@@ -14,6 +14,13 @@ export interface TabInfo {
   id: string; // The UI tab ID
   compositionId: string; // The root SceneNode ID for this tab
   breadcrumbPath: string[]; // E.g. ['comp_main', 'comp_lower_third']
+  /**
+   * AUTHORITATIVE COPY of the playhead, refreshed only at coarse moments
+   * (paused seeks, ≤4Hz during playback, pause, tab switch). The LIVE playhead
+   * is `stores/playbackClockStore` — read `useCurrentTime()` in render and
+   * `getTime()` in handlers. Reading these fields is exact while the transport
+   * is stopped and up to 250ms behind while it runs.
+   */
   time: number;
   frame: number;
   playing: boolean;
@@ -59,6 +66,35 @@ export interface CompositionSettings {
    * labels frame 0. Default 0.
    */
   startFrame: number;
+  /**
+   * The COMPOSITION's own pixel aspect ratio — the width of one comp pixel
+   * divided by its height. 1 (or absent) is square, which is every comp the
+   * app has ever made.
+   *
+   * This is NOT footage pixel aspect and must never be confused with it.
+   * Footage PAR is already gone by the time a layer exists: `sourceInfo`
+   * multiplies the stored width by `interpret.par`, so an anamorphic plate is
+   * a square-pixel layer of the correct SHAPE from import onward. Applying a
+   * comp PAR to it again would stretch it twice.
+   *
+   * What this field is for is the other direction: authoring FOR a non-square
+   * delivery format (D1/DV NTSC, PAL, HDV…), where the stored raster is
+   * narrower or wider than the picture it represents. The viewport's
+   * `view.pixelAspectCorrection` toggle stretches the STAGE by this number so
+   * a circle authored for D1 NTSC looks round while you draw it.
+   *
+   * PREVIEW ONLY. Nothing in the render or encode path carries a sample aspect
+   * ratio — the exporters write square-pixel rasters and no ffmpeg `setsar`
+   * exists anywhere — so this cannot and does not change a single exported
+   * pixel. It is recorded here so a project can carry the intent and the
+   * viewport can honour it.
+   *
+   * OPTIONAL, and `DEFAULT_COMP_SETTINGS` deliberately does not state it: a
+   * stated default would be written into every comp record and change every
+   * document on disk for a feature nobody turned on. Read it through
+   * `resolvePixelAspect`.
+   */
+  pixelAspect?: number;
   /**
    * GLOBAL LIGHT — one comp-wide light direction that layer styles can opt into.
    *
@@ -163,6 +199,20 @@ export function resolveSsao(comp: Pick<CompositionSettings, 'ssao'> | undefined)
   };
 }
 
+/** What an absent (or nonsensical) `pixelAspect` means: square pixels. */
+export const DEFAULT_PIXEL_ASPECT = 1;
+
+/**
+ * Resolve a composition's pixel aspect, filling in the square-pixel default for
+ * every document written before the field existed. Every consumer goes through
+ * here so a NaN, a zero or a negative can never reach the stage transform and
+ * collapse the viewport to nothing.
+ */
+export function resolvePixelAspect(comp: Pick<CompositionSettings, 'pixelAspect'> | undefined): number {
+  const v = comp?.pixelAspect;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : DEFAULT_PIXEL_ASPECT;
+}
+
 /** The composition's light direction, with the pre-global-light defaults. */
 export const DEFAULT_GLOBAL_LIGHT = { angle: 90, altitude: 45 } as const;
 
@@ -195,7 +245,19 @@ export interface ProjectStoreShape {
     markDirty: (id: string, dirty: boolean) => void;
     
     // Per-tab playback state (driven by TimelineController)
+    /**
+     * Move the ACTIVE tab's playhead through the project store. Kept for
+     * callers that have not migrated; the playback clock store watches this
+     * store and adopts the value, so it still moves the live playhead. New
+     * code seeks through the timeline controller or `playbackClockStore.setTime`.
+     */
     setTime: (time: number, frame: number) => void;
+    /**
+     * Write the authoritative playhead copy on ONE tab, silently: no
+     * `TimeChanged` (the clock store already emitted it) and no policy. This
+     * is the clock store's mirror sink and nothing else should call it.
+     */
+    commitTime: (tabId: string, time: number, frame: number) => void;
     setPlaying: (playing: boolean) => void;
     /**
      * Set the playing flag on a SPECIFIC tab, active or not.
@@ -376,6 +438,17 @@ export const useProjectStore = create<ProjectStoreShape>()(
             }
           });
           getEventBus().emit('TimeChanged', { time, frame });
+        },
+        commitTime: (tabId, time, frame) => {
+          const tab = get().tabs[tabId];
+          if (!tab || (tab.time === time && tab.frame === frame)) return;
+          set((s) => {
+            const t = s.tabs[tabId];
+            if (t) {
+              t.time = time;
+              t.frame = frame;
+            }
+          });
         },
         setPlaying: (playing) => {
           set((s) => {

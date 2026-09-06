@@ -34,6 +34,8 @@ function libraryAssets(): SyncableAsset[] {
     src: a.src,
     size: a.size,
     ...(a.metadata ? { metadata: a.metadata } : {}),
+    ...(a.tags && a.tags.length > 0 ? { tags: a.tags } : {}),
+    ...(a.label ? { label: a.label } : {}),
   }));
 }
 
@@ -119,6 +121,8 @@ export async function restoreBundleAssets(path: string | null): Promise<number> 
           src: asset.src,
           size: asset.size ?? 0,
           ...(asset.metadata ? { metadata: asset.metadata } : {}),
+          ...(asset.tags ? { tags: asset.tags } : {}),
+          ...(asset.label ? { label: asset.label } : {}),
         });
       }
     });

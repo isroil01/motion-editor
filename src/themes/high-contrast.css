@@ -1,0 +1,126 @@
+/**
+ * HIGH-CONTRAST THEME — a dark theme with the volume up.
+ *
+ * Pure black ground, white text, borders you can see, and a focus ring you
+ * cannot miss. It is an OVERLAY on dark.css rather than a third full theme:
+ * only the tokens whose value has to change are re-declared here, and
+ * everything else (accents, category hues, the timeline family) inherits.
+ *
+ * Two ways in, both driven by `applyUiPreferences()` in preferenceStore.ts:
+ *
+ *   • `[data-contrast="more"]` — the "High contrast" switch in Appearance.
+ *   • `@media (prefers-contrast: more)` while the theme mode is "system" —
+ *     the OS asked for it, and the user asked us to follow the OS. The store
+ *     mirrors that into the same attribute so the two paths render alike; the
+ *     media block below is the no-JS fallback, gated on `data-theme-mode`.
+ *
+ * The block is written twice because a selector list cannot put ONE of its
+ * members under a media query. Keep them identical.
+ *
+ * Contrast (measured by tokenContrast.test.ts against --surface-1 #0b0b0c):
+ *   primary #ffffff 19.6:1 · secondary #e6e6e6 15.8:1 · tertiary #c4c4c4 11.3:1
+ */
+
+[data-contrast="more"],
+[data-theme="high-contrast"] {
+  --surface-0:        var(--color-slate-1000);   /* #000000 */
+  --surface-1:        var(--color-slate-950);    /* #0b0b0c */
+  --surface-2:        var(--color-slate-900);    /* #171718 */
+  --surface-3:        var(--color-slate-850);    /* #212123 */
+  --surface-hover:    var(--color-white-a15);
+  --surface-active:   var(--color-white-a24);
+  --surface-selected: rgba(41, 136, 255, 0.35);
+
+  --color-background:        var(--surface-0);
+  --color-surface-raised:    var(--surface-3);
+  --color-panel:             var(--surface-1);
+  --color-panel-header:      var(--surface-1);
+  --color-toolbar:           var(--surface-1);
+  --color-statusbar:         var(--surface-1);
+  --color-titlebar:          var(--surface-0);
+  --color-workspace:         var(--surface-0);
+  --color-pasteboard:        var(--surface-1);
+
+  /* Borders: visible on every seam, not just structural ones. */
+  --color-border-structural: var(--color-neutral-400);
+  --color-border:            var(--color-neutral-500);
+  --color-border-strong:     var(--color-neutral-300);
+  --color-border-subtle:     var(--color-neutral-600);
+  --color-divider:           var(--color-neutral-500);
+  --color-field-border:       var(--color-neutral-400);
+  --color-field-border-hover: var(--color-neutral-100);
+  --color-splitter:          var(--color-neutral-400);
+  --border-width-control:    var(--border-width-thick);
+  --border-width-focus:      var(--border-width-heavy);
+
+  --color-text-primary:      var(--color-slate-0);
+  --color-text-secondary:    #e6e6e6;
+  --color-text-tertiary:     #c4c4c4;
+  --color-text-muted:        var(--color-neutral-300);
+  --color-text-disabled:     var(--color-neutral-400);
+
+  --color-hover:             var(--surface-hover);
+  --color-active:            var(--surface-active);
+  --color-pressed:           var(--surface-active);
+  --color-overlay-hover:     var(--surface-hover);
+  --color-overlay-active:    var(--surface-active);
+
+  /* A solid, opaque ring three pixels wide — the alpha ring dark.css uses
+     disappears against a light control. */
+  --color-focus-ring:        var(--color-amber-400);
+  --shadow-focus-ring:       0 0 0 var(--border-width-focus) var(--color-focus-ring);
+
+  --color-info:              var(--color-neutral-100);
+  --color-overlay-scrim:     rgba(0, 0, 0, 0.85);
+}
+
+@media (prefers-contrast: more) {
+  :root[data-theme-mode="system"]:not([data-contrast="off"]) {
+    --surface-0:        var(--color-slate-1000);
+    --surface-1:        var(--color-slate-950);
+    --surface-2:        var(--color-slate-900);
+    --surface-3:        var(--color-slate-850);
+    --surface-hover:    var(--color-white-a15);
+    --surface-active:   var(--color-white-a24);
+    --surface-selected: rgba(41, 136, 255, 0.35);
+
+    --color-background:        var(--surface-0);
+    --color-surface-raised:    var(--surface-3);
+    --color-panel:             var(--surface-1);
+    --color-panel-header:      var(--surface-1);
+    --color-toolbar:           var(--surface-1);
+    --color-statusbar:         var(--surface-1);
+    --color-titlebar:          var(--surface-0);
+    --color-workspace:         var(--surface-0);
+    --color-pasteboard:        var(--surface-1);
+
+    --color-border-structural: var(--color-neutral-400);
+    --color-border:            var(--color-neutral-500);
+    --color-border-strong:     var(--color-neutral-300);
+    --color-border-subtle:     var(--color-neutral-600);
+    --color-divider:           var(--color-neutral-500);
+    --color-field-border:       var(--color-neutral-400);
+    --color-field-border-hover: var(--color-neutral-100);
+    --color-splitter:          var(--color-neutral-400);
+    --border-width-control:    var(--border-width-thick);
+    --border-width-focus:      var(--border-width-heavy);
+
+    --color-text-primary:      var(--color-slate-0);
+    --color-text-secondary:    #e6e6e6;
+    --color-text-tertiary:     #c4c4c4;
+    --color-text-muted:        var(--color-neutral-300);
+    --color-text-disabled:     var(--color-neutral-400);
+
+    --color-hover:             var(--surface-hover);
+    --color-active:            var(--surface-active);
+    --color-pressed:           var(--surface-active);
+    --color-overlay-hover:     var(--surface-hover);
+    --color-overlay-active:    var(--surface-active);
+
+    --color-focus-ring:        var(--color-amber-400);
+    --shadow-focus-ring:       0 0 0 var(--border-width-focus) var(--color-focus-ring);
+
+    --color-info:              var(--color-neutral-100);
+    --color-overlay-scrim:     rgba(0, 0, 0, 0.85);
+  }
+}

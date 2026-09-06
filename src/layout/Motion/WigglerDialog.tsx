@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@components/Button';
 import { ValueField } from '@components/ValueField';
 import { openModal } from '@stores/modalStore';
+import { DialogFooter, useDialogPrimaryAction } from '@components/Modal';
 import { defaultAnimation, type Keyframe, type PropPath } from '@motion/animation';
 import { wiggleTrackKeyframes } from '@core/animation/keyframeAssistants';
 import { beginTrackPreview } from './assistantPreview';
@@ -125,6 +126,8 @@ function WigglerBody({ nodeId, tracks, close, onDone }: WigglerBodyProps): JSX.E
   };
 
   const valid = targets.length > 0 && frequency > 0 && amplitude !== 0;
+  // Enter wiggles, once the numbers make sense.
+  useDialogPrimaryAction(valid ? confirm : null);
 
   return (
     <div className={styles.body}>
@@ -193,15 +196,19 @@ function WigglerBody({ nodeId, tracks, close, onDone }: WigglerBodyProps): JSX.E
           : 'Frequency must be above 0 and amplitude must not be 0.'}
       </p>
 
-      <div className={styles.footer}>
-        <span className={styles.footerNote}>Previewing on the composition</span>
-        <Button variant="ghost" onClick={cancel}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={confirm} disabled={!valid}>
-          Wiggle
-        </Button>
-      </div>
+      <DialogFooter
+        note="Previewing on the composition"
+        secondary={
+          <Button variant="ghost" onClick={cancel}>
+            Cancel
+          </Button>
+        }
+        primary={
+          <Button variant="primary" onClick={confirm} disabled={!valid}>
+            Wiggle
+          </Button>
+        }
+      />
     </div>
   );
 }
@@ -221,8 +228,11 @@ export function openWigglerDialog(nodeId: string): Promise<string | null> {
       resolve(summary);
     };
     openModal({
+      id: 'wiggler',
       title: 'The Wiggler',
       size: 'sm',
+      // A tool window, like the Smoother: the preview is on the comp.
+      variant: 'floating',
       onClose: () => finish(null),
       render: (close) => (
         <WigglerBody nodeId={nodeId} tracks={tracks} close={close} onDone={finish} />

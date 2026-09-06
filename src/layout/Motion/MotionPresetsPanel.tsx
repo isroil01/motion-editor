@@ -45,7 +45,7 @@ import { api, isAuthenticated } from '@core/api/client';
 import { cloudProjectsEnabled } from '@core/config/edition';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { useSelectionStore } from '@stores/selectionStore';
-import { useWorkspaceStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useUIStore } from '@stores/uiStore';
 import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import { setCanvasDrag } from '@core/dnd/canvasDrag';
@@ -93,8 +93,7 @@ function folderIcon(folder: string): IconName {
 export function MotionPresetsPanel(): JSX.Element {
   const selectedIds = useSelectionStore((s) => s.ids);
   const notify = useUIStore((s) => s.notify);
-  const activeTabId = useWorkspaceStore((s) => s.activeTabId);
-  const playhead = useWorkspaceStore((s) => (activeTabId ? s.tabs[activeTabId]?.time : 0) ?? 0);
+  const playhead = useCurrentTime();
 
   // Re-render when the scene is modified (e.g. the user saves or deletes one).
   const sceneRev = useSceneRevision((s) => s.rev);
@@ -500,6 +499,7 @@ export function MotionPresetsPanel(): JSX.Element {
                         draggable
                         onDragStart={(e) => setCanvasDrag(e, { kind: 'motionPreset', name: preset.name })}
                         onClick={() => apply(preset)}
+                        data-tour="quick-apply"
                         // Double-click applies too: AE users reach for it, and a
                         // second apply is undoable, so the duplicate is harmless.
                         onDoubleClick={() => apply(preset)}

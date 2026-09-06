@@ -93,11 +93,11 @@ describe('the Dash Offset row', () => {
     setStroke(DASH);
     render(<AppearanceSection nodeId={ID} />);
     openStrokePopover();
-    const row = screen.getAllByLabelText('Dash Offset')[0]!;
-    // The toggle is the checkbox in the same row.
-    const checkbox = row.closest('div')?.parentElement?.querySelector('input[type="checkbox"]');
-    expect(checkbox).toBeTruthy();
-    fireEvent.click(checkbox as Element);
+    // The toggle is the row's stopwatch (AnimToggle) — the same control every
+    // other animatable row uses since 2026-09-05, not a bare checkbox.
+    const stopwatch = screen.getAllByLabelText('Enable Dash Offset animation')[0]!;
+    expect(stopwatch).toBeTruthy();
+    fireEvent.click(stopwatch);
     expect(defaultAnimation.isAnimated(ID, PROP)).toBe(true);
   });
 

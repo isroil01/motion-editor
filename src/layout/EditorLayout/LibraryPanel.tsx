@@ -38,6 +38,7 @@ import { LOTTIE_ITEMS, insertLottieItem, importLottieFile, type LottieCategory }
 import { prepareLottiePreview, drawLottiePreview } from '@core/library/lottiePreview';
 import { reportLottieImport, reportLottieImportFailure } from '@core/lottie/lottieImportReport';
 import type { LottieJson } from '@core/lottie/lottieImport';
+import { TemplateFieldsPanel } from '@layout/Templates/TemplateFieldsPanel';
 import { LibraryBrowser, FavoriteStar } from './LibraryBrowser';
 import styles from './panels.module.css';
 
@@ -93,98 +94,95 @@ export function ComponentsPanel(): JSX.Element {
   };
 
   return (
-    <Panel
-      id="components"
-      title="Components"
-      icon="box"
-      hideHeader
-      onClose={() => getEventBus().emit('PanelClosed', { panelId: 'components' })}
-    >
-      <div className={styles.libBody}>
-        <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!showSaveInput ? (
-            <button
-              type="button"
-              className={styles.libChip}
-              style={{ flexDirection: 'row', gap: 8, justifyContent: 'center', opacity: hasSelection ? 1 : 0.5, cursor: hasSelection ? 'pointer' : 'not-allowed' }}
-              disabled={!hasSelection}
-              title={hasSelection ? 'Save the current selection as a reusable component' : 'Select layer(s) first'}
-              onClick={() => setShowSaveInput(true)}
-            >
-              <Icon name="plus" size="md" /> Save selection as component
-            </button>
-          ) : (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Input
-                value={componentName}
-                onChange={(e) => setComponentName(e.currentTarget.value)}
-                autoFocus
-                size="sm"
-                fullWidth
-                placeholder="Component name"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSave();
-                  if (e.key === 'Escape') setShowSaveInput(false);
-                }}
-              />
+    <div className={styles.libBody}>
+      <div className={styles.componentsActionRow}>
+        {!showSaveInput ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth
+            leftIcon={<Icon name="plus" size="sm" />}
+            disabled={!hasSelection}
+            title={hasSelection ? 'Save the current selection as a reusable component' : 'Select layer(s) first'}
+            onClick={() => setShowSaveInput(true)}
+          >
+            Save selection as component
+          </Button>
+        ) : (
+          <div className={styles.componentsSaveRow}>
+            <Input
+              value={componentName}
+              onChange={(e) => setComponentName(e.currentTarget.value)}
+              autoFocus
+              size="sm"
+              fullWidth
+              placeholder="Component name"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Escape') setShowSaveInput(false);
+              }}
+            />
+            <Button size="sm" variant="primary" onClick={handleSave}>
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowSaveInput(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {savedComponents.length === 0 ? (
+        <EmptyState
+          compact
+          icon="component"
+          message="No components yet. Select a layer or group and save it to reuse anywhere."
+        />
+      ) : (
+        <div className={styles.libGrid}>
+          {savedComponents.map((c) => (
+            <div key={c.id} className={styles.componentCardWrap}>
               <button
                 type="button"
                 className={styles.libChip}
-                style={{ padding: '0 8px', minHeight: 'unset', width: 'auto', flexShrink: 0 }}
-                onClick={handleSave}
+                title={`Insert a copy of “${c.name}” — or drag onto the canvas`}
+                draggable
+                onDragStart={(e) => setCanvasDrag(e, { kind: 'component', componentId: c.id })}
+                onClick={() => {
+                  insertComponent(c.id);
+                  useUIStore.getState().notify({ level: 'success', message: `Inserted ${c.name}`, durationMs: 1500 });
+                }}
               >
-                Save
+                {(() => {
+                  const thumb = componentThumb(c);
+                  return thumb ? (
+                    <img
+                      src={thumb}
+                      alt=""
+                      className={styles.componentThumbImg}
+                    />
+                  ) : (
+                    <span className={styles.libChipThumb}>
+                      <Icon name="component" size="md" />
+                    </span>
+                  );
+                })()}
+                <span className={styles.libChipLabel}>{c.name}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.componentDeleteBtn}
+                aria-label={`Delete ${c.name}`}
+                title="Delete component"
+                onClick={() => removeComponent(c.id)}
+              >
+                <Icon name="close" size="sm" />
               </button>
             </div>
-          )}
-          {savedComponents.length === 0 ? (
-            <EmptyState
-              compact
-              icon="component"
-              message="No components yet. Select a layer or group and save it to reuse anywhere."
-            />
-          ) : (
-            <div className={styles.libGrid}>
-              {savedComponents.map((c) => (
-                <div key={c.id} style={{ position: 'relative' }}>
-                  <button
-                    type="button"
-                    className={styles.libChip}
-                    title={`Insert a copy of “${c.name}” — or drag onto the canvas`}
-                    draggable
-                    onDragStart={(e) => setCanvasDrag(e, { kind: 'component', componentId: c.id })}
-                    onClick={() => { insertComponent(c.id); useUIStore.getState().notify({ level: 'success', message: `Inserted ${c.name}`, durationMs: 1500 }); }}
-                  >
-                    {(() => {
-                      const thumb = componentThumb(c);
-                      return thumb ? (
-                        <img
-                          src={thumb}
-                          alt=""
-                          width={48}
-                          height={32}
-                          style={{ objectFit: 'contain', borderRadius: 4, background: 'var(--color-surface-0)' }}
-                        />
-                      ) : (
-                        <Icon name="component" size="lg" />
-                      );
-                    })()}
-                    <span className={styles.libChipLabel}>{c.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${c.name}`}
-                    title="Delete component"
-                    onClick={() => removeComponent(c.id)}
-                    style={{ position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: '50%', border: '1px solid var(--color-border)', background: 'var(--color-surface-0)', color: 'var(--color-text-tertiary)', cursor: 'pointer', fontSize: 'var(--font-size-xs)', lineHeight: 1 }}
-                  >✕</button>
-                </div>
-              ))}
-            </div>
-          )}
+          ))}
         </div>
-      </div>
-    </Panel>
+      )}
+    </div>
   );
 }
 
@@ -194,34 +192,28 @@ export function ShapesPanel(): JSX.Element {
   };
 
   return (
-    <Panel
-      id="shapes"
-      title="Shapes"
-      icon="shape"
-      hideHeader
-      onClose={() => getEventBus().emit('PanelClosed', { panelId: 'shapes' })}
-    >
-      <div className={styles.libBody}>
-        <div className={styles.libGrid}>
-          {SHAPE_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={styles.libChip}
-              title={`Insert ${p.label} — or drag onto the canvas`}
-              draggable
-              onDragStart={(e) => setCanvasDrag(e, { kind: 'shape', primitive: p.primitive, label: p.label })}
-              onClick={() => handleShapeInsert(p)}
-            >
-              <svg width="32" height="32" viewBox="0 0 32 32" style={{ color: '#bbb' }}>
+    <div className={styles.libBody}>
+      <div className={styles.libGrid}>
+        {SHAPE_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={styles.libChip}
+            title={`Insert ${p.label} — or drag onto the canvas`}
+            draggable
+            onDragStart={(e) => setCanvasDrag(e, { kind: 'shape', primitive: p.primitive, label: p.label })}
+            onClick={() => handleShapeInsert(p)}
+          >
+            <span className={styles.libChipThumb}>
+              <svg width="24" height="24" viewBox="0 0 32 32" className={styles.shapeSvgIcon}>
                 {p.svg}
               </svg>
-              <span className={styles.libChipLabel}>{p.label}</span>
-            </button>
-          ))}
-        </div>
+            </span>
+            <span className={styles.libChipLabel}>{p.label}</span>
+          </button>
+        ))}
       </div>
-    </Panel>
+    </div>
   );
 }
 
@@ -231,47 +223,39 @@ export function TextPanel(): JSX.Element {
   };
 
   return (
-    <Panel
-      id="text"
-      title="Text"
-      icon="type"
-      hideHeader
-      onClose={() => getEventBus().emit('PanelClosed', { panelId: 'text' })}
-    >
-      <div className={styles.libBody}>
-        <div className={styles.libList}>
-          {TEXT_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={styles.libTextItem}
-              title={`Insert ${p.label} text layer — or drag onto the canvas`}
-              draggable
-              onDragStart={(e) => setCanvasDrag(e, { kind: 'text', label: p.label, fontSize: p.fontSize, weight: p.weight, extra: (p as any).extra ?? {} })}
-              onClick={() => handleTextInsert(p)}
+    <div className={styles.libBody}>
+      <div className={styles.libList}>
+        {TEXT_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={styles.libTextItem}
+            title={`Insert ${p.label} text layer — or drag onto the canvas`}
+            draggable
+            onDragStart={(e) => setCanvasDrag(e, { kind: 'text', label: p.label, fontSize: p.fontSize, weight: p.weight, extra: (p as any).extra ?? {} })}
+            onClick={() => handleTextInsert(p)}
+          >
+            <span
+              style={{
+                fontSize: Math.min(p.fontSize / 3, 20),
+                fontWeight: p.weight,
+                fontStyle: (p as any).extra?.fontStyle,
+                color: (p as any).extra?.fill || 'inherit',
+                fontFamily: (p as any).extra?.fontFamily || 'inherit',
+                letterSpacing: (p as any).extra?.letterSpacing ? `${(p as any).extra.letterSpacing}px` : 'normal',
+                textTransform: (p as any).extra?.transform || 'none',
+              }}
             >
-              <span
-                style={{
-                  fontSize: Math.min(p.fontSize / 3, 20),
-                  fontWeight: p.weight,
-                  fontStyle: (p as any).extra?.fontStyle,
-                  color: (p as any).extra?.fill || 'inherit',
-                  fontFamily: (p as any).extra?.fontFamily || 'inherit',
-                  letterSpacing: (p as any).extra?.letterSpacing ? `${(p as any).extra.letterSpacing}px` : 'normal',
-                  textTransform: (p as any).extra?.transform || 'none',
-                }}
-              >
-                {p.label}
-              </span>
-              <span className={styles.libTextMeta}>
-                {p.fontSize}px · w{p.weight}
-                {(p as any).extra?.fill && ' · styled'}
-              </span>
-            </button>
-          ))}
-        </div>
+              {p.label}
+            </span>
+            <span className={styles.libTextMeta}>
+              {p.fontSize}px · w{p.weight}
+              {(p as any).extra?.fill && ' · styled'}
+            </span>
+          </button>
+        ))}
       </div>
-    </Panel>
+    </div>
   );
 }
 
@@ -645,7 +629,9 @@ function LottieContent(): JSX.Element {
 // ── Library Panel — ONE home for asset libraries ──────────────────
 // Motion GFX / Transitions / Sound FX / Lottie live as sections inside a single sidebar tab.
 
-type LibrarySection = 'mograph' | 'transitions' | 'sfx' | 'lottie' | 'components' | 'shapes' | 'text';
+type LibrarySection =
+  | 'mograph' | 'transitions' | 'sfx' | 'lottie' | 'components' | 'shapes' | 'text'
+  | 'templates';
 
 const LIBRARY_SECTIONS: ReadonlyArray<{ id: LibrarySection; label: string; icon: IconName }> = [
   { id: 'mograph',     label: 'Motion GFX',  icon: 'sparkles' },
@@ -655,6 +641,18 @@ const LIBRARY_SECTIONS: ReadonlyArray<{ id: LibrarySection; label: string; icon:
   { id: 'components',  label: 'Components',  icon: 'component' },
   { id: 'shapes',      label: 'Shapes',      icon: 'shape' },
   { id: 'text',        label: 'Text',        icon: 'type' },
+  /*
+    Templates is the one library with no other home: it was reachable only
+    through a document already using one.
+
+    Presets, Swatches, Materials and Ease were listed here too (2026-09-04)
+    and are gone again (2026-09-05). Each was the SAME component the right
+    rail already shows as its own tab (Presets, Swatches), the Properties
+    panel's Style tab (Materials) or the Graph panel (Ease) — so the rail had
+    twelve tabs, the strip scrolled off the panel, and the same surface
+    answered to two names. One implementation, one place.
+  */
+  { id: 'templates',   label: 'Templates',   icon: 'layout' },
 ];
 
 export function LibraryPanel(): JSX.Element {
@@ -688,6 +686,7 @@ export function LibraryPanel(): JSX.Element {
       {section === 'components' && <ComponentsPanel />}
       {section === 'shapes' && <ShapesPanel />}
       {section === 'text' && <TextPanel />}
+      {section === 'templates' && <TemplateFieldsPanel />}
     </Panel>
   );
 }

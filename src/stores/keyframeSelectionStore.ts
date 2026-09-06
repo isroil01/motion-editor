@@ -15,10 +15,28 @@ interface KeyframeSelectionStore {
   clear: () => void;
 }
 
-export const useKeyframeSelectionStore = create<KeyframeSelectionStore>((set) => ({
+/** Same members, in any order. */
+export function sameIdSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
+export const useKeyframeSelectionStore = create<KeyframeSelectionStore>((set, get) => ({
   ids: new Set<string>(),
-  set: (ids) => set({ ids: new Set(ids) }),
-  clear: () => set({ ids: new Set<string>() }),
+  // Identity changes ONLY when membership does. A marquee drag calls this at
+  // pointer rate with the same members almost every time, and every row of
+  // the timeline compares the Set by identity to decide whether to re-render
+  // — so a fresh Set per move re-rendered every visible row per move.
+  set: (ids) => {
+    if (sameIdSet(get().ids, ids)) return;
+    set({ ids: new Set(ids) });
+  },
+  clear: () => {
+    if (get().ids.size === 0) return;
+    set({ ids: new Set<string>() });
+  },
 }));
 
 export function pruneKeyframeSelectionToNodes(nodeIds: ReadonlySet<string>): void {

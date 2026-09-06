@@ -56,7 +56,7 @@
  * shot camera.
  */
 
-import { Matrix, Matrix4Math, Project3D, type Matrix2D, type Vec3 } from '@motion/scene';
+import { Matrix, Matrix4Math, Project3D, type Matrix2D, type Matrix4, type Vec3 } from '@motion/scene';
 import type { LayerSpace } from '@motion/animation';
 import { defaultAnimation } from '@motion/animation';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
@@ -64,8 +64,9 @@ import { getRemappedTime } from '@core/timeline/TimelineController';
 import { worldMatrixOf, type LocalOf, type LocalTransform, type ParentOf } from '@core/scene/worldTransform';
 import { readGeometry } from '@core/workspace/geometry';
 import { is3DEnabled } from '@core/scene/threeD';
-import { readSceneCamera } from '@core/scene/camera3d';
-import { nodeWorldWithParents3d, toWorldPointAt } from '@core/scene/liveWorld3d';
+import { cameraFromNode, readSceneCamera } from '@core/scene/camera3d';
+import { deviceWorldPosition, nodeWorldWithParents3d, toWorldPointAt } from '@core/scene/liveWorld3d';
+import { readNodeKind } from '@core/scene/sceneDerive';
 import type { SceneNode } from '@core/types';
 
 /** The composition box the projection needs. Injected so tests need no store. */
@@ -144,6 +145,62 @@ function planeOf(m: readonly number[]): { point: Vec3; normal: Vec3 } {
 }
 
 /**
+ * The camera props a layer space may sample — its GEOMETRY, and nothing else.
+ *
+ * `evaluateNode` evaluates every animated prop of the camera, expressions
+ * included. A camera whose Focus Distance is linked to a layer by expression
+ * (`length(sub(thisComp.layer(…).toWorld(…), thisLayer.toWorld(…))))`) has an
+ * expression that asks for a layer space, which resolves the camera, which
+ * evaluated the expression again — a cycle the engine reported as an error and
+ * fell out of, thousands of times per frame. Depth of field never moves the
+ * eye, so the resolver here reads only the props that do.
+ */
+const CAMERA_GEOMETRY_PROPS: ReadonlySet<string> = new Set([
+  'x', 'y', 'z', 'focalLength', 'orbitYaw', 'orbitPitch',
+  'poiX', 'poiY', 'poiZ', 'orientationX', 'orientationY', 'orientationZ',
+]);
+
+function cameraGeometrySampler(time: number): (id: string, prop: string) => number | undefined {
+  return (id, prop) =>
+    CAMERA_GEOMETRY_PROPS.has(prop) ? defaultAnimation.sample(id, prop, getRemappedTime(id, time)) : undefined;
+}
+
+function isDeviceNode(node: SceneNode): boolean {
+  const kind = readNodeKind(node);
+  return kind === 'camera' || kind === 'light';
+}
+
+/**
+ * The layer space of a CAMERA or a LIGHT.
+ *
+ * Devices have no geometry, so `nodeWorldWithParents3d` has no matrix for them
+ * and `thisLayer.toWorld([0, 0])` on a camera reported "no such layer" — which
+ * is the one call Link Focus Distance to Layer is built on, and the AE idiom
+ * for "where is the camera" in any expression. A device's space is a pure
+ * translation at its resolved world position: for a camera the EYE the
+ * renderer projects through (parents, orbit and point of interest included, so
+ * the number an expression reads is the one the pixels were made from), for a
+ * light its parent-lifted position.
+ */
+function deviceMatrixAt(node: SceneNode, time: number, comp: SpaceComp): Matrix4 | null {
+  const kind = readNodeKind(node);
+  if (kind !== 'camera' && kind !== 'light') return null;
+  const position = kind === 'camera'
+    ? cameraFromNode(
+        node, comp.width, comp.height,
+        cameraGeometrySampler(time),
+        (id, point) => toWorldPointAt(id, time, point),
+      ).position
+    : deviceWorldPosition(node, time);
+  return Matrix4Math.compose({
+    position,
+    rotation: { x: 0, y: 0, z: 0 },
+    scale: { x: 1, y: 1, z: 1 },
+    anchor: { x: 0, y: 0, z: 0 },
+  });
+}
+
+/**
  * The conversions for one layer at one time, or undefined when the node is gone.
  *
  * 2D and 3D are genuinely different code paths, not one with a flag: a 2D
@@ -158,7 +215,7 @@ export function layerSpaceAt(
   const node: SceneNode | undefined = defaultSceneGraph.getNode(nodeId) ?? undefined;
   if (!node) return undefined;
 
-  if (!is3DEnabled(node)) {
+  if (!is3DEnabled(node) && !isDeviceNode(node)) {
     // ── 2D. The composition IS the world plane. ──────────────────────
     const w = world2DAt(nodeId, time);
     const inv = Matrix.invert(w);
@@ -185,14 +242,17 @@ export function layerSpaceAt(
   }
 
   // ── 3D. Layer → world is a 4×4; world → comp is the camera. ────────
-  const m = nodeWorldWithParents3d(node, time);
+  // Devices FIRST: a camera does carry enough Transform props for
+  // `nodeWorldWithParents3d` to hand back a matrix, but it is the un-orbited
+  // base position — not the eye the shot is taken from.
+  const m = isDeviceNode(node) ? deviceMatrixAt(node, time, comp) : nodeWorldWithParents3d(node, time);
   if (!m) return undefined;
   const mi = Matrix4Math.invert(m);
   const camera = readSceneCamera(
     defaultSceneGraph,
     comp.width,
     comp.height,
-    (id, prop) => defaultAnimation.evaluateNode(id, getRemappedTime(id, time)).get(prop),
+    cameraGeometrySampler(time),
     comp.rootId,
     (id, point) => toWorldPointAt(id, time, point),
   );

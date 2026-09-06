@@ -82,6 +82,8 @@ import { buildCaptionCommands } from '@core/captions/captionCommands';
 import { buildChoreographyCommands } from '@core/animation/choreographyCommands';
 import { buildBeatCommands } from '@core/audio/beatCommands';
 import { buildSpeedRampCommands } from '@core/animation/speedRampCommands';
+import { buildLayerTimeCommands } from '@core/animation/layerTimeCommands';
+import { buildCameraCommands } from '@core/scene/cameraCommands';
 import {
   buildSmartAnimateCommands,
   installSmartAnimateCommandSync,
@@ -132,6 +134,8 @@ import { ProjectCommands } from '@layout/Menu';
 import { CommandPalette } from '@layout/CommandPalette';
 import { PresentationMode } from '@layout/Presentation/PresentationMode';
 import { openPalette } from '@stores/commandPaletteStore';
+import { focusNavigationClaimedNow } from '@core/commands/focusContext';
+import { isNativeMenuActionId } from '@layout/Menu/nativeMenuTemplate';
 import { insertCamera, insertLight, insertAdjustmentLayer, precomposeSelected, insertPrimitive, insertSolid, deleteSelectedLayers, duplicateSelectedLayers, insert3DPrimitive } from '@core/scene/sceneInsert';
 import { runSceneEditDetection, type SceneEditMode } from '@core/tracking/sceneEditCommand';
 import { getWorkspaceManager } from '@core/layout/workspaceManager';
@@ -750,6 +754,45 @@ function buildBuiltinCommands(): ReadonlyArray<Command> {
     },
     {
       /**
+       * One-key focus modes. `Tab` folds the UI down to viewport + timeline,
+       * `Shift+Tab` to the viewport alone; the same key again puts the panels
+       * back exactly as they were (`layoutStore.setFocusMode`).
+       *
+       * `enabled` is the whole safety story: Tab moves focus inside a text
+       * field, a dialog and a menu, and the global dispatcher wins every race
+       * with a panel listener (repo rule). A DISABLED command falls through,
+       * so reporting false here is what hands Tab back to the browser there.
+       */
+      id: asCommandId('view.focusMode.viewportTimeline'),
+      label: 'Focus: Viewport + Timeline',
+      description: 'Collapse both sidebars; press again to restore',
+      icon: 'panel-bottom',
+      shortcut: { key: 'Tab' },
+      enabled: () => !focusNavigationClaimedNow(),
+      isChecked: () => useLayoutStore.getState().focusMode === 'viewport-timeline',
+      execute: () => useLayoutStore.getState().setFocusMode('viewport-timeline'),
+    },
+    {
+      id: asCommandId('view.focusMode.viewport'),
+      label: 'Focus: Viewport Only',
+      description: 'Collapse sidebars and timeline; press again to restore',
+      icon: 'maximize',
+      shortcut: { key: 'Tab', shift: true },
+      enabled: () => !focusNavigationClaimedNow(),
+      isChecked: () => useLayoutStore.getState().focusMode === 'viewport',
+      execute: () => useLayoutStore.getState().setFocusMode('viewport'),
+    },
+    {
+      // The palette's `?` mode as a menu entry, so the docs are findable from
+      // Help by someone who has never typed a prefix.
+      id: asCommandId('help.searchDocs'),
+      label: 'Search Documentation…',
+      icon: 'info',
+      enabled: () => true,
+      execute: () => openPalette('?'),
+    },
+    {
+      /**
        * Guide layers — visible while you work, absent from the deliverable.
        *
        * Multi-select capable, because marking a batch of reference layers at
@@ -1273,6 +1316,8 @@ export function buildStaticCommands(): ReadonlyArray<Command> {
     ...buildChoreographyCommands(),
     ...buildBeatCommands(),
     ...buildSpeedRampCommands(),
+    ...buildLayerTimeCommands(),
+    ...buildCameraCommands(),
     ...buildSmartAnimateCommands(),
     ...buildReframeCommands(),
     ...buildIk3DCommands(),
@@ -2293,7 +2338,10 @@ export function Providers({ children }: ProvidersProps): JSX.Element {
         }));
 
         // Native (Electron) menu items dispatch through the same CommandSystem.
+        // `menu.action:` ids are the model's onSelect-only entries (workspace
+        // presets); `useNativeMenuSync` answers those, not the registry.
         window.motionEditor?.onMenuCommand?.((id) => {
+          if (isNativeMenuActionId(id)) return;
           void getCommandSystem().execute(asCommandId(id));
         });
 

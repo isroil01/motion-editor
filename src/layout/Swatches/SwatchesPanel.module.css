@@ -41,10 +41,10 @@
 }
 
 .sectionLabel {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--letter-spacing-uppercase);
   color: var(--color-text-secondary);
   margin-top: 4px;
 }

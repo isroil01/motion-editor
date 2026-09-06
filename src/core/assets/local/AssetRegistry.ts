@@ -39,6 +39,8 @@ export interface AssetImportMeta {
   width?: number;
   height?: number;
   duration?: number;
+  tags?: string[];
+  label?: string;
 }
 
 export class AssetRegistry {
@@ -74,9 +76,34 @@ export class AssetRegistry {
       ...(meta.width != null ? { width: meta.width } : {}),
       ...(meta.height != null ? { height: meta.height } : {}),
       ...(meta.duration != null ? { duration: meta.duration } : {}),
+      ...(meta.tags && meta.tags.length > 0 ? { tags: [...meta.tags] } : {}),
+      ...(meta.label ? { label: meta.label } : {}),
     };
     this.records.set(id, record);
     return record;
+  }
+
+  /**
+   * Rewrite the organisation fields of a record that is ALREADY here.
+   *
+   * `importBytes` returns the existing record untouched on a repeat import,
+   * which is right for the bytes and wrong for tags: an asset collected on the
+   * first save and tagged afterwards would never carry its tags into the
+   * bundle. Returns whether anything changed, so the caller can skip the
+   * registry write when nothing did.
+   */
+  updateMeta(id: string, patch: { tags?: string[]; label?: string }): boolean {
+    const record = this.records.get(id);
+    if (!record) return false;
+    const nextTags = patch.tags && patch.tags.length > 0 ? [...patch.tags] : undefined;
+    const nextLabel = patch.label || undefined;
+    const sameTags = JSON.stringify(record.tags ?? []) === JSON.stringify(nextTags ?? []);
+    if (sameTags && (record.label ?? undefined) === nextLabel) return false;
+    if (nextTags) record.tags = nextTags;
+    else delete record.tags;
+    if (nextLabel) record.label = nextLabel;
+    else delete record.label;
+    return true;
   }
 
   get(id: string): AssetRecord | null {

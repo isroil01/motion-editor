@@ -1,4 +1,4 @@
-import { shapeOfEasing, keyframeShapes, keyframePaths, describeShapes } from './keyframeShape';
+import { shapeOfEasing, keyframeShapes, keyframePaths, describeShapes, interpOfShape, keyframeInterp } from './keyframeShape';
 
 describe('shapeOfEasing — every easing maps to a family', () => {
   it('linear and absent easing are the diamond', () => {
@@ -88,5 +88,30 @@ describe('describeShapes — the tooltip', () => {
 
   it('spells out a split keyframe', () => {
     expect(describeShapes('ease', 'hold')).toBe('Eased in · Hold out');
+  });
+});
+
+describe('interpOfShape / keyframeInterp — the data-interp colour attribute', () => {
+  it('maps every shape family onto a --color-timeline-kf-* token name', () => {
+    expect(interpOfShape('linear')).toBe('linear');
+    expect(interpOfShape('ease')).toBe('bezier');
+    expect(interpOfShape('auto')).toBe('auto');
+    expect(interpOfShape('hold')).toBe('hold');
+  });
+
+  it('colours by the OUT side, which is the segment the eye follows', () => {
+    expect(keyframeInterp({ left: 'linear', right: 'hold' }, false)).toBe('hold');
+    expect(keyframeInterp({ left: 'hold', right: 'ease' }, false)).toBe('bezier');
+  });
+
+  it('the last keyframe has no out segment, so it shows the one that arrived', () => {
+    expect(keyframeInterp({ left: 'hold', right: 'linear' }, true)).toBe('hold');
+  });
+
+  it('every easing kind ends up in one of the four families', () => {
+    const kinds = ['linear', 'hold', 'step', 'autoBezier', 'continuousBezier', 'ease', 'easeIn', 'easeOut', 'easeInOut', 'bezier', undefined] as const;
+    for (const k of kinds) {
+      expect(['linear', 'bezier', 'hold', 'auto']).toContain(interpOfShape(shapeOfEasing(k)));
+    }
   });
 });

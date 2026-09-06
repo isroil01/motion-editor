@@ -72,6 +72,9 @@ import {
   isHoldEasing,
   type Bezier,
 } from './speedGraph';
+import { keyframesInBox, nearestCurveAt } from './graphHover';
+import { installGraphNormalizeCommands, onGraphNormalize } from './graphNormalize';
+import { applyKeyframeVelocity, readKeyframeVelocity } from './keyframeVelocity';
 import { snapKeyframeTime, snapKeyframeValue, type SnapTarget, type ValueSnapTarget } from './keyframeSnap';
 import { computeBoxZoomFromSvg } from './graphBoxZoom';
 import { nearestKeyframeOnCurve } from './graphCurveClick';
@@ -181,7 +184,7 @@ interface GraphTrack {
   color: string;
 }
 
-type DragKind = 'kf' | 'handle-in' | 'handle-out' | 'scrub' | 'box-zoom';
+type DragKind = 'kf' | 'handle-in' | 'handle-out' | 'scrub' | 'box-zoom' | 'box-select';
 
 interface DragState {
   kind: DragKind;
@@ -331,6 +334,16 @@ export function GraphEditor({
   const [soloKeys, setSoloKeys] = useState<Set<string> | null>(null);
   /** Live Alt-drag box-zoom rectangle (svg coords), or null. */
   const [boxZoom, setBoxZoom] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  /** Live Shift-drag SELECTION rectangle (svg coords), or null. */
+  const [boxSelect, setBoxSelect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  /**
+   * The value read-out under the pointer, or null when the pointer is not near
+   * a curve. Held as state rather than written to the DOM because it is one
+   * small `<g>` and re-rendering it is cheaper than the ref plumbing would be —
+   * but it is CLEARED during a drag, where the pointer moves at pointer rate
+   * and the drag has its own read-out.
+   */
+  const [hover, setHover] = useState<{ x: number; y: number; label: string; color: string } | null>(null);
   /** Live snap guides while dragging a diamond (time vertical / value horizontal). */
   const [graphSnap, setGraphSnap] = useState<{
     time: SnapTarget | null;
@@ -411,6 +424,12 @@ export function GraphEditor({
    */
   const frozenRangesRef = useRef<Map<string, Range> | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  /**
+   * The focused keyframe's handle positions, readable from a pointermove
+   * handler that must not DEPEND on them — it would re-bind on every frame of
+   * a drag. Written further down, once `handleGeom` has been computed.
+   */
+  const handleGeomRef = useRef<Array<{ nodeId: string; prop: string; t: number; x: number; y: number }>>([]);
 
   const sampledPaths = useMemo(() => {
     const paths: {
@@ -590,6 +609,17 @@ export function GraphEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tracks, duration, pps, INNER_H, rev, mode, scrollLeft, viewportW, refitTick]);
 
+  /**
+   * Every keyframe a Shift-drag box has caught — diamonds, plus the focused
+   * keyframe's tangent handles. Declared here, above the pointer handlers that
+   * call it, so the box-select cannot be a use-before-declaration hazard.
+   */
+  const boxSelectIds = useCallback(
+    (rect: { x0: number; y0: number; x1: number; y1: number }): Set<string> =>
+      keyframesInBox(sampledPaths, rect, handleGeomRef.current, pps, makeKeyframeId),
+    [sampledPaths, pps],
+  );
+
   // ── Reference ("before") curves ───────────────────────────────
   /**
    * Turn it on and every visible curve is frozen as it stands; the ghosts then
@@ -614,7 +644,7 @@ export function GraphEditor({
   // hand us a fresh array on every render, and a dep that changes every render
   // would re-freeze the ghost on every sampled frame of a drag — which is the
   // ghost following the live curve, i.e. no reference at all.
-  const selectionKey = selectedNodeIds.join(' ');
+  const selectionKey = selectedNodeIds.join('\u0000');
   useEffect(() => {
     if (referenceOn) recaptureRef.current = true;
   }, [referenceOn, selectionKey, mode, visibility, propertyFilter]);
@@ -764,6 +794,11 @@ export function GraphEditor({
         }
       }
       setBoxZoom(null);
+    } else if (d.kind === 'box-select') {
+      // The selection was applied live on every move, so release only clears
+      // the rectangle. A box that never moved leaves the selection alone
+      // rather than emptying it: shift-click on empty space is "add nothing".
+      setBoxSelect(null);
     } else if (d.tx) {
       if (d.moved) {
         const label = d.kind === 'kf' ? 'Move Keyframe' : 'Edit Curve';
@@ -910,6 +945,30 @@ export function GraphEditor({
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (e.button !== 0) return;
       const { x, y } = svgCoords(e);
+      // Shift on empty space is a SELECTION box, not a scrub. Shift already
+      // means "add to the selection" on a diamond, so extending it to the
+      // background is the reading people arrive at without being told; and the
+      // gesture it displaces (shift-scrub) never had a meaning.
+      if (e.shiftKey) {
+        setBoxSelect({ x0: x, y0: y, x1: x, y1: y });
+        beginDrag(e, {
+          kind: 'box-select',
+          nodeId: '',
+          prop: '',
+          kfT: 0,
+          origValue: 0,
+          ox: x,
+          oy: y,
+          px0: x,
+          py0: y,
+          minV: 0,
+          maxV: 1,
+          mode,
+          boxX: x,
+          boxY: y,
+        });
+        return;
+      }
       if (e.altKey && onZoom) {
         setBoxZoom({ x0: x, y0: y, x1: x, y1: y });
         beginDrag(e, {
@@ -1208,6 +1267,23 @@ export function GraphEditor({
   const onSvgPointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       const d = dragRef.current;
+      // ── The hover read-out ──────────────────────────────────────
+      // Only while nothing is being dragged: a drag has its own numbers, and
+      // a second chip following the pointer through one would be noise.
+      if (!d) {
+        const { x: hx, y: hy } = svgCoords(e);
+        const reading = nearestCurveAt(sampledPaths, hx / pps, hy, INNER_H);
+        setHover(
+          reading
+            ? {
+              x: hx,
+              y: reading.y,
+              color: reading.color,
+              label: `${reading.prop} ${fmtAxis(reading.value)}${mode === 'speed' ? '/s' : ''} @ ${(hx / pps).toFixed(2)}s`,
+            }
+            : null,
+        );
+      }
       if (!d || e.pointerId !== d.pointerId) return;
       const { x, y } = svgCoords(e);
       let ex = x - d.px0;
@@ -1218,28 +1294,52 @@ export function GraphEditor({
         return;
       }
 
-      if (d.kind === 'box-zoom') {
+      if (d.kind === 'box-zoom' || d.kind === 'box-select') {
         if (!d.moved && Math.hypot(ex, ey) < DRAG_DEAD_ZONE_PX) return;
         d.moved = true;
         d.boxX = x;
         d.boxY = y;
-        setBoxZoom({ x0: d.ox, y0: d.oy, x1: x, y1: y });
+        const rect = { x0: d.ox, y0: d.oy, x1: x, y1: y };
+        if (d.kind === 'box-zoom') setBoxZoom(rect);
+        else {
+          setBoxSelect(rect);
+          // Live, not on release: the selection ring appearing as the box
+          // crosses each diamond is what tells you the box is the right shape
+          // before you let go.
+          setSelectedKfIds(boxSelectIds(rect));
+        }
         return;
       }
 
       if (!d.moved && Math.hypot(ex, ey) < DRAG_DEAD_ZONE_PX) return;
       d.moved = true;
 
-      // Shift constrains to the dominant axis.
+      // Shift constrains the drag.
+      //
+      // A KEYFRAME takes the dominant axis: it is a point in two dimensions and
+      // "which of the two did I mean" is genuinely the question.
+      //
+      // A TANGENT HANDLE is constrained HORIZONTALLY, always. Its two axes are
+      // not symmetrical: x is influence (how far into the segment the ease
+      // reaches) and y is the slope. Adjusting influence while holding the
+      // slope is a gesture people use constantly; the vertical-only version is
+      // not, because moving a handle straight up ALSO changes the influence
+      // implicitly through the curve it produces. Letting Shift pick the
+      // dominant axis here meant a careful horizontal drag that strayed two
+      // pixels up silently flipped to a slope edit.
       if (e.shiftKey) {
-        if (Math.abs(ex) >= Math.abs(ey)) ey = 0;
-        else ex = 0;
+        if (d.kind === 'kf') {
+          if (Math.abs(ex) >= Math.abs(ey)) ey = 0;
+          else ex = 0;
+        } else {
+          ey = 0;
+        }
       }
 
       if (d.kind === 'kf') moveKeyframe(d, ex, ey, e);
       else moveHandle(d, ex, ey, e);
     },
-    [svgCoords, onScrub, pps, duration, moveKeyframe, moveHandle],
+    [svgCoords, onScrub, pps, duration, moveKeyframe, moveHandle, sampledPaths, INNER_H, mode, boxSelectIds],
   );
 
   const onSvgPointerUp = useCallback(
@@ -1441,10 +1541,36 @@ export function GraphEditor({
     return { kf, color: path.color, kx, ky, showIn, showOut, inX, inY, inAnchorY, outX, outY };
   }, [selectedKfData, sampledPaths, pps, mode, INNER_H]);
 
+  // Refreshed on every render; read only by the box-select (see the ref above).
+  handleGeomRef.current = handleGeom
+    ? [
+      ...(handleGeom.showIn
+        ? [{ nodeId: handleGeom.kf.nodeId, prop: handleGeom.kf.prop, t: handleGeom.kf.t, x: handleGeom.inX, y: handleGeom.inY }]
+        : []),
+      ...(handleGeom.showOut
+        ? [{ nodeId: handleGeom.kf.nodeId, prop: handleGeom.kf.prop, t: handleGeom.kf.t, x: handleGeom.outX, y: handleGeom.outY }]
+        : []),
+    ]
+    : [];
+
+  // ── "Fit all curves vertically" ────────────────────────────────
+  // The command broadcasts; the editor answers by dropping the range frozen by
+  // the last drag and bumping the tick the sampling memo watches. Registered
+  // here rather than in a provider so the command and its only listener are
+  // installed together — a command in the palette whose handler is not mounted
+  // is the failure this codebase keeps finding.
+  useEffect(() => {
+    installGraphNormalizeCommands();
+    return onGraphNormalize(() => {
+      frozenRangesRef.current = null;
+      setRefitTick((n) => n + 1);
+    });
+  }, []);
+
   const cursorClass = dragging
     ? dragRef.current?.kind === 'scrub'
       ? styles.svgScrubbing
-      : dragRef.current?.kind === 'box-zoom'
+      : dragRef.current?.kind === 'box-zoom' || dragRef.current?.kind === 'box-select'
         ? styles.svgBoxZoom
         : styles.svgDragging
     : '';
@@ -1810,6 +1936,16 @@ export function GraphEditor({
         })}
       </div>
 
+      {/* ── The selected key's numbers ─────────────────────────────
+          A dragged handle is an approximation of a number, and there are
+          answers a drag cannot give: "make both sides exactly 200/s", "give
+          this a third of the segment". AE puts these behind a modal
+          (Keyframe Velocity) and that dialog still exists for the multi-key
+          case — this is the same values, docked, live, for the one key you are
+          looking at. Every field is a `ValueField`, so each is scrubbable and
+          typeable with the same gestures as the inspector's. */}
+      {selectedKfData ? <KeyframeNumericStrip kf={selectedKfData} /> : null}
+
       {/* ── SVG graph canvas ───────────────────────────────────── */}
       <div ref={canvasRef} className={styles.canvas} onScroll={onCanvasScroll}>
         <svg
@@ -1820,6 +1956,7 @@ export function GraphEditor({
           onPointerDown={onSvgPointerDown}
           onPointerMove={onSvgPointerMove}
           onPointerUp={onSvgPointerUp}
+          onPointerLeave={() => setHover(null)}
           onPointerCancel={onSvgPointerUp}
           onLostPointerCapture={onSvgPointerUp}
         >
@@ -1975,6 +2112,28 @@ export function GraphEditor({
             />
           )}
 
+          {boxSelect && (
+            <rect
+              className={styles.boxSelectRect}
+              x={Math.min(boxSelect.x0, boxSelect.x1)}
+              y={Math.min(boxSelect.y0, boxSelect.y1)}
+              width={Math.abs(boxSelect.x1 - boxSelect.x0)}
+              height={Math.abs(boxSelect.y1 - boxSelect.y0)}
+            />
+          )}
+
+          {/* Hover read-out. Anchored to the CURVE's y rather than the
+              pointer's, so the chip names the line it is pointing at instead
+              of hovering in the space above it. */}
+          {hover && !dragging && (
+            <g className={styles.hoverTip} pointerEvents="none">
+              <circle cx={hover.x} cy={hover.y} r={3} fill={hover.color} />
+              <text x={hover.x + 8} y={hover.y - 6} fontSize={10} fill={hover.color}>
+                {hover.label}
+              </text>
+            </g>
+          )}
+
           {graphSnap?.time && (
             <line
               className={`${styles.snapLine} ${graphSnap.time.kind === 'playhead' ? styles.snapPlayhead : styles.snapKeyframe}`}
@@ -2033,6 +2192,102 @@ export function GraphEditor({
           </g>
         </svg>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The docked numeric strip for one keyframe.
+ *
+ * Its own component so it re-reads the velocity through
+ * `readKeyframeVelocity` — the same accessor the Keyframe Velocity dialog
+ * uses — rather than duplicating the "which keyframe owns which bezier"
+ * reasoning that module's header spells out. Getting that wrong writes the
+ * INCOMING half onto this keyframe and silently reshapes the side of the curve
+ * the user was not looking at.
+ *
+ * `rev` in the key forces a fresh read after every edit: the values are pulled
+ * from the engine, not held in state, so an undo or a handle drag has to be
+ * able to reset the fields.
+ */
+function KeyframeNumericStrip({
+  kf,
+}: {
+  kf: { nodeId: string; prop: string; t: number; value: number };
+}): JSX.Element | null {
+  const reading = readKeyframeVelocity(kf.nodeId, kf.prop, kf.t);
+  if (!reading) return null;
+  const { velocity, hasIncoming, hasOutgoing } = reading;
+
+  const write = (patch: Partial<typeof velocity>): void => {
+    applyKeyframeVelocity(kf.nodeId, kf.prop, kf.t, { ...velocity, ...patch });
+    bumpScene();
+  };
+
+  return (
+    <div className={styles.numericStrip} role="group" aria-label="Selected keyframe">
+      <span className={styles.numericLabel}>{kf.prop}</span>
+      <label className={styles.numericField}>
+        <span>Value</span>
+        <ValueField
+          value={kf.value}
+          aria-label="Keyframe value"
+          onChange={(v) => {
+            runAnimEdit('Set Keyframe Value', () => {
+              for (const prop of expandKeyframeProp(kf.prop)) {
+                defaultAnimation.updateKeyframe(kf.nodeId, prop, kf.t, { value: v });
+              }
+            });
+            bumpScene();
+          }}
+        />
+      </label>
+      <label className={styles.numericField}>
+        <span>In speed</span>
+        <ValueField
+          value={velocity.inSpeed}
+          min={0}
+          disabled={!hasIncoming}
+          unit="/s"
+          aria-label="Incoming speed"
+          onChange={(v) => write({ inSpeed: v })}
+        />
+      </label>
+      <label className={styles.numericField}>
+        <span>Out speed</span>
+        <ValueField
+          value={velocity.outSpeed}
+          min={0}
+          disabled={!hasOutgoing}
+          unit="/s"
+          aria-label="Outgoing speed"
+          onChange={(v) => write({ outSpeed: v })}
+        />
+      </label>
+      <label className={styles.numericField}>
+        <span>In inf.</span>
+        <ValueField
+          value={velocity.inInfluence * 100}
+          min={0.1}
+          max={99.9}
+          unit="%"
+          disabled={!hasIncoming}
+          aria-label="Incoming influence"
+          onChange={(v) => write({ inInfluence: v / 100 })}
+        />
+      </label>
+      <label className={styles.numericField}>
+        <span>Out inf.</span>
+        <ValueField
+          value={velocity.outInfluence * 100}
+          min={0.1}
+          max={99.9}
+          unit="%"
+          disabled={!hasOutgoing}
+          aria-label="Outgoing influence"
+          onChange={(v) => write({ outInfluence: v / 100 })}
+        />
+      </label>
     </div>
   );
 }

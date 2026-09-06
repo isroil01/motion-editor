@@ -539,6 +539,22 @@ export interface MotionEditorApi {
     write?(hash: string, bytes: Uint8Array): Promise<boolean>;
     read?(hash: string): Promise<Uint8Array | null>;
   };
+  /**
+   * Disk-facing verbs for the Assets panel (electron/ipc/reveal.ts): show a
+   * file in Explorer / Finder, pick a folder for the media browser, and list
+   * one level of a directory. Absent in the browser build, where the panel
+   * hides every control that needs them.
+   */
+  shell?: {
+    /** False when the path no longer exists. */
+    revealInFolder?(filePath: string): Promise<boolean>;
+    /** Native folder picker; null if cancelled. */
+    pickFolder?(): Promise<string | null>;
+    /** Native multi-file picker for media; null if cancelled. */
+    pickFiles?(): Promise<string[] | null>;
+    /** Hidden entries removed; null if the directory cannot be read. */
+    listDir?(dir: string): Promise<Array<{ name: string; path: string; kind: 'dir' | 'file'; size?: number; mtimeMs?: number }> | null>;
+  };
   window?: {
     minimize?(): Promise<void>;
     maximize?(): Promise<void>;
@@ -584,6 +600,11 @@ export interface MotionEditorApi {
   };
   /** Subscribe to native menu command ids. Returns an unsubscribe fn. */
   onMenuCommand?(handler: (commandId: string) => void): () => void;
+  /**
+   * Hand main the menu model serialised by `layout/Menu/nativeMenuTemplate.ts`;
+   * the native menu is rebuilt from it. Absent in a browser build.
+   */
+  setMenuTemplate?(template: unknown): Promise<{ ok: boolean }>;
   /** `premation://plugin/<id>` — validated in main, re-validated by the renderer. */
   onPluginDeepLink?(handler: (payload: { id: string }) => void): () => void;
   /**

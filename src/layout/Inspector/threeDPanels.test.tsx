@@ -119,13 +119,13 @@ describe('Morph Targets section', () => {
     defaultSceneGraph.addNode(layer('mesh', { morph0: 0.2 }, modelComp({ modelKey: 'k', mesh: 0, prim: 0 })));
     const view = render(<ModelSection nodeId="mesh" />);
 
-    fireEvent.click(screen.getByTitle('Animate Target 1 — adds a keyframe at the playhead'));
+    fireEvent.click(screen.getByLabelText('Enable Target 1 animation'));
     expect(defaultAnimation.isAnimated('mesh', 'morph0')).toBe(true);
 
     // In the app the row repaints itself off `AnimationChanged`; this harness
     // has no bus bridge to the engine, so the re-render is explicit.
     view.rerender(<ModelSection nodeId="mesh" />);
-    expect(screen.getByTitle('Stop animating Target 1')).toBeInTheDocument();
+    expect(screen.getByLabelText('Disable Target 1 animation')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Target 1 slider'), { target: { value: '0.9' } });
     expect(defaultAnimation.sample('mesh', 'morph0', 0)).toBeCloseTo(0.9);

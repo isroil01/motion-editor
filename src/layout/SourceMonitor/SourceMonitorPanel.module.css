@@ -233,3 +233,31 @@
 .actionPrimary {
   border-color: var(--color-accent);
 }
+
+/* ── Three-point-edit HUD ────────────────────────────────────────────
+ * In · Out · Duration, under the readout. Monospace and tabular so the three
+ * timecodes stay in the same columns as they change — a number that shifts
+ * sideways as it counts is a number you have to re-read. */
+.threePoint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 2px var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.threePointCell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.threePointKey {
+  font-size: var(--font-size-micro);
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}

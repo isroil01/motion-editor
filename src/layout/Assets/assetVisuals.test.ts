@@ -2,7 +2,7 @@ import { getAssetVisualInfo, FOLDER_COLOR } from './assetVisuals';
 
 describe('assetVisuals', () => {
   it('identifies folder color correctly', () => {
-    expect(FOLDER_COLOR).toBe('#f5a623');
+    expect(FOLDER_COLOR).toBe('var(--color-amber-500)');
   });
 
   it('identifies SVG vector images', () => {
@@ -10,7 +10,7 @@ describe('assetVisuals', () => {
     expect(info.icon).toBe('shape');
     expect(info.label).toBe('SVG Vector');
     expect(info.className).toBe('assetGlyphSvg');
-    expect(info.color).toBe('#06b6d4');
+    expect(info.color).toBe('var(--color-filetype-image)');
   });
 
   it('identifies standard raster images', () => {
@@ -18,7 +18,7 @@ describe('assetVisuals', () => {
     expect(png.icon).toBe('image');
     expect(png.label).toBe('PNG Image');
     expect(png.className).toBe('assetGlyphImage');
-    expect(png.color).toBe('#10b981');
+    expect(png.color).toBe('var(--color-filetype-image)');
 
     const jpg = getAssetVisualInfo({ name: 'banner.jpg', type: 'image' });
     expect(jpg.label).toBe('JPEG Image');
@@ -33,7 +33,7 @@ describe('assetVisuals', () => {
     expect(gif.icon).toBe('image');
     expect(gif.label).toBe('GIF Animation');
     expect(gif.className).toBe('assetGlyphGif');
-    expect(gif.color).toBe('#ec4899');
+    expect(gif.color).toBe('var(--color-filetype-image)');
   });
 
   it('identifies design files (PSD, AI)', () => {
@@ -41,7 +41,7 @@ describe('assetVisuals', () => {
     expect(psd.icon).toBe('layers');
     expect(psd.label).toBe('Photoshop');
     expect(psd.className).toBe('assetGlyphPsd');
-    expect(psd.color).toBe('#3b82f6');
+    expect(psd.color).toBe('var(--color-filetype-image)');
 
     const ai = getAssetVisualInfo({ name: 'brand.ai' });
     expect(ai.icon).toBe('shape');
@@ -54,7 +54,7 @@ describe('assetVisuals', () => {
     expect(raw.icon).toBe('camera');
     expect(raw.label).toBe('RAW / HDR');
     expect(raw.className).toBe('assetGlyphRaw');
-    expect(raw.color).toBe('#0ea5e9');
+    expect(raw.color).toBe('var(--color-filetype-image)');
 
     const dng = getAssetVisualInfo({ name: 'capture.dng' });
     expect(dng.icon).toBe('camera');
@@ -65,7 +65,7 @@ describe('assetVisuals', () => {
     expect(mp4.icon).toBe('video');
     expect(mp4.label).toBe('MP4 Video');
     expect(mp4.className).toBe('assetGlyphVideo');
-    expect(mp4.color).toBe('#8b5cf6');
+    expect(mp4.color).toBe('var(--color-filetype-video)');
 
     const mov = getAssetVisualInfo({ name: 'render.mov', type: 'video' });
     expect(mov.label).toBe('QuickTime');
@@ -74,7 +74,7 @@ describe('assetVisuals', () => {
     expect(mxf.icon).toBe('video');
     expect(mxf.label).toBe('Pro Video');
     expect(mxf.className).toBe('assetGlyphVideoPro');
-    expect(mxf.color).toBe('#a855f7');
+    expect(mxf.color).toBe('var(--color-filetype-video)');
   });
 
   it('identifies audio files', () => {
@@ -82,7 +82,7 @@ describe('assetVisuals', () => {
     expect(mp3.icon).toBe('audio');
     expect(mp3.label).toBe('MP3 Audio');
     expect(mp3.className).toBe('assetGlyphAudio');
-    expect(mp3.color).toBe('#f43f5e');
+    expect(mp3.color).toBe('var(--color-filetype-audio)');
 
     const wav = getAssetVisualInfo({ name: 'soundfx.wav', type: 'audio' });
     expect(wav.label).toBe('WAV Audio');
@@ -93,7 +93,7 @@ describe('assetVisuals', () => {
     expect(lottie.icon).toBe('code');
     expect(lottie.label).toBe('Lottie / JSON');
     expect(lottie.className).toBe('assetGlyphCode');
-    expect(lottie.color).toBe('#f97316');
+    expect(lottie.color).toBe('var(--color-filetype-data)');
   });
 
   it('identifies Fonts', () => {
@@ -101,7 +101,7 @@ describe('assetVisuals', () => {
     expect(font.icon).toBe('type');
     expect(font.label).toBe('Font');
     expect(font.className).toBe('assetGlyphFont');
-    expect(font.color).toBe('#38bdf8');
+    expect(font.color).toBe('var(--color-filetype-font)');
   });
 
   it('identifies 3D models', () => {
@@ -109,7 +109,7 @@ describe('assetVisuals', () => {
     expect(model.icon).toBe('3d');
     expect(model.label).toBe('3D Model');
     expect(model.className).toBe('assetGlyph3D');
-    expect(model.color).toBe('#fb923c');
+    expect(model.color).toBe('var(--color-filetype-other)');
   });
 
   it('identifies Compositions', () => {
@@ -117,7 +117,7 @@ describe('assetVisuals', () => {
     expect(comp.icon).toBe('component');
     expect(comp.label).toBe('Composition');
     expect(comp.className).toBe('assetGlyphComp');
-    expect(comp.color).toBe('#6366f1');
+    expect(comp.color).toBe('var(--color-filetype-comp)');
   });
 
   it('falls back gracefully on unknown files', () => {
@@ -125,6 +125,6 @@ describe('assetVisuals', () => {
     expect(unknown.icon).toBe('file');
     expect(unknown.label).toBe('PDF File');
     expect(unknown.className).toBe('assetGlyphFile');
-    expect(unknown.color).toBe('#94a3b8');
+    expect(unknown.color).toBe('var(--color-filetype-other)');
   });
 });

@@ -134,7 +134,37 @@ class PointTrack {
     // centring, which searchHalf already covers.
     const predictX = this.x + Math.round(this.vx);
     const predictY = this.y + Math.round(this.vy);
-    const match = matchPatch(this.refPatch, this.featureHalf, plane, predictX, predictY, this.searchHalf);
+    let match = matchPatch(this.refPatch, this.featureHalf, plane, predictX, predictY, this.searchHalf);
+
+    // Recovery before coasting. A miss inside the nominal window used to go
+    // straight to a velocity prediction, and eight of those in a row killed
+    // the track — which is how a feature that merely moved faster than the
+    // measured search radius for one frame (a whip pan, a bounce) ended as
+    // "lost, 22 predicted through occlusion". Two cheap retries first:
+    //
+    //   1. the same template in a window twice, then three times as wide
+    //      around the prediction (large motion, a genuine jump);
+    //   2. the ANCHOR template — the appearance at the start of the track —
+    //      in the wide window, which re-acquires a feature after a brief
+    //      occlusion or a flicker that led the adapted template astray.
+    //
+    // The wide windows only run on a miss, so a clean track pays nothing.
+    if (!(match && match.confidence >= this.minConfidence)) {
+      for (const scale of [2, 3]) {
+        const wide = matchPatch(this.refPatch, this.featureHalf, plane, predictX, predictY, this.searchHalf * scale);
+        if (wide && wide.confidence >= this.minConfidence && (!match || wide.confidence > match.confidence)) {
+          match = wide;
+          break;
+        }
+      }
+    }
+    if (!(match && match.confidence >= this.minConfidence) && this.anchorPatch) {
+      const reacquired = matchPatch(this.anchorPatch, this.featureHalf, plane, predictX, predictY, this.searchHalf * 2);
+      if (reacquired && reacquired.confidence >= this.minConfidence) {
+        match = reacquired;
+        this.refPatch = this.anchorPatch;
+      }
+    }
 
     if (match && match.confidence >= this.minConfidence) {
       let mx = match.x;

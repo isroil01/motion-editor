@@ -25,6 +25,7 @@
  * an ANIMATED value; this is the authority on the value underneath it.
  */
 
+import type { SceneNode } from '@core/types';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { updateNodeComponentProp } from './InspectorAPI';
 import {
@@ -304,12 +305,31 @@ export function writeStaticPropertyValue(nodeId: string, prop: string, value: nu
     return true;
   }
 
-  const comp = node.components.find((c) => typeof (c.props as Record<string, unknown>)[prop] === 'number');
+  const comp = node.components.find((c) => typeof (c.props as Record<string, unknown>)[prop] === 'number')
+    ?? transformHomeFor(node, prop);
   if (comp) {
     updateNodeComponentProp(defaultSceneGraph, nodeId, comp.id, prop, value);
     return true;
   }
   return false;
+}
+
+/**
+ * The Transform component, for a transform property the layer has never
+ * STORED.
+ *
+ * Enabling 3D writes `z` / `rotationX` / `rotationY` and nothing else, so a 3D
+ * layer's Orientation X/Y/Z and Anchor Point Z rows read their registry default
+ * (0) and — because the write above looked only for a component already
+ * carrying the prop — could not be changed: the field accepted the number and
+ * the layer ignored it, while Rotation X/Y two rows up worked. The renderer
+ * reads these off the Transform component (`readNode3D`), so that is where an
+ * unstored one belongs. Scoped to the transform category: an effect or style
+ * param that is genuinely absent must still answer "nowhere to put it".
+ */
+function transformHomeFor(node: SceneNode, prop: string): SceneNode['components'][number] | undefined {
+  if (resolvePropertyMeta(prop, node.id).group !== 'transform') return undefined;
+  return node.components.find((c) => c.type === 'Transform');
 }
 
 /** True when {@link writeStaticPropertyValue} has somewhere to put a value. */
@@ -340,6 +360,7 @@ export function canWriteStaticPropertyValue(nodeId: string, prop: string): boole
   if (ta) return readAnimatorData(node)[ta.index] !== undefined;
 
   if (node.components.some((c) => typeof (c.props as Record<string, unknown>)[prop] === 'number')) return true;
+  if (transformHomeFor(node, prop)) return true;
   return prop === 'x' || prop === 'y';
 }
 

@@ -49,17 +49,36 @@ const TOGGLES: ReadonlyArray<readonly [string, string]> = [
   ['view.motionPath', 'motionPathVisible'],
   // A preview toggle: lives in preferenceStore, not guidesStore.
   ['view.useProxies', 'useProxies'],
+  // The one-key focus modes (Tab / Shift+Tab): layoutStore.focusMode.
+  ['view.focusMode.viewportTimeline', 'focusMode'],
+  ['view.focusMode.viewport', 'focusMode'],
 ];
+
+/**
+ * The source of ONE command's registration: from its `asCommandId('<id>')` to
+ * the next command's, or to the next `registry.register(` — whichever comes
+ * first. The builtin commands are one array literal now, so "up to the next
+ * register call" alone would run one block across a dozen commands and flag
+ * every one that merely PRECEDES a toggle.
+ */
+function registrationBlock(source: string, id: string): string {
+  const at = source.indexOf(`asCommandId('${id}')`);
+  if (at < 0) return '';
+  const candidates = [
+    source.indexOf('registry.register(', at + 1),
+    source.indexOf('asCommandId(', at + 1),
+  ].filter((i) => i >= 0);
+  const next = candidates.length ? Math.min(...candidates) : source.length;
+  return source.slice(at, next);
+}
 
 describe('Command.isChecked', () => {
   const providers = readSource('providers/Providers.tsx');
 
   it.each(TOGGLES)('%s implements isChecked from guidesStore.%s', (id, field) => {
     // The registration block for this command, up to the next `registry.register`.
-    const at = providers.indexOf(`asCommandId('${id}')`);
-    expect(at).toBeGreaterThan(0);
-    const next = providers.indexOf('registry.register(', at);
-    const block = providers.slice(at, next < 0 ? providers.length : next);
+    expect(providers.indexOf(`asCommandId('${id}')`)).toBeGreaterThan(0);
+    const block = registrationBlock(providers, id);
     expect(block).toContain('isChecked:');
     expect(block).toMatch(new RegExp(`isChecked:[^\\n]*\\b${field}\\b`));
   });
@@ -95,10 +114,7 @@ describe('Command.isChecked', () => {
     const ids = [...providers.matchAll(/asCommandId\('([^']+)'\)/g)].map((m) => m[1]!);
     const declaredAt = new Set<string>();
     for (const id of ids) {
-      const at = providers.indexOf(`asCommandId('${id}')`);
-      const next = providers.indexOf('registry.register(', at);
-      const block = providers.slice(at, next < 0 ? providers.length : next);
-      if (block.includes('isChecked:')) declaredAt.add(id);
+      if (registrationBlock(providers, id).includes('isChecked:')) declaredAt.add(id);
     }
     expect([...declaredAt].sort()).toEqual(TOGGLES.map(([id]) => id).sort());
   });

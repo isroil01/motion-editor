@@ -59,9 +59,25 @@
   white-space: nowrap;
 }
 
-/* `.center`, `.projectName` and `.dirtyDot` moved to ProjectStatus.module.css.
-   They were fully styled here and rendered by nothing; they now live with the
-   component that draws them, which both this bar and the web TopNav mount. */
+/* The centre slot: ProjectStatus (name · dirty dot · saved-ago) sits under
+   the window's middle, absolutely placed so the left and right clusters
+   cannot push it off-centre. `.projectName` and `.dirtyDot` themselves moved
+   to ProjectStatus.module.css — the component draws them, both this bar and
+   the web TopNav mount it. Above the drag region so it is clickable. */
+.center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  height: 100%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 40%;
+  min-width: 0;
+  z-index: 1;
+  -webkit-app-region: no-drag;
+}
 
 .right {
   display: flex;

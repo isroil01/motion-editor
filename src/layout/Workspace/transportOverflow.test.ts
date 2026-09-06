@@ -9,14 +9,25 @@
  * `isDemoted` walks that order one step at a time rather than in a clump.
  */
 
-import { TRANSPORT_DEMOTE_ORDER, MAX_DEMOTE_LEVEL, isDemoted } from './transportOverflow';
+import {
+  DISPLAY_DEMOTE_ORDER,
+  TRANSPORT_DEMOTE_ORDER,
+  TRANSPORT_GROUP_ORDER,
+  MAX_DEMOTE_LEVEL,
+  displayLevelFor,
+  isDemoted,
+} from './transportOverflow';
 
 describe('the transport bar demote order', () => {
-  it('gives up the clip edits first and the zoom field last', () => {
-    // Clip edits are three buttons — the widest group — and every one of them
-    // has a keyboard shortcut. The zoom field goes last because it is the only
+  it('gives up the display controls first, then the clip edits, and the zoom field last', () => {
+    // The display controls are the least-often-changed things in the row and
+    // every one is already a menu; they lead, right to left. Clip edits are
+    // three buttons — the bar's widest own group — and every one of them has
+    // a keyboard shortcut. The zoom field goes last because it is the only
     // group that leaves without a menu entry.
-    expect(TRANSPORT_DEMOTE_ORDER[0]).toBe('clipEdits');
+    expect([...TRANSPORT_DEMOTE_ORDER.slice(0, DISPLAY_DEMOTE_ORDER.length)]).toEqual([...DISPLAY_DEMOTE_ORDER]);
+    expect([...TRANSPORT_DEMOTE_ORDER.slice(DISPLAY_DEMOTE_ORDER.length)]).toEqual([...TRANSPORT_GROUP_ORDER]);
+    expect(TRANSPORT_GROUP_ORDER[0]).toBe('clipEdits');
     expect(TRANSPORT_DEMOTE_ORDER[TRANSPORT_DEMOTE_ORDER.length - 1]).toBe('zoom');
   });
 
@@ -24,13 +35,25 @@ describe('the transport bar demote order', () => {
     for (const group of TRANSPORT_DEMOTE_ORDER) {
       expect(isDemoted(group, 0)).toBe(false);
     }
+    expect(displayLevelFor(0)).toBe(0);
   });
 
-  it('sheds exactly one more group per level', () => {
+  it('sheds exactly one more rung per level', () => {
     for (let level = 0; level <= MAX_DEMOTE_LEVEL; level++) {
       const shed = TRANSPORT_DEMOTE_ORDER.filter((g) => isDemoted(g, level));
       expect(shed).toEqual(TRANSPORT_DEMOTE_ORDER.slice(0, level));
     }
+  });
+
+  it('reads the display controls\' own level out of the bar\'s, capped at their ten', () => {
+    for (let level = 0; level <= DISPLAY_DEMOTE_ORDER.length; level++) {
+      expect(displayLevelFor(level)).toBe(level);
+    }
+    expect(displayLevelFor(DISPLAY_DEMOTE_ORDER.length + 1)).toBe(DISPLAY_DEMOTE_ORDER.length);
+    expect(displayLevelFor(MAX_DEMOTE_LEVEL)).toBe(DISPLAY_DEMOTE_ORDER.length);
+    // The bar's own first group goes only once every display control has.
+    expect(isDemoted('clipEdits', DISPLAY_DEMOTE_ORDER.length)).toBe(false);
+    expect(isDemoted('clipEdits', DISPLAY_DEMOTE_ORDER.length + 1)).toBe(true);
   });
 
   it('has shed everything at the top of the ladder', () => {

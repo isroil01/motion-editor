@@ -9,7 +9,7 @@ export interface AssetVisualInfo {
 }
 
 /**
- * Derives the visual representation (icon, descriptive type label, styling class, and hex color)
+ * Derives the visual representation (icon, descriptive type label, styling class, and colour token)
  * for an asset or file item based on its type and filename extension.
  */
 export function getAssetVisualInfo(
@@ -24,7 +24,7 @@ export function getAssetVisualInfo(
       icon: 'shape',
       label: 'SVG Vector',
       className: 'assetGlyphSvg',
-      color: '#06b6d4',
+      color: 'var(--color-filetype-image)',
     };
   }
 
@@ -34,7 +34,7 @@ export function getAssetVisualInfo(
       icon: 'layers',
       label: 'Photoshop',
       className: 'assetGlyphPsd',
-      color: '#3b82f6',
+      color: 'var(--color-filetype-image)',
     };
   }
   if (ext === 'ai' || ext === 'eps') {
@@ -42,7 +42,7 @@ export function getAssetVisualInfo(
       icon: 'shape',
       label: 'Illustrator',
       className: 'assetGlyphPsd',
-      color: '#f59e0b',
+      color: 'var(--color-filetype-image)',
     };
   }
 
@@ -52,7 +52,7 @@ export function getAssetVisualInfo(
       icon: 'camera',
       label: 'RAW / HDR',
       className: 'assetGlyphRaw',
-      color: '#0ea5e9',
+      color: 'var(--color-filetype-image)',
     };
   }
 
@@ -62,7 +62,7 @@ export function getAssetVisualInfo(
       icon: 'image',
       label: 'GIF Animation',
       className: 'assetGlyphGif',
-      color: '#ec4899',
+      color: 'var(--color-filetype-image)',
     };
   }
 
@@ -81,7 +81,7 @@ export function getAssetVisualInfo(
       icon: 'image',
       label,
       className: 'assetGlyphImage',
-      color: '#10b981',
+      color: 'var(--color-filetype-image)',
     };
   }
 
@@ -91,7 +91,7 @@ export function getAssetVisualInfo(
       icon: 'video',
       label: 'Pro Video',
       className: 'assetGlyphVideoPro',
-      color: '#a855f7',
+      color: 'var(--color-filetype-video)',
     };
   }
 
@@ -109,7 +109,7 @@ export function getAssetVisualInfo(
       icon: 'video',
       label,
       className: 'assetGlyphVideo',
-      color: '#8b5cf6',
+      color: 'var(--color-filetype-video)',
     };
   }
 
@@ -128,7 +128,7 @@ export function getAssetVisualInfo(
       icon: 'audio',
       label,
       className: 'assetGlyphAudio',
-      color: '#f43f5e',
+      color: 'var(--color-filetype-audio)',
     };
   }
 
@@ -138,7 +138,7 @@ export function getAssetVisualInfo(
       icon: 'code',
       label: 'Lottie / JSON',
       className: 'assetGlyphCode',
-      color: '#f97316',
+      color: 'var(--color-filetype-data)',
     };
   }
 
@@ -148,7 +148,7 @@ export function getAssetVisualInfo(
       icon: 'type',
       label: 'Font',
       className: 'assetGlyphFont',
-      color: '#38bdf8',
+      color: 'var(--color-filetype-font)',
     };
   }
 
@@ -158,7 +158,7 @@ export function getAssetVisualInfo(
       icon: '3d',
       label: '3D Model',
       className: 'assetGlyph3D',
-      color: '#fb923c',
+      color: 'var(--color-filetype-other)',
     };
   }
 
@@ -168,7 +168,7 @@ export function getAssetVisualInfo(
       icon: 'component',
       label: 'Composition',
       className: 'assetGlyphComp',
-      color: '#6366f1',
+      color: 'var(--color-filetype-comp)',
     };
   }
 
@@ -177,9 +177,9 @@ export function getAssetVisualInfo(
     icon: 'file',
     label: ext ? `${ext.toUpperCase()} File` : 'File',
     className: 'assetGlyphFile',
-    color: '#94a3b8',
+    color: 'var(--color-filetype-other)',
   };
 }
 
 /** Standard real folder color (Warm Manila Amber) */
-export const FOLDER_COLOR = '#f5a623';
+export const FOLDER_COLOR = 'var(--color-amber-500)';

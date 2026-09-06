@@ -14,19 +14,25 @@
  *   │  [BL: AI prompt]                                         │
  *   └──────────────────────────────────────────────────────────┘
  *
- * There is no header bar: the composition's name is the Scene tab's label
- * (`layout/Tabs/EditorTabs.tsx`) and its status badges moved to the timeline's
- * tool row. The viewport's own controls went with them — `ViewportTools` is
- * rendered by `BottomTimeline`, not here — so nothing floats over the stage
- * except the AI prompt and the focus breadcrumb.
+ * The composition's NAME is the Scene tab's label (`layout/Tabs/EditorTabs.tsx`)
+ * and its status badges are in the transport bar (`ViewportTools`). The
+ * viewport's DISPLAY state — view layout, channel, resolution, preview, viewer
+ * LUT, overlays, snapshot compare, display mode, camera bookmarks, pop out —
+ * is `ViewportDisplayControls`, rendered at the right end of that same tabs
+ * row. There is no strip of this component's own above the stage: one row
+ * above, one transport row below.
+ *
+ * Over the stage itself: the AI prompt, the focus breadcrumb, the HUD, the
+ * comparison layer and the roto strokes. Nothing else floats.
  *
  * Interaction and rendering are handled by the framework-independent
  * `@motion/workspace` engine via {@link useWorkspace}.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode, type KeyboardEvent } from 'react';
 import { cn } from '@utils/cn';
-import { useActiveWorkspace, useWorkspaceStore, useProjectStore } from '@stores/projectStore';
+import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime, getTime as getPlayheadTime } from '@stores/playbackClockStore';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useWorkspaceViewStore } from '@stores/workspaceViewStore';
@@ -60,6 +66,7 @@ import { UI_COMPONENT_PRESETS } from '@core/scene/uiComponents';
 
 import { SecondaryViewPane } from './SecondaryViewPane';
 import { useGuidesStore } from '@stores/guidesStore';
+import { useViewportDisplayStore } from '@stores/viewportDisplayStore';
 import { FocusBreadcrumb } from '@layout/focus/FocusBreadcrumb';
 import { TextEditOverlay } from './TextEditOverlay';
 import { PuppetOverlay } from './PuppetOverlay';
@@ -76,6 +83,11 @@ import { useDeviceHandles } from './useDeviceHandles';
 import { useFocusContext } from '@layout/focus/useFocusContext';
 import { useWorkspace } from './useWorkspace';
 import { TransportBar } from './TransportBar';
+import { ViewportHud } from './ViewportHud';
+import { CompareOverlay } from './CompareOverlay';
+import { RotoBrushOverlay } from './RotoBrushOverlay';
+import { InlineAiPrompt } from './InlineAiPrompt';
+import { installViewportCommands } from './viewportCommands';
 import styles from './Workspace.module.css';
 
 export interface WorkspaceViewportProps {
@@ -85,8 +97,14 @@ export interface WorkspaceViewportProps {
   className?: string;
 }
 
-/** Divider line between cells of the 4-up grid (matches the app border token). */
-const QUAD_DIVIDER = '1px solid var(--color-border, rgba(255,255,255,0.12))';
+/*
+ * The 4-up grid's divider and its `'50%'` rects moved into
+ * `Workspace.module.css` (`.quadTopRight` / `.quadBottomLeft` /
+ * `.quadBottomRight`, and `.stage2up` / `.stage4up` for the interactive
+ * stage). They were layout expressed as JS strings, so the `cssTokens` guard
+ * could not see the `var(--color-border)` inside them and each needed a
+ * hardcoded fallback that no theme could reach.
+ */
 
 /**
  * Keys the viewport handles directly.
@@ -145,7 +163,7 @@ export function WorkspaceViewport({
   bottomRight,
   className,
 }: WorkspaceViewportProps): JSX.Element {
-  const time     = useActiveWorkspace()?.time ?? 0;
+  const time     = useCurrentTime();
   // Frame-coalesced, NOT the raw rev: this component is the whole viewport
   // shell — every SVG overlay under it reconciles when it does — and the raw
   // subscription re-rendered it once per pointermove during a drag.
@@ -192,6 +210,39 @@ export function WorkspaceViewport({
   const viewLayout = useGuidesStore((s) => s.viewLayout);
   const quadViewModes = useGuidesStore((s) => s.quadViewModes);
   const setQuadViewMode = useGuidesStore((s) => s.setQuadViewMode);
+
+  // Wireframe / bounding-box hide the shaded picture; the overlay draws the
+  // line work (see `paintDisplayMode` in useWorkspace).
+  const displayMode = useViewportDisplayStore((s) => s.displayMode);
+
+  /**
+   * The horizontal stretch the preview is shown at.
+   *
+   * FOOTAGE pixel aspect is already gone by the time a layer exists:
+   * `sourceInfo.displaySize` multiplies the stored width by `interpret.par`,
+   * so an anamorphic plate is a square-pixel layer of the right shape from
+   * import onward. What is left for a viewport correction is the
+   * COMPOSITION's own pixel aspect — and the composition model has no such
+   * field yet (the Composition Settings row that would add it is not this
+   * directory's to write). So this reads it defensively and resolves to 1
+   * until that lands, at which point the toggle starts working with no change
+   * here. On a square-pixel comp it is a no-op, which is also true in AE.
+   */
+  const compPixelAspect = useCompositionStore(
+    (s) => (s as { pixelAspect?: number }).pixelAspect ?? 1,
+  );
+  const parCorrection = useViewportDisplayStore((s) => s.pixelAspectCorrection);
+  const viewportPar = parCorrection && compPixelAspect > 0 ? compPixelAspect : 1;
+
+  // The viewport's own commands — JKL, in/out, snapshot compare, camera
+  // bookmarks, guides, display modes, HUD, snap-to-pixel, PAR, viewer LUT,
+  // the roto tool and the inline AI prompt. Registered from HERE (the same
+  // pattern `previewCacheCommands` uses from `ViewControls`) rather than from
+  // `Providers.tsx`, which this directory does not own. Idempotent, so a
+  // remount or a second viewport instance re-registers nothing.
+  useEffect(() => {
+    installViewportCommands();
+  }, []);
 
   // Keep the engine camera's lock in sync with the persisted workspace mode.
   // The composition framing itself rides on the engine's normal first-fit, so
@@ -412,8 +463,7 @@ export function WorkspaceViewport({
       case 'motionPreset': {
         const node = controller.ws.hitTestScreen(local);
         if (node) {
-          const ws = useWorkspaceStore.getState();
-          const playhead = (ws.activeTabId ? ws.tabs[ws.activeTabId]?.time : 0) ?? 0;
+          const playhead = getPlayheadTime();
           applyPresetByName(node.id, payload.name, playhead);
         } else {
           useUIStore.getState().notify({ level: 'warning', message: 'Drop a motion preset onto a layer.', durationMs: 2400 });
@@ -451,11 +501,12 @@ export function WorkspaceViewport({
   return (
     <div className={cn(styles.wrapper, className)}>
       {/*
-        No header bar. The composition name is the Scene tab's label now, and
-        the two status badges that shared the bar with it moved into the
-        timeline's tool row with the rest of the viewport controls — see
-        `ViewportTools`. What is left above the canvas is nothing, which is the
-        point: the stage starts at the top of the panel.
+        No header strip. The display controls (layout, channel, resolution,
+        preview, LUT, overlays, snapshot compare, display mode, bookmarks, pop
+        out) sit in the transport row UNDER this component —
+        `TransportBar.tsx` renders `ViewportDisplayControls` between the scene
+        tools and the zoom field — so the body is one tabs row · the stage ·
+        one transport row.
       */}
 
       {/* Canvas viewport */}
@@ -472,22 +523,28 @@ export function WorkspaceViewport({
         style={dragOver ? { outline: '2px solid var(--color-primary)', outlineOffset: '-2px' } : undefined}
       >
         <div
-          className={styles.stage}
           ref={stageRef}
           // Multi-view: the interactive stage yields space to the view-only
           // panes — the right half in 2-up, the top-left quadrant in 4-up. In
           // both cases useWorkspace's ResizeObserver on stageRef re-fits the
           // comp to the smaller rect automatically (no extra wiring here).
-          style={
-            viewLayout === '2' ? { right: '50%' }
-            : viewLayout === '4' ? { right: '50%', bottom: '50%' }
-            : undefined
-          }
+          className={cn(
+            styles.stage,
+            viewLayout === '2' && styles.stage2up,
+            viewLayout === '4' && styles.stage4up,
+          )}
+          // Pixel-aspect correction, as a custom property the four canvases
+          // read. See `.canvas` in the module for why it is a CSS transform
+          // and not a projection change.
+          style={{ '--viewport-par': viewportPar } as CSSProperties}
         >
           {/* BEFORE the canvas, so the compositor blends the canvas over it —
               that is what makes partial alpha composite correctly for free. */}
           {transparent && <TransparencyGrid />}
-          <canvas ref={canvasRef} className={styles.canvas} />
+          <canvas
+            ref={canvasRef}
+            className={cn(styles.canvas, displayMode !== 'shaded' && styles.canvasHidden)}
+          />
           <canvas ref={cacheRef} className={styles.cacheCanvas} data-workspace-cache="" />
           <canvas ref={onionRef} className={styles.onionCanvas} data-workspace-onion="" />
           <canvas ref={overlayRef} className={styles.overlay} data-workspace-overlay="" />
@@ -556,6 +613,16 @@ export function WorkspaceViewport({
           <SmartGuideOverlay />
           {/* Persistent view-orientation axis widget (whenever the comp is 3D). */}
           <AxisWidgetOverlay />
+          {/* Roto Brush strokes. Claims the pointer only while the roto tool
+              is active and a footage layer is selected; inert otherwise. */}
+          <RotoBrushOverlay />
+          {/* Snapshot comparison (F5 / F6). Above the picture, below the
+              interactive handles — a wipe must not cover the gizmo you drag. */}
+          <CompareOverlay />
+          {/* fps / frame ms / cache / resolution / backend, top-left. */}
+          <ViewportHud />
+          {/* Ctrl+Enter: an AI prompt anchored to the selection's screen rect. */}
+          <InlineAiPrompt />
         </div>
 
         {/* View-only right pane (AE's 2 Views) — its own canvas + backend. */}
@@ -577,19 +644,19 @@ export function WorkspaceViewport({
               key="quad-1"
               mode={quadViewModes[1]}
               onModeChange={(m) => setQuadViewMode(1, m)}
-              style={{ top: 0, bottom: '50%', left: '50%', right: 0, borderLeft: QUAD_DIVIDER, borderBottom: 'none' }}
+              className={styles.quadTopRight}
             />
             <SecondaryViewPane
               key="quad-2"
               mode={quadViewModes[2]}
               onModeChange={(m) => setQuadViewMode(2, m)}
-              style={{ top: '50%', bottom: 0, left: 0, right: '50%', borderLeft: 'none', borderTop: QUAD_DIVIDER }}
+              className={styles.quadBottomLeft}
             />
             <SecondaryViewPane
               key="quad-3"
               mode={quadViewModes[3]}
               onModeChange={(m) => setQuadViewMode(3, m)}
-              style={{ top: '50%', bottom: 0, left: '50%', right: 0, borderLeft: QUAD_DIVIDER, borderTop: QUAD_DIVIDER }}
+              className={styles.quadBottomRight}
             />
           </>
         )}
@@ -605,10 +672,10 @@ export function WorkspaceViewport({
         <div className={styles.overlayTL}>{topLeft}</div>
         {/*
           `ViewportTools` used to float here, over the bottom-left of the stage.
-          It renders in the timeline's tool row now, beside the trim buttons —
-          a pill over the canvas covers the canvas, and covers a different part
-          of it at every zoom level. The slot stays for `bottomLeft`, which is
-          the AI prompt.
+          It renders in the transport bar now, beside the play cluster — a pill
+          over the canvas covers the canvas, and covers a different part of it
+          at every zoom level. The slot stays for `bottomLeft`, which is the AI
+          prompt.
         */}
         <div className={styles.overlayBL}>{bottomLeft}</div>
         <div className={styles.overlayBR}>{bottomRight}</div>
@@ -629,5 +696,5 @@ export function WorkspaceViewport({
   );
 }
 
-// ViewportZoomControls was removed — zoom lives in `ViewportTools`, which the
-// timeline's tool row renders.
+// ViewportZoomControls was removed — zoom is `ZoomField`, at the right end of
+// the transport bar.

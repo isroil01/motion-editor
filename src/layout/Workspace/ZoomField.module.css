@@ -1,0 +1,72 @@
+/* The viewport zoom field — see ZoomField.tsx. Sized to the transport bar's
+   own control height so the run of glyphs reads as one row. */
+
+.zoomGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: nowrap;
+}
+
+.tool {
+  width: var(--control-height-row);
+  height: var(--control-height-row);
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tool:hover {
+  color: var(--color-text-primary);
+}
+
+.tool:active {
+  transform: scale(0.92);
+}
+
+.tool:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.chevron {
+  opacity: 0.6;
+}
+
+/* The percentage: scrubs on drag, opens as a field on double-click. */
+.scrubField {
+  min-width: 42px;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  text-align: center;
+  cursor: ew-resize;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.scrubField:hover {
+  color: var(--color-text-primary);
+}
+
+.scrubInput {
+  width: 48px;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-1);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-xs);
+  outline: none;
+  text-align: center;
+}

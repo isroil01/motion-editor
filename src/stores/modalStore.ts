@@ -9,18 +9,34 @@
 
 import { create } from 'zustand';
 import type { ReactNode } from 'react';
-import type { ModalSize } from '@components/Modal/Modal';
+import type { ModalSize, ModalVariant } from '@components/Modal/Modal';
 
 export interface ModalRequest {
   id: string;
   title?: ReactNode;
   description?: ReactNode;
   size?: ModalSize;
+  /**
+   * `blocking` (default) scrims the app and traps focus. `floating` is a
+   * non-blocking tool window: no scrim, draggable by its header, the app
+   * behind stays live, and its position (and size, when `resizable`) is
+   * remembered per `id` — so give a floating dialog a STABLE id.
+   */
+  variant?: ModalVariant;
+  /** Floating only — a resize grip in the corner; the size is remembered too. */
+  resizable?: boolean;
   persistent?: boolean;
   hideCloseButton?: boolean;
   onClose?: () => void;
   render: (close: () => void) => ReactNode;
   footer?: (close: () => void) => ReactNode;
+  /**
+   * What Enter does. Optional: a body that owns its own state registers the
+   * action itself with `useDialogPrimaryAction`, and a footer built from
+   * `DialogFooter` marks its primary button, which Enter clicks as a fallback.
+   */
+  primaryAction?: (close: () => void) => void;
+  className?: string;
 }
 
 export type ModalOpenInput = Omit<ModalRequest, 'id'> & { id?: string };

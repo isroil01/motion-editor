@@ -56,38 +56,59 @@ function capturePointer(svg: SVGSVGElement, pointerId: number): void {
 /** Pointer travel (screen px) below which a down→up pair still counts as a click. */
 const CLICK_SLOP_PX = 3;
 
-/**
- * Controller side colours — hardcoded hex, like every other colour in this file.
- *
- * NOT `--color-layer-*` tokens, and the reason is worth keeping. Those tokens
- * encode layer KIND (text / shape / image / video / …), not rig SIDE; there is
- * no left/right/centre triple to reuse, and borrowing three kind tokens would
- * give a rig colour a meaning the token does not carry and drift the moment
- * someone retints "video". Reading tokens at runtime is also not free here —
- * `getComputedStyle` forces a style recalculation (see the note in
- * `useWorkspace.ts`), and an overlay pays that per frame for the whole of a
- * drag.
- *
- * So this follows the convention already in the file (`#00e699` bones,
- * `#ff0055` IK targets, `#a855f7` poles) rather than inventing a second one.
- * If a runtime-token convention for canvas overlays is ever built, these move
- * with the rest of them — this should not be the thing that invents it.
- *
- * Values chosen to separate from those three at a glance: amber and cyan sit
- * away from the existing green/magenta/purple, and centre is a neutral grey so
- * a spine control never reads as a side.
- */
+/*
+  ── Rig colours ─────────────────────────────────────────────────────────────
+
+  Every colour this overlay draws is a `--color-overlay-rig-*` token from
+  `tokens/domain.css`, referenced as `var()` in the SVG attribute. This file
+  was the last overlay still holding literals; its neighbours
+  (SceneGeometryOverlay, FocusPlaneOverlay, Gizmo3dOverlay, EffectHandleOverlay)
+  had already converted, and it used them as its excuse for not converting.
+
+  `var()` IN THE ATTRIBUTE, not `getComputedStyle`. The note that used to stand
+  here argued against tokens on the grounds that reading one at runtime forces
+  a style recalculation, and it is right about canvas overlays — but this
+  overlay is SVG, drawn by React. A presentation attribute IS a CSS declaration,
+  so `stroke="var(--x)"` is resolved by the style engine on the element like any
+  other rule: no `getComputedStyle`, no forced recalculation, nothing read per
+  stroke or per frame. That is the same idiom the four converted overlays use.
+
+  The tokens are theme-FIXED (see the token file): an overlay's contrast partner
+  is the user's artwork, not the editor's ground.
+*/
+
+/** The controller side hues, resolved by the style engine on the element. */
 const CONTROLLER_SIDE_COLOR: Record<'left' | 'right' | 'centre', string> = {
-  left: '#ffb020',
-  right: '#3fd0ff',
-  centre: '#c8cedb',
+  left: 'var(--color-overlay-rig-side-left)',
+  right: 'var(--color-overlay-rig-side-right)',
+  centre: 'var(--color-overlay-rig-side-centre)',
 };
 
 /** Halo drawn under every controller so it reads against arbitrary artwork. */
-const CONTROLLER_HALO = 'rgba(0, 0, 0, 0.55)';
+const CONTROLLER_HALO = 'var(--color-overlay-rig-halo)';
 
 /** Inert controller — desaturated grey, so side colour reads as "live". */
-const CONTROLLER_INERT = '#6b7280';
+const CONTROLLER_INERT = 'var(--color-overlay-rig-inert)';
+
+/** The four semantic rig hues and their polygon fills. */
+const RIG = {
+  bone: 'var(--color-overlay-rig-bone)',
+  boneFill: 'var(--color-overlay-rig-bone-fill)',
+  draft: 'var(--color-overlay-rig-draft)',
+  draftFill: 'var(--color-overlay-rig-draft-fill)',
+  ik: 'var(--color-overlay-rig-ik)',
+  ikFill: 'var(--color-overlay-rig-ik-fill)',
+  pole: 'var(--color-overlay-rig-pole)',
+  selected: 'var(--color-overlay-rig-selected)',
+  selectedFill: 'var(--color-overlay-rig-selected-fill)',
+  vertex: 'var(--color-overlay-rig-vertex)',
+  meshFill: 'var(--color-overlay-rig-mesh-fill)',
+  meshEdge: 'var(--color-overlay-rig-mesh-edge)',
+  /** Shared with every other overlay: the white a marker is outlined in, and
+   *  the dark stroke a label is painted behind. */
+  outline: 'var(--color-overlay-text)',
+  labelHalo: 'var(--color-overlay-stroke-dark)',
+} as const;
 
 /**
  * The controller shape library, as an SVG path in SCREEN space.
@@ -907,12 +928,24 @@ export function BoneOverlay(): JSX.Element | null {
           const s0 = localToScreen(posedVertices[i0 * 4]!, posedVertices[i0 * 4 + 1]!);
           const s1 = localToScreen(posedVertices[i1 * 4]!, posedVertices[i1 * 4 + 1]!);
           const s2 = localToScreen(posedVertices[i2 * 4]!, posedVertices[i2 * 4 + 1]!);
-          let fill = 'rgba(255, 170, 0, 0.04)';
+          // `string`, not the const-narrowed token type: with a bone selected
+          // this becomes a computed heat colour (see below).
+          let fill: string = RIG.meshFill;
           if (selectedBoneId) {
             const w =
               (weightAt(selectedBoneId, i0) +
                 weightAt(selectedBoneId, i1) +
                 weightAt(selectedBoneId, i2)) / 3;
+            /*
+              The ONE colour in this file that is not a token, and deliberately.
+
+              This is a heat RAMP over a continuous value (the vertex weight),
+              not a chrome colour: blue at 0, green at ½, red at 1, interpolated
+              per triangle. A token names one colour; a ramp is a function, and
+              tokenising three endpoints would still leave the interpolation
+              here and would make the ramp look like three unrelated decisions.
+              It is data, drawn as colour, and it belongs with the data.
+            */
             const r = Math.round(Math.min(255, Math.max(0, (w - 0.5) * 2 * 255)));
             const g = Math.round(Math.min(255, Math.max(0, (1 - Math.abs(w - 0.5) * 2) * 255)));
             const b = Math.round(Math.min(255, Math.max(0, (0.5 - w) * 2 * 255)));
@@ -922,7 +955,7 @@ export function BoneOverlay(): JSX.Element | null {
             <polygon
               key={`bm-${i}`}
               points={`${s0.x},${s0.y} ${s1.x},${s1.y} ${s2.x},${s2.y}`}
-              stroke="rgba(255, 170, 0, 0.22)"
+              stroke={RIG.meshEdge}
               strokeWidth={1}
               fill={fill}
               pointerEvents="none"
@@ -939,9 +972,9 @@ export function BoneOverlay(): JSX.Element | null {
         const p = localToScreen(posedVertices[pickedVertex * 4]!, posedVertices[pickedVertex * 4 + 1]!);
         return (
           <g pointerEvents="none">
-            <circle cx={p.x} cy={p.y} r={6} fill="none" stroke="#33aaff" strokeWidth={2} />
-            <circle cx={p.x} cy={p.y} r={2} fill="#33aaff" />
-            <text x={p.x + 9} y={p.y - 7} fontSize={10} fill="#33aaff" style={{ userSelect: 'none' }}>
+            <circle cx={p.x} cy={p.y} r={6} fill="none" stroke={RIG.vertex} strokeWidth={2} />
+            <circle cx={p.x} cy={p.y} r={2} fill={RIG.vertex} />
+            <text x={p.x + 9} y={p.y - 7} fontSize={10} fill={RIG.vertex} style={{ userSelect: 'none' }}>
               {`#${pickedVertex}`}
             </text>
           </g>
@@ -955,7 +988,7 @@ export function BoneOverlay(): JSX.Element | null {
           cy={-999}
           r={brushRadius}
           fill="none"
-          stroke="#00e699"
+          stroke={RIG.draft}
           strokeWidth={1}
           pointerEvents="none"
           ref={brushCursorRef}
@@ -974,17 +1007,17 @@ export function BoneOverlay(): JSX.Element | null {
           <g pointerEvents="none" data-bone-draft="">
             <line
               x1={start.x} y1={start.y} x2={end.x} y2={end.y}
-              stroke="#00e699" strokeWidth={2} strokeDasharray="5 3"
+              stroke={RIG.draft} strokeWidth={2} strokeDasharray="5 3"
             />
-            <circle cx={start.x} cy={start.y} r={6} fill="#00e699" stroke="#fff" />
-            <circle cx={end.x} cy={end.y} r={5} fill="none" stroke="#00e699" strokeWidth={2} />
+            <circle cx={start.x} cy={start.y} r={6} fill={RIG.draft} stroke={RIG.outline} />
+            <circle cx={end.x} cy={end.y} r={5} fill="none" stroke={RIG.draft} strokeWidth={2} />
             <text
               x={(start.x + end.x) / 2 + 8}
               y={(start.y + end.y) / 2 - 8}
-              fill="#fff"
+              fill={RIG.outline}
               fontSize={11}
               paintOrder="stroke"
-              stroke="rgba(0,0,0,.8)"
+              stroke={RIG.labelHalo}
               strokeWidth={3}
             >
               {`${Math.round(length)} px`}
@@ -1034,14 +1067,14 @@ export function BoneOverlay(): JSX.Element | null {
               points={polyPoints}
               fill={
                 isSelected
-                  ? 'rgba(43, 126, 255, 0.45)'
+                  ? RIG.selectedFill
                   : isHovered
-                    ? 'rgba(0, 230, 153, 0.35)'
+                    ? RIG.draftFill
                     : inIkChain
-                      ? 'rgba(255, 0, 85, 0.22)'
-                      : 'rgba(255, 170, 0, 0.25)'
+                      ? RIG.ikFill
+                      : RIG.boneFill
               }
-              stroke={isSelected ? '#2b7eff' : isHovered ? '#00e699' : inIkChain ? '#ff0055' : '#ffaa00'}
+              stroke={isSelected ? RIG.selected : isHovered ? RIG.draft : inIkChain ? RIG.ik : RIG.bone}
               strokeWidth={1.5}
             />
 
@@ -1050,8 +1083,8 @@ export function BoneOverlay(): JSX.Element | null {
               cx={rScreen.x}
               cy={rScreen.y}
               r={6}
-              fill={isSelected ? '#2b7eff' : inIkChain ? '#ff0055' : '#ffaa00'}
-              stroke="#ffffff"
+              fill={isSelected ? RIG.selected : inIkChain ? RIG.ik : RIG.bone}
+              stroke={RIG.outline}
               strokeWidth={1.5}
             />
 
@@ -1060,8 +1093,8 @@ export function BoneOverlay(): JSX.Element | null {
               cx={tScreen.x}
               cy={tScreen.y}
               r={4}
-              fill={isSelected ? '#2b7eff' : '#00e699'}
-              stroke="#ffffff"
+              fill={isSelected ? RIG.selected : RIG.draft}
+              stroke={RIG.outline}
               strokeWidth={1}
             />
           </g>
@@ -1091,9 +1124,9 @@ export function BoneOverlay(): JSX.Element | null {
           >
             {/* Invisible fat hit area so the crosshair is grabbable */}
             <circle cx={tScreen.x} cy={tScreen.y} r={14} fill="transparent" />
-            <circle cx={tScreen.x} cy={tScreen.y} r={8} fill="none" stroke="#ff0055" strokeWidth={2} />
-            <line x1={tScreen.x - 10} y1={tScreen.y} x2={tScreen.x + 10} y2={tScreen.y} stroke="#ff0055" strokeWidth={1.5} />
-            <line x1={tScreen.x} y1={tScreen.y - 10} x2={tScreen.x} y2={tScreen.y + 10} stroke="#ff0055" strokeWidth={1.5} />
+            <circle cx={tScreen.x} cy={tScreen.y} r={8} fill="none" stroke={RIG.ik} strokeWidth={2} />
+            <line x1={tScreen.x - 10} y1={tScreen.y} x2={tScreen.x + 10} y2={tScreen.y} stroke={RIG.ik} strokeWidth={1.5} />
+            <line x1={tScreen.x} y1={tScreen.y - 10} x2={tScreen.x} y2={tScreen.y + 10} stroke={RIG.ik} strokeWidth={1.5} />
           </g>
         );
       })}
@@ -1118,14 +1151,14 @@ export function BoneOverlay(): JSX.Element | null {
             {joint && (
               <line
                 x1={joint.x} y1={joint.y} x2={p.x} y2={p.y}
-                stroke="#a855f7" strokeWidth={1} strokeDasharray="3 3" opacity={0.8}
+                stroke={RIG.pole} strokeWidth={1} strokeDasharray="3 3" opacity={0.8}
                 pointerEvents="none"
               />
             )}
             <circle cx={p.x} cy={p.y} r={12} fill="transparent" />
             <polygon
               points={`${p.x},${p.y - 7} ${p.x + 6},${p.y + 5} ${p.x - 6},${p.y + 5}`}
-              fill="#a855f7" stroke="#ffffff" strokeWidth={1.2}
+              fill={RIG.pole} stroke={RIG.outline} strokeWidth={1.2}
             />
           </g>
         );

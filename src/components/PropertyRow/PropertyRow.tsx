@@ -158,6 +158,33 @@ export interface PropertyRowProps {
   className?: string;
   /** Extra leading indent, in levels (16px each), for nested property groups. */
   depth?: number;
+  /**
+   * The row describes a multi-selection whose values disagree. Draws a
+   * "mixed" mark after the name; the value control itself is expected to be a
+   * `ValueField` in `mixed` mode (or a swatch drawn as mixed).
+   */
+  mixed?: boolean;
+  /** A muted note after the name — "2 of 3" when only some layers have it. */
+  hint?: string;
+  /** Pinned to the Pinned tab — a push-pin glyph before the name. */
+  pinned?: boolean;
+  /**
+   * An expression error, shown as a dashed underline on the name with the
+   * message on hover. `null`/undefined = no error.
+   */
+  error?: string | null;
+  /**
+   * Small controls that belong to the NAME cell's right edge — the `=`
+   * expression toggle, the pick-whip, modifier chips. In the name cell rather
+   * than a column of their own so the value column every row shares does not
+   * move by the width of controls only some rows have.
+   */
+  trailing?: ReactNode;
+  /**
+   * Full-width content under the row — the keyframe lane, an inline expression
+   * editor. Spans every grid column so it aligns with the row above it.
+   */
+  below?: ReactNode;
 }
 
 /**
@@ -181,14 +208,21 @@ export function PropertyRow({
   compact = false,
   className,
   depth = 0,
+  mixed = false,
+  hint,
+  pinned = false,
+  error,
+  trailing,
+  below,
 }: PropertyRowProps): JSX.Element {
   const a11yLabel = srLabel ?? label;
   return (
     <div
-      className={cn(styles.row, compact && styles.compact, className)}
+      className={cn(styles.row, compact && styles.compact, below !== undefined && styles.withBelow, className)}
       onContextMenu={onContextMenu}
       style={depth > 0 ? { paddingLeft: depth * 16 } : undefined}
       data-property-row
+      data-mixed={mixed || undefined}
     >
       {onStopwatch ? (
         <StopwatchButton animated={animated} label={a11yLabel} onToggle={onStopwatch} />
@@ -196,8 +230,18 @@ export function PropertyRow({
         <span />
       )}
       {animated && navigator ? <KeyframeNavigator label={a11yLabel} {...navigator} /> : <span />}
-      <span className={cn(styles.name, animated && styles.nameAnimated)} title={a11yLabel}>
-        {label}
+      <span className={cn(styles.name, animated && styles.nameAnimated)} title={error ?? a11yLabel}>
+        {pinned && <Icon name="push-pin" size="sm" className={styles.pin} title="Pinned" />}
+        <span className={cn(styles.nameText, error && styles.nameError)} data-error={error ? '' : undefined}>
+          {label}
+        </span>
+        {mixed && (
+          <span className={styles.mixedMark} title="Mixed — the selected layers disagree" aria-label="Mixed values">
+            mixed
+          </span>
+        )}
+        {hint && <span className={styles.hint}>{hint}</span>}
+        {trailing && <span className={styles.trailing}>{trailing}</span>}
       </span>
       <div className={styles.values}>{children}</div>
       {onReset ? (
@@ -213,6 +257,7 @@ export function PropertyRow({
       ) : (
         <span />
       )}
+      {below !== undefined && <div className={styles.below}>{below}</div>}
     </div>
   );
 }

@@ -27,6 +27,8 @@ module.exports = {
     // CommonJS, and one of them anywhere in a component tree fails the whole
     // file at parse time — which is what made the editor untestable.
     '^react-markdown$': '<rootDir>/jest.esmComponentMock.cjs',
+    // Vite's `?raw` text imports → string stub (must precede path aliases).
+    '\\?raw$': '<rootDir>/jest.rawMock.cjs',
     // CSS Modules → stub (must precede path aliases).
     '\\.(css|less|scss|sass)$': '<rootDir>/jest.styleMock.cjs',
     // Static assets (brand logos, etc.) → URL-string stub. Must also precede the
@@ -37,6 +39,9 @@ module.exports = {
     // the module that builds the plugin-sandbox Worker URL is swapped for a
     // stub. Tests inject a fake worker via PluginHost.setWorkerFactory().
     '^\\./spawnPluginWorker$': '<rootDir>/src/core/plugins/spawnPluginWorker.stub.ts',
+    // `import.meta.glob` (Vite) over docs/*.md for the palette's `?` mode —
+    // same CommonJS parse problem, same answer: a stub with an empty index.
+    '^(\\.|@layout/CommandPalette)/docsGlob$': '<rootDir>/src/layout/CommandPalette/docsGlob.stub.ts',
     // Path aliases — keep in sync with tsconfig.json "paths".
     '^@motion/scene$': '<rootDir>/packages/scene/src/index.ts',
     '^@motion/animation$': '<rootDir>/packages/animation/src/index.ts',

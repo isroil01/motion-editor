@@ -17,6 +17,7 @@ import {
   TOUR_POLL_MS,
   canAutoStart,
   resetOnboardingRuntime,
+  setStartScreenVisible,
 } from './onboardingStore';
 
 const SEEN_LS = 'motion-editor.onboarding.seen';
@@ -179,6 +180,32 @@ describe('auto-advance', () => {
 describe('first-run policy', () => {
   test('auto-start is allowed on a clean install', () => {
     expect(canAutoStart()).toBe(true);
+  });
+
+  test('a boot-time auto-start is retracted when the start screen appears after it', () => {
+    // Mount order: the shell (and its tour auto-start) before the start
+    // screen. The late flag must pull the tour back down, unseen.
+    useOnboardingStore.getState().onEditorMounted();
+    expect(useOnboardingStore.getState().active).toBe(true);
+    setStartScreenVisible(true);
+    expect(useOnboardingStore.getState().active).toBe(false);
+    expect(localStorage.getItem(SEEN_LS)).toBeNull();
+    setStartScreenVisible(false);
+    expect(useOnboardingStore.getState().active).toBe(true);
+  });
+
+  test('the tour waits behind the start screen and begins when it is dismissed', () => {
+    // A fresh profile is exactly when the start screen is up, and a tour that
+    // spotlights the toolbar over the project browser points at nothing the
+    // user can reach. Visible → no auto-start; dismissed → it begins.
+    setStartScreenVisible(true);
+    expect(canAutoStart()).toBe(false);
+    useOnboardingStore.getState().onEditorMounted();
+    expect(useOnboardingStore.getState().active).toBe(false);
+
+    setStartScreenVisible(false);
+    expect(useOnboardingStore.getState().active).toBe(true);
+    expect(useOnboardingStore.getState().autoStarted).toBe(true);
   });
 
   test('a completed or skipped tour never auto-starts again', () => {

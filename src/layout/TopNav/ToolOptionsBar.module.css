@@ -116,3 +116,15 @@
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
+
+/* Warning-tinted hint: a tool that cannot act until the selection changes. */
+.hintWarning {
+  color: var(--color-warning);
+}
+
+/* Pushes the snap-to-pixel mode badge to the far end of the bar, so its
+   position does not shift as the tool options beside it change width. */
+.snapSpacer {
+  flex: 1 1 auto;
+  min-width: var(--space-2);
+}

@@ -1,75 +1,105 @@
 /**
  * DARK THEME — Motion Studio ("premium black").
- * True neutral-black surfaces (zero blue tint), MONOCHROME chrome: selection +
- * primary are white-on-black. Colour is reserved for meaning only — violet for
- * AI, coral for the playhead/temporal family, category hues, status.
- * Elevation = surface value steps; hairlines only at region seams.
+ * Near-neutral black surfaces from the `--color-slate-*` ladder, MONOCHROME
+ * chrome: selection + primary are white-on-black. Colour is reserved for
+ * meaning only — violet for AI, coral for the playhead/temporal family,
+ * category hues, status. Elevation = surface value steps; hairlines only at
+ * region seams.
+ *
+ * Authored from PRIMITIVES, exactly as light.css is. Every value here is a
+ * `var(--color-…)` from tokens/colors.css or an alpha overlay; the raw hexes
+ * that used to live in this file have moved into the ramp (slate-925, the
+ * neutral text greys) so the two themes are built the same way and a future
+ * theme can be derived by swapping the ramp.
+ *
+ * ── The surface contract ─────────────────────────────────────────────────
+ *
+ *   --surface-0   app frame, the ground everything sits on
+ *   --surface-1   panels, cards, tables
+ *   --surface-2   controls, buttons, table headers, wells
+ *   --surface-3   popovers, menus, tooltips — the topmost opaque layer
+ *
+ * Each level is a GUARANTEED luminance step above the one below it in this
+ * theme (and below it in light.css). `tokenContrast.test.ts` measures the
+ * ramp, so a surface can no longer drift onto its neighbour. The three
+ * interaction overlays are alpha so they compose onto any level:
+ *
+ *   --surface-hover      pointer over a row / button
+ *   --surface-active     pressed
+ *   --surface-selected   the selection tint (NOT the solid selection colour)
+ *
+ * The older `--color-surface-*` / `--color-panel` / `--color-toolbar` names
+ * remain as ALIASES onto these, so nothing in src/layout has to move today.
  */
 
 [data-theme="dark"],
 :root:not([data-theme]) {
-  /* ── Surfaces (elevation by value, not borders) ───────────────── */
-  --color-background:        #181818;
-  --color-surface-0:         #181818;  /* app frame / canvas base */
-  --color-surface-1:         #232323;  /* panels / cards / tables */
-  --color-surface-2:         #2c2c2c;  /* controls / buttons / table headers */
-  --color-surface-3:         #383838;  /* hover step           */
-  --color-surface-raised:    #2a2a2a;  /* popovers / overlays  */
-  --color-panel:             #232323;
-  --color-panel-header:      #1d1d1d;
-  --color-toolbar:           #1d1d1d;
-  --color-statusbar:         #1d1d1d;
-  --color-titlebar:          #141414;
-  --color-workspace:         #181818; /* canvas void          */
-  --color-pasteboard:        #232323; /* comp surround        */
+  /* ── Surface contract ─────────────────────────────────────────── */
+  --surface-0:        var(--color-slate-900);   /* #171718 */
+  --surface-1:        var(--color-slate-850);   /* #212123 */
+  --surface-2:        var(--color-slate-800);   /* #2b2b2e */
+  --surface-3:        var(--color-slate-700);   /* #35373d */
+  --surface-hover:    var(--color-white-a04);
+  --surface-active:   var(--color-white-a08);
+  --surface-selected: var(--color-primary-subtle);
+
+  /* ── Surfaces (aliases onto the contract) ────────────────────── */
+  --color-background:        var(--surface-0);
+  --color-surface-0:         var(--surface-0);  /* app frame / canvas base */
+  --color-surface-1:         var(--surface-1);  /* panels / cards / tables */
+  --color-surface-2:         var(--surface-2);  /* controls / buttons / table headers */
+  --color-surface-3:         var(--surface-3);  /* hover step / popovers */
+  --color-surface-raised:    var(--surface-3);  /* popovers / overlays  */
+  --color-panel:             var(--surface-1);
+  --color-panel-header:      var(--color-neutral-900);
+  --color-toolbar:           var(--color-neutral-900);
+  --color-statusbar:         var(--color-neutral-900);
+  --color-titlebar:          var(--color-slate-925);
+  --color-workspace:         var(--surface-0);  /* canvas void          */
+  --color-pasteboard:        var(--surface-1);  /* comp surround        */
 
   /* ── Borders & dividers ───────────────────────────────────────── */
   /* Major structural boundaries (seams between main app regions) */
-  --color-border-structural: #000000;
-  --color-splitter:          #000000;
+  --color-border-structural: var(--color-slate-1000);
+  --color-splitter:          var(--color-slate-1000);
   --color-splitter-hover:    var(--color-selection);
 
   /* Secondary & inner chrome (tabs, cards, sections, subheaders, controls) */
-  --color-border:            #282828;
-  --color-border-strong:     #383838;
-  --color-border-subtle:     #1e1e1e;
-  --color-divider:           #222222;
+  --color-border:            var(--color-neutral-800);
+  --color-border-strong:     var(--color-slate-700);
+  --color-border-subtle:     var(--color-neutral-900);
+  --color-divider:           var(--color-neutral-850);
   /* Recessed-field hairline (Input/Switch/ValueField/etc. inset wells) —
      one step lighter than border-subtle since these sit on the darkest well. */
-  --color-field-border:       rgba(255, 255, 255, 0.08);
-  --color-field-border-hover: rgba(255, 255, 255, 0.16);
+  --color-field-border:       var(--color-white-a08);
+  --color-field-border-hover: var(--color-white-a16);
 
   /* ── Text ─────────────────────────────────────────────────────── */
   /*
-   * Neutral off-whites (zero blue).
+   * Zero-tint off-whites from the neutral ramp. Contrast against surface-1
+   * (#212123), measured by tokenContrast.test.ts rather than by hand:
    *
-   * Re-checked 2026-08-03 against the surfaces actually in use. The previous
-   * note claimed "AA-checked on surface-1 (#171718)", but surface-1 was later
-   * lightened to #232323 and the text ramp was never re-measured — so the
-   * check was stale AND the old tertiary (#7e7e7e) failed even against the
-   * surface it named:
+   *   primary   #e1e1e1  12.3 : 1
+   *   secondary #a6a6a6   6.6 : 1
+   *   tertiary  #8c8c8c   4.8 : 1   ← carries real labels (units, counts,
+   *                                   hints), so it clears AA, not just 3:1
    *
-   *            panel #232323   header #1d1d1d   frame #161616
-   *   #7e7e7e      3.87            4.15            4.46      ← all under AA
-   *   #8c8c8c      4.67            5.01            5.38      ← passes
-   *
-   * Tertiary carries real labels (units, counts, hints), so it has to clear
-   * 4.5:1. Anything genuinely decorative uses --color-text-muted instead.
+   * Anything genuinely decorative uses --color-text-muted instead.
    */
-  --color-text-primary:      #e1e1e1;
-  --color-text-secondary:    #a6a6a6;
-  --color-text-tertiary:     #8c8c8c;  /* AA on panel/header/frame — see above */
-  --color-text-muted:        #5a5a5a;  /* decorative / icons only, never body */
-  --color-text-inverse:      #161616;
-  --color-text-on-accent:    #ffffff;
-  --color-text-disabled:     #444444;
+  --color-text-primary:      var(--color-neutral-100);
+  --color-text-secondary:    var(--color-neutral-300);
+  --color-text-tertiary:     var(--color-neutral-400);
+  --color-text-muted:        var(--color-neutral-600);  /* decorative / icons only, never body */
+  --color-text-inverse:      var(--color-slate-900);
+  --color-text-on-accent:    var(--color-slate-0);
+  --color-text-disabled:     var(--color-neutral-700);
 
   /* ── Interactive states ───────────────────────────────────────── */
-  --color-hover:             rgba(255, 255, 255, 0.04);
-  --color-active:            rgba(255, 255, 255, 0.08);
+  --color-hover:             var(--surface-hover);
+  --color-active:            var(--surface-active);
   --color-selected:          var(--color-selection);
   --color-selected-hover:    var(--color-selection-hover);
-  --color-pressed:           rgba(255, 255, 255, 0.08);
+  --color-pressed:           var(--surface-active);
   --color-drop-target:       rgba(255, 255, 255, 0.10);
 
   /* ── Selection (AE Royal Blue highlight) ───────────────────────── */
@@ -79,16 +109,16 @@
   --color-motion-path:       #6aa8ff;
   /* Canvas overlay chrome (snap lines, camera/light guides, HUD pills). */
   --color-snap-line:         #ff3ba7;
-  --color-camera-guide:      #38bdf8;
+  --color-camera-guide:      var(--color-sky-400);
   --color-light-guide:       #f59e0b;
   /* Guides the USER drags out of the rulers. Its own token rather than the
      camera-guide colour it was spelled as a literal beside: a ruler guide and
      a camera frustum are different objects and must stay tellable apart. */
   --color-ruler-bg:          #111111;
-  --color-ruler-corner:      #161616;
+  --color-ruler-corner:      var(--color-slate-925);
   --color-ruler-border:      #262626;
   --color-ruler-text:        #cccccc;
-  --color-ruler-tick:        #707070;
+  --color-ruler-tick:        var(--color-neutral-500);
   --color-ruler-guide:       #2dd4eb;
   --color-hud-bg:            rgba(20, 22, 30, 0.85);
   --color-hud-border:        rgba(100, 130, 255, 0.5);
@@ -99,7 +129,7 @@
   --color-primary-hover:     #4097ff;
   --color-primary-active:    #1d75e0;
   --color-primary-subtle:    rgba(41, 136, 255, 0.15);  /* selection tint */
-  --color-primary-foreground: #ffffff;                    /* white on blue */
+  --color-primary-foreground: var(--color-slate-0);      /* white on blue */
 
   --color-accent:            #2988ff;
   --color-accent-subtle:     rgba(41, 136, 255, 0.15);
@@ -108,9 +138,9 @@
   --color-modified:          var(--color-amber-500);
 
   /* ── Status (semantic only — never interactive chrome) ────────── */
-  --color-success:           #10b981;
-  --color-warning:           #f5b84b;
-  --color-danger:            #f43f5e;
+  --color-success:           var(--color-emerald-500);
+  --color-warning:           var(--color-amber-500);
+  --color-danger:            var(--color-rose-500);
   --color-info:              #9a9a9e;
 
   /* ── Focus / accessibility (white ring on black) ──────────────── */
@@ -118,6 +148,6 @@
 
   /* ── Overlays ─────────────────────────────────────────────────── */
   --color-overlay-scrim:     rgba(4, 6, 9, 0.7);
-  --color-overlay-hover:     rgba(255, 255, 255, 0.04);
-  --color-overlay-active:    rgba(255, 255, 255, 0.08);
+  --color-overlay-hover:     var(--surface-hover);
+  --color-overlay-active:    var(--surface-active);
 }

@@ -51,6 +51,7 @@ import {
 } from 'react';
 import { Button } from '@components/Button';
 import { Icon } from '@components/Icon';
+import { Dropdown } from '@components/Dropdown';
 import { SearchField } from '@components/SearchField';
 import { EmptyState } from '@components/EmptyState';
 import { cn } from '@utils/cn';
@@ -389,109 +390,145 @@ export function TranscriptPanel(): JSX.Element {
       aria-label="Transcript"
       onKeyDown={onKeyDown}
     >
-      <div className={styles.toolbar}>
-        <Button
-          size="xs"
-          variant="primary"
-          leftIcon={<Icon name="mic" size="sm" />}
-          disabled={busy || !available}
-          onClick={() => { void runTranscribe(); }}
-          title={
-            available
-              ? `Transcribe the ${scope.label}`
-              : 'This build cannot transcribe audio — the desktop app holds the provider key.'
-          }
-        >
-          {transcript ? 'Re-transcribe' : 'Transcribe'}
-        </Button>
-        <Button
-          size="xs"
-          leftIcon={<Icon name="trash" size="sm" />}
-          disabled={busy || selected.length === 0}
-          onClick={() => { void runDelete(); }}
-          title="Remove the selected words' time from the composition and close the gap (Delete)"
-        >
-          Delete selection
-        </Button>
-        <button
-          type="button"
-          className={styles.scopeToggle}
-          aria-pressed={restrictToSelection}
-          onClick={() => setRestrictToSelection(!restrictToSelection)}
-          title={
-            restrictToSelection
-              ? 'Cutting only the layers selected in the scene. The gap still closes for every layer.'
-              : 'Cutting every layer the selection crosses — including a video’s separate audio layer.'
-          }
-        >
-          {restrictToSelection ? 'Selected layers only' : 'All layers'}
-        </button>
-        <span className={styles.spacer} />
-        <Button
-          size="xs"
-          leftIcon={<Icon name="type" size="sm" />}
-          disabled={busy || words.length === 0}
-          onClick={() => addTranscriptAsCaptions(rootId)}
-          title="Create one text layer per segment, timed to the edited transcript"
-        >
-          Add as captions
-        </Button>
-        <Button
-          size="xs"
-          leftIcon={<Icon name="download" size="sm" />}
-          disabled={words.length === 0}
-          onClick={() => exportTranscript('srt', rootId)}
-          title="Export the transcript as SubRip"
-        >
-          SRT
-        </Button>
-        <Button
-          size="xs"
-          leftIcon={<Icon name="download" size="sm" />}
-          disabled={words.length === 0}
-          onClick={() => exportTranscript('vtt', rootId)}
-          title="Export the transcript as WebVTT"
-        >
-          VTT
-        </Button>
-      </div>
-
-      <div className={styles.toolbar}>
+      <div className={styles.searchRow}>
         <SearchField
           size="sm"
-          fullWidth={false}
-          placeholder="Find a word"
+          fullWidth
+          placeholder="Find a word in the transcript…"
           value={query}
           onChange={setQuery}
           ariaLabel="Find a word in the transcript"
         />
-        <Button
-          size="xs"
-          leftIcon={<Icon name="magic-wand" size="sm" />}
-          disabled={words.length === 0}
-          onClick={selectFillers}
-          title="Select every filler word, ready to delete"
-        >
-          Select fillers
-        </Button>
-        <button
-          type="button"
-          className={styles.linkButton}
-          aria-expanded={showFillers}
-          onClick={() => setShowFillers((v) => !v)}
-        >
-          {showFillers ? 'Hide list' : 'Edit list'}
-        </button>
+      </div>
+
+      <div className={styles.toolbarRow}>
+        <div className={styles.toolbarGroup}>
+          <Button
+            size="xs"
+            variant="primary"
+            leftIcon={<Icon name="mic" size="sm" />}
+            disabled={busy || !available}
+            onClick={() => { void runTranscribe(); }}
+            title={
+              available
+                ? `Transcribe the ${scope.label}`
+                : 'This build cannot transcribe audio — the desktop app holds the provider key.'
+            }
+          >
+            {transcript ? 'Re-transcribe' : 'Transcribe'}
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            leftIcon={<Icon name="trash" size="sm" />}
+            disabled={busy || selected.length === 0}
+            onClick={() => { void runDelete(); }}
+            title="Remove the selected words' time from the composition and close the gap (Delete)"
+          >
+            Delete selection
+          </Button>
+          <button
+            type="button"
+            className={styles.scopeToggle}
+            aria-pressed={restrictToSelection}
+            onClick={() => setRestrictToSelection(!restrictToSelection)}
+            title={
+              restrictToSelection
+                ? 'Cutting only the layers selected in the scene. The gap still closes for every layer.'
+                : 'Cutting every layer the selection crosses — including a video’s separate audio layer.'
+            }
+          >
+            {restrictToSelection ? 'Selected layers only' : 'All layers'}
+          </button>
+        </div>
+
+        <div className={styles.toolbarGroup}>
+          <Button
+            size="xs"
+            variant="ghost"
+            leftIcon={<Icon name="magic-wand" size="sm" />}
+            disabled={words.length === 0}
+            onClick={selectFillers}
+            title="Select every filler word, ready to delete"
+          >
+            Select fillers
+          </Button>
+          <Button
+            size="xs"
+            variant={showFillers ? 'secondary' : 'ghost'}
+            aria-expanded={showFillers}
+            onClick={() => setShowFillers((v) => !v)}
+            title="Configure custom filler word list"
+          >
+            {showFillers ? 'Hide list' : 'Edit list'}
+          </Button>
+          <Dropdown
+            placement="bottom-end"
+            trigger={
+              <button
+                type="button"
+                className={styles.toolbarBtn}
+                title="More actions (Captions, Export)"
+                aria-label="More transcript actions"
+              >
+                <Icon name="more-horizontal" size="sm" />
+              </button>
+            }
+            items={[
+              {
+                type: 'item',
+                id: 'captions',
+                label: 'Add as captions',
+                icon: 'type',
+                disabled: busy || words.length === 0,
+                onSelect: () => addTranscriptAsCaptions(rootId),
+              },
+              { type: 'separator' },
+              {
+                type: 'label',
+                label: 'Export',
+              },
+              {
+                type: 'item',
+                id: 'export-srt',
+                label: 'Export as SRT (.srt)',
+                icon: 'download',
+                disabled: words.length === 0,
+                onSelect: () => exportTranscript('srt', rootId),
+              },
+              {
+                type: 'item',
+                id: 'export-vtt',
+                label: 'Export as WebVTT (.vtt)',
+                icon: 'download',
+                disabled: words.length === 0,
+                onSelect: () => exportTranscript('vtt', rootId),
+              },
+            ]}
+          />
+        </div>
       </div>
 
       {showFillers && (
-        <textarea
-          className={styles.fillerList}
-          value={fillerText}
-          spellCheck={false}
-          aria-label="Filler words, comma separated"
-          onChange={(e) => setFillerText(e.target.value)}
-        />
+        <div className={styles.fillerEditorCard}>
+          <div className={styles.fillerEditorHeader}>
+            <span>Custom filler words</span>
+            <button
+              type="button"
+              className={styles.linkButton}
+              onClick={() => setShowFillers(false)}
+            >
+              Done
+            </button>
+          </div>
+          <textarea
+            className={styles.fillerList}
+            value={fillerText}
+            spellCheck={false}
+            aria-label="Filler words, comma separated"
+            onChange={(e) => setFillerText(e.target.value)}
+          />
+        </div>
       )}
 
       {phase !== 'idle' && (
@@ -522,8 +559,12 @@ export function TranscriptPanel(): JSX.Element {
 
       {selected.length > 0 && (
         <div className={styles.selectionBar}>
-          {selected.length} word{selected.length === 1 ? '' : 's'} selected ·{' '}
-          {selectedSeconds.toFixed(2)}s in {ranges.length} range{ranges.length === 1 ? '' : 's'}
+          <div className={styles.selectionBarText}>
+            <span>
+              {selected.length} word{selected.length === 1 ? '' : 's'} selected ·{' '}
+              {selectedSeconds.toFixed(2)}s in {ranges.length} range{ranges.length === 1 ? '' : 's'}
+            </span>
+          </div>
           <button type="button" className={styles.linkButton} onClick={clearSelection}>
             Clear
           </button>

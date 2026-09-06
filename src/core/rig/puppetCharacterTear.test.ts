@@ -184,6 +184,43 @@ describe('puppet mesh for a PNG character (outline mode)', () => {
     expect(inEmptyRegion).toBe(0);
   });
 
+  it('covers every opaque cell of the artwork — no boundary triangle is dropped', () => {
+    // The visible bug on a real PNG: the mesher rejected every triangle whose
+    // edge lay ON the outline down the right-hand side of the character (an
+    // even-odd ray cast on a point sitting exactly on a vertical edge is biased
+    // by side), so the layer rendered with wedge-shaped holes along its torso,
+    // arm and leg. The renderer draws only what the mesh covers, so this is
+    // the property that matters: the centre of every covered coverage cell
+    // lies inside some triangle of the rest mesh.
+    const mesh = meshFor('silhouette');
+    const inTri = (px: number, py: number, a: number, b: number, c: number): boolean => {
+      const v = mesh.vertices;
+      const d1 = (px - v[b * 4]!) * (v[a * 4 + 1]! - v[b * 4 + 1]!) - (v[a * 4]! - v[b * 4]!) * (py - v[b * 4 + 1]!);
+      const d2 = (px - v[c * 4]!) * (v[b * 4 + 1]! - v[c * 4 + 1]!) - (v[b * 4]! - v[c * 4]!) * (py - v[c * 4 + 1]!);
+      const d3 = (px - v[a * 4]!) * (v[c * 4 + 1]! - v[a * 4 + 1]!) - (v[c * 4]! - v[a * 4]!) * (py - v[a * 4 + 1]!);
+      return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+    };
+    const cw = W / mask.cols;
+    const ch = H / mask.rows;
+    let uncovered = 0;
+    let total = 0;
+    for (let r = 0; r < mask.rows; r++) {
+      for (let c = 0; c < mask.cols; c++) {
+        if (!mask.cells[r * mask.cols + c]) continue;
+        total++;
+        const px = (c + 0.5) * cw - W / 2;
+        const py = (r + 0.5) * ch - H / 2;
+        let hit = false;
+        for (let t = 0; t < mesh.triangles.length && !hit; t += 3) {
+          hit = inTri(px, py, mesh.triangles[t]!, mesh.triangles[t + 1]!, mesh.triangles[t + 2]!);
+        }
+        if (!hit) uncovered++;
+      }
+    }
+    expect(total).toBeGreaterThan(100);
+    expect(uncovered).toBe(0);
+  });
+
   it('(a) no triangle flips its winding, for a drag OR a fold', () => {
     const mesh = meshFor('silhouette');
     expect(flippedTriangles(mesh, deform(draggedPins(), mesh, 'arap'))).toBe(0);
@@ -218,7 +255,12 @@ describe('puppet mesh for a PNG character (outline mode)', () => {
       out[handIdx * 4 + 1]! - mesh.vertices[handIdx * 4 + 1]!,
     );
     expect(handMove).toBeGreaterThan(DRAG - 0.5);
-    expect(maxMoveIn(mesh, out, TORSO)).toBeLessThan(2);
+    // The torso has ONE pin, so ARAP lets it rotate a little about that pin as
+    // the arm pulls — a few px at the shoulder-side corner of the box is the
+    // rigid-body answer, not smear. (This bound was 2px while the mesher was
+    // dropping every boundary triangle down the arm's right side; the properly
+    // connected arm couples the torso more, and honestly.)
+    expect(maxMoveIn(mesh, out, TORSO)).toBeLessThan(4);
   });
 
   it('(b) the arm BENDS — displacement falls off along the limb', () => {
@@ -308,16 +350,39 @@ describe('puppet mesh for a PNG character (outline mode)', () => {
     // vertex. ARAP must then constrain the vertex `finishRestMesh` bound the pin
     // to, not whichever tied vertex is compacted first — otherwise the artwork
     // slides out from under the handle (measured: 37.3px of a 40px drag).
-    const mesh = meshFor('silhouette');
+    //
+    // The saturation is FORCED here rather than relied on. It used to occur
+    // naturally on this mesh, but only because the mesher was dropping the arm's
+    // boundary triangles and leaving a sparse, badly-connected limb tip; on the
+    // correct mesh the column peaks uniquely. The tie-break still has to hold
+    // for any mesh where the solve does saturate, so build one: every vertex
+    // within a step of the hand gets the same weight as the bound vertex, with
+    // the LOWEST-indexed of them — the one a first-wins argmax would pick — well
+    // away from the pin.
+    const built = meshFor('silhouette');
+    const n = built.vertices.length / 4;
+    const bound = built.pinVertexIndices[HAND.id]!;
+    const hand = new Float32Array(built.weights[HAND.id]!);
+    const body = new Float32Array(built.weights[BODY.id]!);
+    const peak = hand[bound]!;
+    let lowestTied = bound;
+    for (let i = 0; i < n; i++) {
+      const d = Math.hypot(built.vertices[i * 4]! - HAND.x, built.vertices[i * 4 + 1]! - HAND.y);
+      if (d < 12) {
+        hand[i] = peak;
+        body[i] = 1 - peak;
+        if (i < lowestTied) lowestTied = i;
+      }
+    }
+    expect(lowestTied).toBeLessThan(bound); // first-wins argmax WOULD pick the wrong vertex
+    const mesh: DeformedMesh = { ...built, weights: { [HAND.id]: hand, [BODY.id]: body } };
     const col = mesh.weights[HAND.id]!;
-    const n = mesh.vertices.length / 4;
     let max = -Infinity;
     for (let i = 0; i < n; i++) if (col[i]! > max) max = col[i]!;
     let ties = 0;
     for (let i = 0; i < n; i++) if (col[i]! === max) ties++;
-    expect(ties).toBeGreaterThan(1); // the degenerate case really does occur here
+    expect(ties).toBeGreaterThan(1);
 
-    const bound = mesh.pinVertexIndices[HAND.id]!;
     const out = deform(draggedPins(), mesh, 'arap');
     expect(out[bound * 4]! - mesh.vertices[bound * 4]!).toBeCloseTo(0, 6);
     expect(out[bound * 4 + 1]! - mesh.vertices[bound * 4 + 1]!).toBeCloseTo(DRAG, 6);

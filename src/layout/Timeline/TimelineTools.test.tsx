@@ -55,9 +55,13 @@ it('every button advertises its shortcut and what it does', () => {
   }
 });
 
-it('names the armed tool in words, not only as a lit glyph', () => {
+it('carries no text label — the name lives in each button, not beside the row', () => {
+  // The word "Selection" used to sit beside the five buttons. It cost a slot
+  // in a toolbar that now has to hold the whole panel's tools, and it said
+  // what the armed button's own name and tooltip already say.
   render(<TimelineTools />);
-  expect(screen.getByText('Selection')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('radio', { name: 'Slip tool' }));
-  expect(screen.getByText('Slip')).toBeInTheDocument();
+  expect(screen.queryByText('Selection')).toBeNull();
+  const armed = screen.getByRole('radio', { name: 'Selection tool' });
+  expect(armed).toHaveAttribute('aria-checked', 'true');
+  expect(armed.getAttribute('title')).toContain('Selection');
 });

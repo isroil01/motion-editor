@@ -4,6 +4,7 @@ export {
   MenuSeparator,
   MenuLabel,
   MenuCheckbox,
+  MenuCustomRow,
   ContextMenu,
 } from './Menu';
 export type {

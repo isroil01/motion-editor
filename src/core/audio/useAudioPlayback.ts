@@ -23,6 +23,7 @@ import { useAssetStore } from '@stores/assetStore';
 import { audioEngine, type AudioLayerState } from './AudioEngine';
 import { readAudioLayers } from './audioScene';
 import { playbackHealth } from '@core/rendering/videoPlaybackDiag';
+import { useCurrentTime } from '@stores/playbackClockStore';
 
 /** During playback, refresh the layer list at most this often even with no
  *  revision bump — catches live edits (keyframed levels) whose paths don't
@@ -32,7 +33,10 @@ const PLAYBACK_REFRESH_MS = 500;
 export function useAudioPlayback(): void {
   const ws = useActiveWorkspace();
   const playing = ws?.playing ?? false;
-  const time = ws?.time ?? 0;
+  // The live clock, not the project-store mirror: that copy is refreshed at
+  // 4 Hz during playback, which hovers right at AudioEngine.SEEK_TOLERANCE
+  // (0.25 s) and would re-trigger voices.
+  const time = useCurrentTime();
   // Scope to the ACTIVE composition: unscoped, a multi-comp project played
   // every comp's audio at once — the same bleed the export mixdown had.
   const compositionId = ws?.compositionId;

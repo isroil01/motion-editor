@@ -1,5 +1,6 @@
 /**
- * ProjectStatus — which project is open, and whether it has unsaved edits.
+ * ProjectStatus — which project is open, whether it has unsaved edits, and
+ * how long ago it was last saved.
  *
  * The editor had no such indicator. `TitleBar.module.css` carried a fully
  * styled `.projectName` and `.dirtyDot` that no component ever rendered, so
@@ -7,18 +8,54 @@
  * had (or had not) landed. That is what let a Save which wrote nothing pass for
  * one: the toast said "Saved" and no other surface disagreed.
  *
- * Two sources, because the project's identity and its dirty flag genuinely live
- * apart: the name comes from the ProjectManager, and the unsaved marker from
- * the active workspace tab — the flag `hasUnsavedChanges` and the discard
- * prompt read.
+ * Three sources, because they genuinely live apart: the name comes from the
+ * ProjectManager, the unsaved marker from the active workspace tab — the flag
+ * `hasUnsavedChanges` and the discard prompt read — and the last-saved time
+ * from the `ProjectSaved` event the manager emits after a successful write.
+ *
+ * Mounted in the Electron title bar centre AND in the web TopNav centre.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { onCoreServicesReady, tryCoreServices } from '@core/services/coreServices';
+import { getEventBus } from '@core/events/EventBus';
 import { useProjectStore } from '@stores/projectStore';
 import styles from './ProjectStatus.module.css';
 
-export function ProjectStatus(): JSX.Element {
+/** Module-level so a remount (route change, pop-out) does not forget it. */
+let lastSavedAt: number | null = null;
+
+/** "just now", "3m ago", "2h ago" — coarse on purpose; this is a glance, not a log. */
+export function formatAgo(savedAt: number, now: number): string {
+  const s = Math.max(0, Math.round((now - savedAt) / 1000));
+  if (s < 45) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+function useLastSaved(): number | null {
+  const [at, setAt] = useState<number | null>(lastSavedAt);
+  useEffect(() => {
+    const sub = getEventBus().on('ProjectSaved', () => {
+      lastSavedAt = Date.now();
+      setAt(lastSavedAt);
+    });
+    return () => sub.dispose();
+  }, []);
+  // Tick once a minute so "3m ago" ages without any other state change.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (at === null) return;
+    const id = setInterval(() => setTick((n) => n + 1), 60_000);
+    return () => clearInterval(id);
+  }, [at]);
+  return at;
+}
+
+export function ProjectStatus({ compact = false }: { compact?: boolean }): JSX.Element {
   /*
     TOLERATES AN UNBOOTED CORE, and must.
 
@@ -50,20 +87,23 @@ export function ProjectStatus(): JSX.Element {
     () => tryCoreServices()?.project.getState().current ?? null,
   );
   const dirty = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.dirty === true : false));
+  const savedAt = useLastSaved();
 
   const name = current?.name;
+  const ago = savedAt !== null ? formatAgo(savedAt, Date.now()) : null;
   const title = current?.path
-    ? `${name} — ${current.path}${dirty ? ' (unsaved changes)' : ''}`
+    ? `${name} — ${current.path}${dirty ? ' (unsaved changes)' : ''}${ago ? ` · saved ${ago}` : ''}`
     : 'Not saved yet — Save will ask where to put it';
 
   return (
-    <div className={styles.status} title={title}>
+    <div className={compact ? `${styles.status} ${styles.compact}` : styles.status} title={title}>
       <span className={name ? styles.name : `${styles.name} ${styles.unnamed}`}>
         {name ?? 'No project'}
       </span>
       {/* Decorative: the accessible statement is the `title` above, so a screen
           reader gets "unsaved changes" as words rather than a bare dot. */}
       {dirty ? <span className={styles.dirtyDot} aria-hidden /> : null}
+      {ago && !compact ? <span className={styles.saved}>{dirty ? `saved ${ago}` : ago}</span> : null}
     </div>
   );
 }

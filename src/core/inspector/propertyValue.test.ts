@@ -62,6 +62,24 @@ describe('flat component props', () => {
   });
 });
 
+describe('unstored transform props', () => {
+  it('orientation and anchor Z land on the Transform even before the layer stores them', () => {
+    // Enabling 3D writes z / rotationX / rotationY only; the Orientation rows
+    // then read 0 and, before this, could not be changed at all.
+    for (const prop of ['orientationX', 'orientationY', 'orientationZ', 'anchorZ', 'rotationX']) {
+      expect(readStaticPropertyValue('a', prop)).toBeUndefined();
+      expect(canWriteStaticPropertyValue('a', prop)).toBe(true);
+      expect(writeStaticPropertyValue('a', prop, 33)).toBe(true);
+      expect(readStaticPropertyValue('a', prop)).toBe(33);
+    }
+    const t = defaultSceneGraph.getNode('a')!.components.find((c) => c.type === 'Transform')!;
+    expect(t.props.orientationX).toBe(33);
+    // A genuinely absent NON-transform prop still has nowhere to go.
+    expect(canWriteStaticPropertyValue('a', 'noSuchThing')).toBe(false);
+    expect(writeStaticPropertyValue('a', 'noSuchThing', 1)).toBe(false);
+  });
+});
+
 describe('effect parameters', () => {
   it('reads the value the effect actually holds', () => {
     addEffect('a', 'glow');

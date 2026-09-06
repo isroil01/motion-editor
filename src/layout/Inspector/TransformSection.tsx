@@ -1,31 +1,44 @@
+/**
+ * TransformSection — anchor, position, scale, size, rotation, opacity and the
+ * advanced 3D tail, as an AE-style flat property list.
+ *
+ * Every numeric row is a `MultiPropertyRow` (2026-09-04): the row reads the
+ * property across the WHOLE selection, shows `—` where the layers disagree,
+ * writes every layer on a typed value, offsets every layer on a drag, and
+ * records one undo entry per gesture. The section itself keeps only what is
+ * not a row — the group subheads with their group stopwatches, the anchor
+ * snap matrix, the Linked Scale switch, the advanced disclosure and the
+ * preset menu.
+ *
+ * Reads are per NODE revision, so a scrub on an unselected layer does not
+ * touch this section, and the section is memoised by its host so a keystroke
+ * in the panel's search box does not re-run it.
+ */
+
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '@components/Icon';
-import { getRemappedTime, keyframeToCompTime } from '@core/timeline/TimelineController';
-import { useMemo, useState } from 'react';
-import { ValueField } from '@components/ValueField';
-import { useSceneRevision } from '@stores/sceneStore';
+import { AngleDial } from '@components/AngleDial';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { is3DEnabled } from '@core/scene/threeD';
 import { setAnchor, estimateNodeBounds } from '@core/scene/anchor';
 import { readNodeKind } from '@core/scene/sceneDerive';
 import { defaultAnimation } from '@motion/animation';
-import { runAnimEdit } from '@core/animation/animationCommands';
-import { resolvePropertyMeta } from '@core/inspector/propertyMeta';
-import { PropertyRow } from '@components/PropertyRow';
-import { buildPropertyMenu } from '@core/inspector/propertyMenu';
-import { openContextMenu } from '@stores/contextMenuStore';
-import { useNodeComponentProp } from '@hooks/useNodeComponentProp';
-import { useAnimationRevision } from '@hooks/useAnimationRevision';
-import { useActiveWorkspace, useProjectStore } from '@stores/projectStore';
+import { useNodeRevision } from '@core/inspector/nodeRevision';
+import { staticOrDefaultValue } from '@core/inspector/propertyValue';
+import { toggleAnimationGroup, type PropertyAccess } from '@core/inspector/multiSelection';
+import { applyTransformPreset, captureTransformPreset } from '@core/inspector/sectionPresets';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import { batchHistory } from '@stores/historyStore';
-import { useCompositionStore } from '@stores/compositionStore';
-import { AngleDial } from '@components/AngleDial';
+import { MultiPropertyRow } from './MultiPropertyRow';
+import { SectionPresetMenu } from './SectionPresetMenu';
+import { useInspectorSelection } from './inspectorSelection';
 
 import styles from './TransformSection.module.css';
 
 /** Rotation-flavored props get a purpose-built dial next to their number —
- *  the dial writes through the SAME handleChange as the ValueField, so
- *  keyframing/auto-key behaviour is identical. */
+ *  the dial writes through the SAME path as the ValueField, so keyframing,
+ *  auto-key and multi-selection behaviour are identical. */
 const ROTATION_PROPS = new Set([
   'rotation',
   'rotationX',
@@ -47,238 +60,102 @@ const ANCHOR_PRESETS: Array<{ id: string; label: string; getOffset: (w: number, 
   { id: 'br', label: 'Bottom Right', getOffset: (w: number, h: number) => ({ x: w / 2, y: h / 2 }) },
 ];
 
-export function TransformSection({ nodeId }: { nodeId: string }): JSX.Element | null {
-  useSceneRevision((s) => s.rev);
-  // Every field here can show a sampled keyframe value, and keyframes live in
-  // the AnimationEngine rather than a store — without this the panel keeps
-  // displaying the value it last rendered with after you edit one.
-  useAnimationRevision();
-  const time = useActiveWorkspace()?.time ?? 0;
-  const fps = useCompositionStore((c) => c.fps) || 30;
-  // The layer's own time axis — the one the renderer samples on. Every read and
-  // every write in this panel goes through it, so what you see is what renders.
-  const layerT = getRemappedTime(nodeId, time);
+/** Props that live on the Style/Text component rather than the Transform. */
+const STYLE_PROPS = new Set(['opacity', 'fillOpacity']);
+
+function hasTransform(nodeId: string): boolean {
+  return defaultSceneGraph.getNode(nodeId)?.components.some((c) => c.type === 'Transform') === true;
+}
+
+function hasStyle(nodeId: string): boolean {
+  return defaultSceneGraph.getNode(nodeId)?.components.some((c) => c.type === 'Style' || c.type === 'Text') === true;
+}
+
+/**
+ * Per-prop readers, cached by prop so their identity is stable across renders
+ * (a `MultiPropertyRow` memoises on `access`).
+ *
+ * A layer whose Transform never stored `scaleX` still HAS a scale of 1 — the
+ * registry default — so the reader answers the default rather than "absent",
+ * exactly as the old `typeof raw === 'number' ? raw : 1` fallbacks did. A
+ * layer with no Transform component at all (audio) is absent.
+ */
+const ACCESS = new Map<string, PropertyAccess>();
+function accessFor(prop: string): PropertyAccess {
+  let a = ACCESS.get(prop);
+  if (a) return a;
+  const present = STYLE_PROPS.has(prop) ? hasStyle : hasTransform;
+  a = { read: (id) => (present(id) ? staticOrDefaultValue(id, prop) : undefined) };
+  if (prop === 'anchorX' || prop === 'anchorY') {
+    // Anchor writes go through `setAnchor` so the position is compensated
+    // and the layer does not jump — the same path the canvas gizmo uses.
+    a = {
+      ...a,
+      writeStatic: (id, v) => {
+        if (!hasTransform(id)) return false;
+        const ax = prop === 'anchorX' ? v : staticOrDefaultValue(id, 'anchorX');
+        const ay = prop === 'anchorY' ? v : staticOrDefaultValue(id, 'anchorY');
+        setAnchor(id, ax, ay);
+        return true;
+      },
+    };
+  }
+  ACCESS.set(prop, a);
+  return a;
+}
+
+function TransformSectionInner({ nodeId }: { nodeId: string }): JSX.Element | null {
+  useNodeRevision(nodeId);
+  const nodeIds = useInspectorSelection(nodeId);
+  const time = useCurrentTime();
   const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
   const node = defaultSceneGraph.getNode(nodeId);
   const [linkedScale, setLinkedScale] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // NO early return before the hooks below. `if (!node) return null` used to sit
-  // here, above ~22 more hooks (two useMemo + twenty useNodeComponentProp), so
-  // selecting a layer whose node lookup misses — or deselecting while this panel
-  // stays mounted — changed the hook count between renders and React threw
-  // "Rendered fewer hooks than expected", taking the whole Properties tab down.
-  // The hooks all tolerate `undefined` ids; the render guard moved below them.
+  // NO early return before the hooks below — the hook count must not depend
+  // on whether the node exists (deleting a selected layer with this panel open
+  // used to throw "Rendered fewer hooks than expected").
   const tComp = useMemo(() => node?.components.find((c) => c.type === 'Transform'), [node]);
   const sComp = useMemo(() => node?.components.find((c) => c.type === 'Style' || c.type === 'Text'), [node]);
 
-  const [xValRaw, setXVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'x');
-  const [yValRaw, setYVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'y');
-  const [zValRaw, setZVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'z');
-  const [rotValRaw, setRotVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'rotation');
-  const [scaleXValRaw, setScaleXVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'scaleX');
-  const [scaleYValRaw, setScaleYVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'scaleY');
-  const scaleXVal = typeof scaleXValRaw === 'number' ? scaleXValRaw : 1;
-  const scaleYVal = typeof scaleYValRaw === 'number' ? scaleYValRaw : 1;
-  const [rotXValRaw, setRotXVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'rotationX');
-  const [rotYValRaw, setRotYVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'rotationY');
-  const [oriXRaw, setOriX] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'orientationX');
-  const [oriYRaw, setOriY] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'orientationY');
-  const [oriZRaw, setOriZ] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'orientationZ');
-  const [anchorZRaw, setAnchorZ] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'anchorZ');
-  const [skewRaw, setSkew] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'skew');
-  const [skewAxisRaw, setSkewAxis] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'skewAxis');
-  const skewVal = typeof skewRaw === 'number' ? skewRaw : 0;
-  const skewAxisVal = typeof skewAxisRaw === 'number' ? skewAxisRaw : 0;
-  const oriXVal = typeof oriXRaw === 'number' ? oriXRaw : 0;
-  const oriYVal = typeof oriYRaw === 'number' ? oriYRaw : 0;
-  const oriZVal = typeof oriZRaw === 'number' ? oriZRaw : 0;
-  const anchorZVal = typeof anchorZRaw === 'number' ? anchorZRaw : 0;
-  const [widthValRaw, setWidthVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'width');
-  const [heightValRaw, setHeightVal] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'height');
-  const widthVal = typeof widthValRaw === 'number' ? widthValRaw : undefined;
-  const heightVal = typeof heightValRaw === 'number' ? heightValRaw : undefined;
-  const [anchorXValRaw] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'anchorX');
-  const [anchorYValRaw] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, 'anchorY');
-  const anchorXVal = typeof anchorXValRaw === 'number' ? anchorXValRaw : 0;
-  const anchorYVal = typeof anchorYValRaw === 'number' ? anchorYValRaw : 0;
-  const [opacityValRaw, setOpacityVal] = useNodeComponentProp(defaultSceneGraph, nodeId, sComp?.id, 'opacity');
-  const [fillOpacityRaw, setFillOpacity] = useNodeComponentProp(defaultSceneGraph, nodeId, sComp?.id, 'fillOpacity');
-  const fillOpacityVal = typeof fillOpacityRaw === 'number' ? fillOpacityRaw : 100;
+  const capturePreset = useCallback(() => captureTransformPreset(nodeId, time), [nodeId, time]);
+  const applyPreset = useCallback(
+    (values: Readonly<Record<string, number | string | boolean>>) =>
+      applyTransformPreset(nodeIds, values, { compTime: time, autoKeyframe }),
+    [nodeIds, time, autoKeyframe],
+  );
 
-  const xVal = typeof xValRaw === 'number' ? xValRaw : 0;
-  const yVal = typeof yValRaw === 'number' ? yValRaw : 0;
-  const zVal = typeof zValRaw === 'number' ? zValRaw : 0;
-  const rotVal = typeof rotValRaw === 'number' ? rotValRaw : 0;
-  const rotXVal = typeof rotXValRaw === 'number' ? rotXValRaw : 0;
-  const rotYVal = typeof rotYValRaw === 'number' ? rotYValRaw : 0;
-  const opacityVal = typeof opacityValRaw === 'number' ? opacityValRaw : 100;
+  const rotationDial = useCallback(
+    (label: string) => ({ value, setValue }: { value: number; setValue: (v: number) => void }): ReactNode => (
+      <AngleDial value={value} onChange={setValue} aria-label={`${label} dial`} />
+    ),
+    [],
+  );
 
-  // Single render guard, AFTER every hook — so the hook order is identical on
-  // every render regardless of what is selected.
+  // Single render guard, AFTER every hook.
   if (!node || !tComp) return null;
 
-  /**
-   * One animatable transform row. Label, unit, range, step, precision and the
-   * reset value all come from the property registry — the call site supplies
-   * only the prop path, its current value and how to write it, so the same
-   * property cannot be described one way here and another in the timeline.
-   */
-  const renderAnimPropInner = (
-    propName: string,
-    value: number,
-    setVal: (v: number) => void,
-  ) => {
-    const meta = resolvePropertyMeta(propName, nodeId);
-    const label = meta.label;
-    const unit = meta.unit;
-    const resetVal = meta.resettable && typeof meta.defaultValue === 'number' ? meta.defaultValue : undefined;
-    const numeric = typeof value === 'number';
-    const animated = numeric && defaultAnimation.isAnimated(nodeId, propName);
-    // Sample on the SAME axis we write to. This used to sample the raw comp
-    // time while writing at the layer time, so on a layer whose clip does not
-    // start at 0 the field showed a point somewhere along the curve instead of
-    // the keyframe you set — and typing there "corrected" it, which read as the
-    // later keyframe overwriting the earlier one.
-    const displayVal = animated ? defaultAnimation.sample(nodeId, propName, layerT) ?? value : value;
+  const read = (prop: string): number => staticOrDefaultValue(nodeId, prop);
+  const widthVal = tComp.props.width;
+  const heightVal = tComp.props.height;
+  const hasSize = typeof widthVal === 'number' && typeof heightVal === 'number';
 
-    const handleChange = (v: unknown) => {
-      const valNum = Number(v);
-      if ((animated || autoKeyframe) && typeof v === 'number') {
-        runAnimEdit(
-          `Set ${propName}`,
-          () => {
-            defaultAnimation.setKeyframe(nodeId, propName, layerT, valNum);
-            if (linkedScale && (propName === 'scaleX' || propName === 'scaleY')) {
-              const otherProp = propName === 'scaleX' ? 'scaleY' : 'scaleX';
-              defaultAnimation.setKeyframe(nodeId, otherProp, layerT, valNum);
-            }
-          },
-          `set:${nodeId}:${propName}:${layerT}`
-        );
-      } else {
-        /*
-         * ONE undo step, however many props this row writes.
-         *
-         * History keys an action by the property that was written, so a row
-         * that writes two of them alternates keys and commits a step on every
-         * alternation. Linked Scale does exactly that — scaleX, scaleY, scaleX,
-         * ... once per pointer-move — so a single 20px drag of the Scale field
-         * left 35 entries on the undo stack and took 35 Ctrl+Z to reverse.
-         * Rotation, which writes one prop, left 1.
-         *
-         * The keyframed branch above never had this: `runAnimEdit` already
-         * carries one merge key for the whole edit. This is the static branch
-         * catching up.
-         */
-        batchHistory(`transform:${nodeId}:${propName}`, () => {
-          setVal(valNum);
-          if (linkedScale && (propName === 'scaleX' || propName === 'scaleY')) {
-            if (propName === 'scaleX') setScaleYVal(valNum);
-            else setScaleXVal(valNum);
-          }
-        });
-      }
-    };
+  const row = (prop: string, extra?: { linkedProp?: string }): JSX.Element => (
+    <MultiPropertyRow
+      key={prop}
+      nodeId={nodeId}
+      prop={prop}
+      shortLabel
+      access={accessFor(prop)}
+      linkedProp={extra?.linkedProp}
+      renderBefore={ROTATION_PROPS.has(prop) ? rotationDial(prop) : undefined}
+    />
+  );
 
-    // Keyframe navigation, on the property's own time axis.
-    const kfs = animated ? defaultAnimation.getTrackKeyframes(nodeId, propName) ?? [] : [];
-    const EPS = 1e-4;
-    const at = kfs.find((k) => Math.abs(k.t - layerT) < EPS);
-    const prev = [...kfs].reverse().find((k) => k.t < layerT - EPS);
-    const next = kfs.find((k) => k.t > layerT + EPS);
-    const seek = (t: number): void => {
-      const compT = keyframeToCompTime(nodeId, t, propName);
-      useProjectStore.getState().actions.setTime(compT, Math.round(compT * fps));
-    };
-
-    const toggleStopwatch = (): void => {
-      if (animated) {
-        runAnimEdit(`Remove ${propName} animation`, () => defaultAnimation.removeTrack(nodeId, propName));
-      } else {
-        runAnimEdit(`Animate ${propName}`, () =>
-          defaultAnimation.setKeyframe(nodeId, propName, layerT, Number(value)),
-        );
-      }
-    };
-
-    return (
-      <PropertyRow
-        key={propName}
-        // The group header already says "Position"; the row says "X". The FULL
-        // name still reaches assistive tech through the field's aria-label.
-        label={label.replace(/(Position|Scale|Rotation|Anchor Point)\s*/i, '') || label}
-        srLabel={label}
-        animated={animated}
-        compact
-        onStopwatch={numeric ? toggleStopwatch : undefined}
-        navigator={{
-          hasPrev: !!prev,
-          hasNext: !!next,
-          atKeyframe: !!at,
-          onPrev: () => prev && seek(prev.t),
-          onNext: () => next && seek(next.t),
-          onToggleKeyframe: () => {
-            if (at) {
-              runAnimEdit(`Remove ${propName} keyframe`, () =>
-                defaultAnimation.removeKeyframe(nodeId, propName, at.t),
-              );
-            } else {
-              // Adds at the CURRENT value — anchoring a property without
-              // changing what it renders.
-              runAnimEdit(`Add ${propName} keyframe`, () =>
-                defaultAnimation.setKeyframe(nodeId, propName, layerT, Number(displayVal ?? 0)),
-              );
-            }
-          },
-        }}
-        onReset={resetVal !== undefined ? () => handleChange(resetVal) : undefined}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          openContextMenu(
-            e.clientX,
-            e.clientY,
-            buildPropertyMenu({
-              nodeId,
-              prop: propName,
-              layerT,
-              value: Number(displayVal ?? 0),
-              setValue: setVal,
-            }),
-          );
-        }}
-      >
-        {/* Rotation rows: AE-style dial (drag = rotate, Shift snaps 15°,
-            winds through revolutions) sharing the row's write path. It lives
-            INSIDE the value cell, so it can no longer push the number out of
-            the column every other row shares. */}
-        {ROTATION_PROPS.has(propName) && (
-          <AngleDial
-            value={Number(displayVal ?? 0)}
-            onChange={handleChange}
-            aria-label={`${label} dial`}
-          />
-        )}
-        <ValueField
-          value={Number(displayVal ?? 0)}
-          unit={unit}
-          min={meta.min}
-          max={meta.max}
-          step={meta.step}
-          precision={meta.precision}
-          onChange={handleChange}
-          aria-label={label}
-        />
-      </PropertyRow>
-    );
-  };
-
-  // Render a stopwatch icon button directly on a grid cell (outside popover).
-  // Each prop carries ITS OWN current value — keying every prop to a single
-  // shared value made "Enable animation" on Position write y:= x (the layer
-  // visibly jumped the moment the stopwatch was clicked).
-  const renderStopwatchBtn = (props: Array<{ prop: string; value: number }>) => {
-    const animated = props.some(({ prop }) => defaultAnimation.isAnimated(nodeId, prop));
+  /** The GROUP stopwatch on a subhead: every prop of the group, every layer. */
+  const groupStopwatch = (label: string, props: string[]): JSX.Element => {
+    const animated = nodeIds.some((id) => props.some((p) => defaultAnimation.isAnimated(id, p)));
     return (
       <button
         type="button"
@@ -286,19 +163,9 @@ export function TransformSection({ nodeId }: { nodeId: string }): JSX.Element | 
         title={animated ? 'Remove animation (delete keyframes)' : 'Enable animation (create first keyframe)'}
         onClick={(e) => {
           e.stopPropagation();
-          if (animated) {
-            runAnimEdit('Remove animation', () => {
-              for (const { prop } of props) defaultAnimation.removeTrack(nodeId, prop);
-            });
-          } else {
-            runAnimEdit('Enable animation', () => {
-              for (const { prop, value } of props) {
-                defaultAnimation.setKeyframe(nodeId, prop, layerT, value);
-              }
-            });
-          }
+          toggleAnimationGroup(nodeIds, props, time, label, accessFor(props[0] ?? ''));
         }}
-        aria-label={animated ? 'Disable animation' : 'Enable animation'}
+        aria-label={animated ? `Disable ${label} animation` : `Enable ${label} animation`}
       >
         <Icon name="stopwatch" size="sm" />
       </button>
@@ -310,31 +177,40 @@ export function TransformSection({ nodeId }: { nodeId: string }): JSX.Element | 
   const isLight = readNodeKind(node) === 'light';
   const hasDepth = isCamera || isLight || is3D;
 
-  // Check if any sub-property is animated for visual indicator dot
-  const isAnchorAnimated = defaultAnimation.isAnimated(nodeId, 'anchorX') || defaultAnimation.isAnimated(nodeId, 'anchorY');
-  const isPositionAnimated = defaultAnimation.isAnimated(nodeId, 'x') || defaultAnimation.isAnimated(nodeId, 'y') || defaultAnimation.isAnimated(nodeId, 'z');
-  const isScaleAnimated = defaultAnimation.isAnimated(nodeId, 'scaleX') || defaultAnimation.isAnimated(nodeId, 'scaleY');
-  const isRotationAnimated = defaultAnimation.isAnimated(nodeId, 'rotation') || defaultAnimation.isAnimated(nodeId, 'rotationX') || defaultAnimation.isAnimated(nodeId, 'rotationY');
-  const isSizeAnimated = defaultAnimation.isAnimated(nodeId, 'width') || defaultAnimation.isAnimated(nodeId, 'height');
-  const isOpacityAnimated = defaultAnimation.isAnimated(nodeId, 'opacity');
-  const isSkewAnimated = defaultAnimation.isAnimated(nodeId, 'skew') || defaultAnimation.isAnimated(nodeId, 'skewAxis');
+  const anyAnimated = (props: string[]): boolean => props.some((p) => defaultAnimation.isAnimated(nodeId, p));
 
-  // Interactive 3x3 anchor snapping
-  const bounds = widthVal !== undefined && heightVal !== undefined ? { width: widthVal, height: heightVal } : estimateNodeBounds(nodeId);
+  // Interactive 3x3 anchor snapping, applied to every selected layer against
+  // its OWN bounds — one undo entry for the lot.
+  const bounds = hasSize ? { width: widthVal, height: heightVal } : estimateNodeBounds(nodeId);
+  const anchorX = read('anchorX');
+  const anchorY = read('anchorY');
 
-  const applyAnchorPreset = (preset: typeof ANCHOR_PRESETS[number]) => {
-    const target = preset.getOffset(bounds.width, bounds.height);
-    setAnchor(nodeId, target.x, target.y);
+  const applyAnchorPreset = (preset: typeof ANCHOR_PRESETS[number]): void => {
+    batchHistory(`anchorPreset:${preset.id}:${nodeIds.join(',')}`, () => {
+      for (const id of nodeIds) {
+        const n = defaultSceneGraph.getNode(id);
+        const t = n?.components.find((c) => c.type === 'Transform');
+        if (!n || !t) continue;
+        const w = t.props.width;
+        const h = t.props.height;
+        const b = typeof w === 'number' && typeof h === 'number' ? { width: w, height: h } : estimateNodeBounds(id);
+        const target = preset.getOffset(b.width, b.height);
+        setAnchor(id, target.x, target.y);
+      }
+    });
   };
 
-  const isPresetActive = (preset: typeof ANCHOR_PRESETS[number]) => {
+  const isPresetActive = (preset: typeof ANCHOR_PRESETS[number]): boolean => {
     const target = preset.getOffset(bounds.width, bounds.height);
-    return Math.abs(anchorXVal - target.x) < 1.5 && Math.abs(anchorYVal - target.y) < 1.5;
+    return Math.abs(anchorX - target.x) < 1.5 && Math.abs(anchorY - target.y) < 1.5;
   };
+
+  const positionProps = ['x', 'y', ...(hasDepth ? ['z'] : [])];
+  const rotationProps = ['rotation', ...(is3D ? ['rotationX', 'rotationY'] : [])];
 
   // AE-style flat property list: a subhead per group (label · animated dot ·
   // stopwatch), then its rows inline — no popovers, everything one glance away.
-  const subhead = (label: string, animated: boolean, stopwatch: JSX.Element | null, extra?: JSX.Element) => (
+  const subhead = (label: string, animated: boolean, stopwatch: JSX.Element | null, extra?: JSX.Element): JSX.Element => (
     <div className={styles.subhead}>
       {label}
       {animated && <span className={styles.animatedDot} />}
@@ -346,16 +222,16 @@ export function TransformSection({ nodeId }: { nodeId: string }): JSX.Element | 
 
   return (
     <div className={styles.section}>
+      <div className={styles.presetRow}>
+        <SectionPresetMenu sectionId="transform" label="Transform presets" capture={capturePreset} apply={applyPreset} />
+      </div>
       <div className={styles.inlineRows}>
         {!isCamera && (
           <>
             {subhead(
               'Anchor',
-              isAnchorAnimated,
-              renderStopwatchBtn([
-                { prop: 'anchorX', value: anchorXVal },
-                { prop: 'anchorY', value: anchorYVal },
-              ]),
+              anyAnimated(['anchorX', 'anchorY']),
+              groupStopwatch('Anchor', ['anchorX', 'anchorY']),
               <div className={styles.anchorOriginBox} title="Quick Snap Anchor Origin (3x3 Matrix)">
                 {ANCHOR_PRESETS.map((p) => (
                   <button
@@ -366,125 +242,115 @@ export function TransformSection({ nodeId }: { nodeId: string }): JSX.Element | 
                     onClick={() => applyAnchorPreset(p)}
                   />
                 ))}
-              </div>
+              </div>,
             )}
-            {renderAnimPropInner('anchorX', anchorXVal, (v) => {
-              setAnchor(nodeId, v, anchorYVal);
-            })}
-            {renderAnimPropInner('anchorY', anchorYVal, (v) => {
-              setAnchor(nodeId, anchorXVal, v);
-            })}
+            {row('anchorX')}
+            {row('anchorY')}
           </>
         )}
 
-        {subhead('Position', isPositionAnimated, renderStopwatchBtn([
-          { prop: 'x', value: xVal },
-          { prop: 'y', value: yVal },
-          ...(hasDepth ? [{ prop: 'z', value: zVal }] : []),
-        ]))}
-        {renderAnimPropInner('x', xVal, (v) => setXVal(v))}
-        {renderAnimPropInner('y', yVal, (v) => setYVal(v))}
-        {hasDepth && renderAnimPropInner('z', zVal, (v) => setZVal(v))}
+        {subhead('Position', anyAnimated(positionProps), groupStopwatch('Position', positionProps))}
+        {row('x')}
+        {row('y')}
+        {hasDepth && row('z')}
 
         <div className={styles.subhead}>
           <span>Scale</span>
           <button
             type="button"
             onClick={() => setLinkedScale(!linkedScale)}
-            className={`${styles.lockBtn} ${linkedScale ? styles.lockBtnActive : ''}`}
+            className={`${styles.lockToggle} ${linkedScale ? styles.lockToggleActive : ''}`}
             title={linkedScale ? 'Unlink Scale dimensions' : 'Link Scale dimensions (Uniform Zoom)'}
-            style={{ marginLeft: 6 }}
+            aria-label={linkedScale ? 'Unlink Scale dimensions' : 'Link Scale dimensions (Uniform Zoom)'}
+            aria-pressed={linkedScale}
           >
-            <Icon name={linkedScale ? 'lock' : 'unlock'} size="sm" style={{ color: linkedScale ? '#f5b041' : 'inherit' }} />
+            <Icon name={linkedScale ? 'lock' : 'unlock'} size="sm" />
           </button>
-          {isScaleAnimated && <span className={styles.animatedDot} />}
+          {anyAnimated(['scaleX', 'scaleY']) && <span className={styles.animatedDot} />}
           <span style={{ flex: 1 }} />
-          {renderStopwatchBtn([
-            { prop: 'scaleX', value: scaleXVal },
-            { prop: 'scaleY', value: scaleYVal },
-          ])}
+          {groupStopwatch('Scale', ['scaleX', 'scaleY'])}
         </div>
-        {renderAnimPropInner('scaleX', scaleXVal, (v) => setScaleXVal(v))}
-        {renderAnimPropInner('scaleY', scaleYVal, (v) => setScaleYVal(v))}
+        {row('scaleX', { linkedProp: linkedScale ? 'scaleY' : undefined })}
+        {row('scaleY', { linkedProp: linkedScale ? 'scaleX' : undefined })}
 
-        {widthVal !== undefined && heightVal !== undefined && (
+        {hasSize && (
           <>
-            {subhead('Size', isSizeAnimated, renderStopwatchBtn([
-              { prop: 'width', value: widthVal },
-              { prop: 'height', value: heightVal },
-            ]))}
-            {renderAnimPropInner('width', widthVal, (v) => setWidthVal(v))}
-            {renderAnimPropInner('height', heightVal, (v) => setHeightVal(v))}
+            {subhead('Size', anyAnimated(['width', 'height']), groupStopwatch('Size', ['width', 'height']))}
+            {row('width')}
+            {row('height')}
           </>
         )}
 
-        {subhead('Rotation', isRotationAnimated, renderStopwatchBtn([
-          { prop: 'rotation', value: rotVal },
-          ...(is3D
-            ? [
-                { prop: 'rotationX', value: rotXVal },
-                { prop: 'rotationY', value: rotYVal },
-              ]
-            : []),
-        ]))}
-        {renderAnimPropInner('rotation', rotVal, (v) => setRotVal(v))}
+        {subhead('Rotation', anyAnimated(rotationProps), groupStopwatch('Rotation', rotationProps))}
+        {row('rotation')}
 
         {sComp && (
           <>
-            {subhead('Opacity', isOpacityAnimated, renderStopwatchBtn([{ prop: 'opacity', value: opacityVal }]))}
-            {renderAnimPropInner('opacity', opacityVal, (v) => setOpacityVal(v))}
+            {subhead('Opacity', anyAnimated(['opacity']), groupStopwatch('Opacity', ['opacity']))}
+            {row('opacity')}
           </>
         )}
 
-        {/* Advanced Transform Progressive Disclosure Toggle */}
-        <button
-          type="button"
-          className={styles.advancedToggle}
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          aria-expanded={showAdvanced}
-        >
-          <Icon
-            name={showAdvanced ? 'chevron-down' : 'chevron-right'}
-            size="sm"
-            className={styles.advancedChevron}
-          />
-          <span>Advanced Transform & 3D</span>
-        </button>
+        {/* Advanced Transform & 3D Section */}
+        <div className={styles.advancedSection}>
+          <button
+            type="button"
+            className={styles.advancedToggle}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            aria-expanded={showAdvanced}
+          >
+            <div className={styles.advancedToggleLeft}>
+              <Icon
+                name={showAdvanced ? 'chevron-down' : 'chevron-right'}
+                size="sm"
+                className={styles.advancedChevron}
+              />
+              <Icon name="cube" size="sm" className={styles.advancedIcon} />
+              <span className={styles.advancedTitle}>Advanced Transform & 3D</span>
+            </div>
+            {is3D && <span className={styles.advancedBadge}>3D</span>}
+          </button>
 
-        {showAdvanced && (
-          <div className={styles.advancedGroup}>
-            {/* Skew */}
-            {subhead('Skew', isSkewAnimated, renderStopwatchBtn([
-              { prop: 'skew', value: skewVal },
-            ]))}
-            {renderAnimPropInner('skew', skewVal, (v) => setSkew(v))}
-            {renderAnimPropInner('skewAxis', skewAxisVal, (v) => setSkewAxis(v))}
+          {showAdvanced && (
+            <div className={styles.advancedGroup}>
+              {subhead('Skew', anyAnimated(['skew', 'skewAxis']), groupStopwatch('Skew', ['skew']))}
+              {row('skew')}
+              {row('skewAxis')}
 
-            {/* 3D Rotations & Orientations */}
-            {is3D && (
-              <>
-                {subhead('3D Rotation & Orientation', false, null)}
-                {renderAnimPropInner('rotationX', rotXVal, (v) => setRotXVal(v))}
-                {renderAnimPropInner('rotationY', rotYVal, (v) => setRotYVal(v))}
-                {renderAnimPropInner('orientationX', oriXVal, (v) => setOriX(v))}
-                {renderAnimPropInner('orientationY', oriYVal, (v) => setOriY(v))}
-                {renderAnimPropInner('orientationZ', oriZVal, (v) => setOriZ(v))}
-                {renderAnimPropInner('anchorZ', anchorZVal, (v) => setAnchorZ(v))}
-              </>
-            )}
+              {is3D && (
+                <>
+                  {subhead('3D Rotation & Orientation', false, null)}
+                  {row('rotationX')}
+                  {row('rotationY')}
+                  {row('orientationX')}
+                  {row('orientationY')}
+                  {row('orientationZ')}
+                  {row('anchorZ')}
+                </>
+              )}
 
-            {/* Fill opacity */}
-            {sComp && (
-              <>
-                {subhead('Fill Opacity', false, null)}
-                {renderAnimPropInner('fillOpacity', fillOpacityVal, (v) => setFillOpacity(v))}
-              </>
-            )}
-          </div>
-        )}
+              {sComp && (
+                <>
+                  {subhead('Fill Opacity', false, null)}
+                  {row('fillOpacity')}
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+
+/*
+ * Memoized: the Properties panel re-renders for its own reasons (a selection
+ * change, a sub-tab switch, the sticky header) and hands every section the
+ * same `nodeId` it had before. Without this boundary the section would rebuild
+ * its whole subtree on each of those, undoing the per-node subscriptions the
+ * rows inside it use to stay asleep. Pinned by `inspectorRenderScope.test.tsx`.
+ */
+export const TransformSection = memo(TransformSectionInner);
 
 export default TransformSection;

@@ -3,8 +3,10 @@
  * After Effects users expect (format, resolution, frame rate, duration, channels).
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type KeyboardEvent } from 'react';
 import { Icon } from '@components/Icon';
+import { Button } from '@components/Button';
+import { DialogFooter, enterShouldConfirm } from '@components/Modal';
 import { OutputFormat } from '@stores/renderQueueStore';
 import { canEncodeLocally, PRORES_PROFILE_LABELS, type ExportQuality, type ProresProfile } from '@core/export/videoSink';
 import { useCompositionStore } from '@stores/compositionStore';
@@ -138,11 +140,44 @@ export function OutputModuleDialog({
     setTemplatesRev((r) => r + 1);
   };
 
+  const confirm = (): void =>
+    // Clamped on OK: raw number inputs let a cleared field submit 0/NaN,
+    // which reached the renderer as fps 0 (NaN frame times), width 0 (a 0×N
+    // canvas) or duration 0. Fall back to the comp's own values rather than
+    // refusing — the dialog's initial state.
+    onConfirm({
+      format,
+      width: Number.isFinite(width) && width >= 2 ? Math.round(width) : initialWidth,
+      height: Number.isFinite(height) && height >= 2 ? Math.round(height) : initialHeight,
+      fps: Number.isFinite(fps) && fps >= 1 && fps <= 240 ? fps : initialFps,
+      durationSec: Number.isFinite(duration) && duration > 0 ? duration : initialDuration,
+      transparent: transparent && supportsAlpha,
+      quality,
+      ...(format === 'mov' ? { proresProfile } : {}),
+    });
+
+  // Not a `Modal` (it sits inside the Render Queue panel rather than the
+  // modal stack), so it applies the same Enter rule by hand: Enter confirms
+  // unless the focused element owns Enter (`enterShouldConfirm`); Escape
+  // cancels.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.defaultPrevented) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onCancel();
+      return;
+    }
+    if (e.key !== 'Enter' || e.altKey || e.shiftKey) return;
+    if (!(e.ctrlKey || e.metaKey) && !enterShouldConfirm(e.target)) return;
+    e.preventDefault();
+    confirm();
+  };
+
   return (
     <div className={styles.overlay}>
-      <div className={styles.dialog}>
+      <div className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="output-module-title" onKeyDown={onKeyDown}>
         <div className={styles.header}>
-          <h2>Output Module Settings</h2>
+          <h2 id="output-module-title">Output Module Settings</h2>
           <button type="button" className={styles.closeBtn} onClick={onCancel}>
             <Icon name="close" size="sm" />
           </button>
@@ -267,32 +302,19 @@ export function OutputModuleDialog({
           </div>
         </div>
 
-        <div className={styles.footer}>
-          <button type="button" className={styles.cancelBtn} onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={styles.okBtn}
-            onClick={() =>
-              // Clamped on OK: raw number inputs let a cleared field submit
-              // 0/NaN, which reached the renderer as fps 0 (NaN frame times),
-              // width 0 (a 0×N canvas) or duration 0. Fall back to the comp's
-              // own values rather than refusing — the dialog's initial state.
-              onConfirm({
-                format,
-                width: Number.isFinite(width) && width >= 2 ? Math.round(width) : initialWidth,
-                height: Number.isFinite(height) && height >= 2 ? Math.round(height) : initialHeight,
-                fps: Number.isFinite(fps) && fps >= 1 && fps <= 240 ? fps : initialFps,
-                durationSec: Number.isFinite(duration) && duration > 0 ? duration : initialDuration,
-                transparent: transparent && supportsAlpha,
-                quality,
-                ...(format === 'mov' ? { proresProfile } : {}),
-              })
+        <div className={styles.footerRow}>
+          <DialogFooter
+            secondary={
+              <Button variant="secondary" size="sm" onClick={onCancel}>
+                Cancel
+              </Button>
             }
-          >
-            OK
-          </button>
+            primary={
+              <Button variant="primary" size="sm" onClick={confirm}>
+                OK
+              </Button>
+            }
+          />
         </div>
       </div>
     </div>

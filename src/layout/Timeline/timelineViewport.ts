@@ -18,14 +18,28 @@
 export interface TimelineViewportState {
   /**
    * Visible width of the lanes in CSS pixels, excluding the track-header
-   * column. 0 means "not measured yet" — no timeline is mounted.
+   * column and the vertical scrollbar (`clientWidth`). 0 means "not measured
+   * yet" — no timeline is mounted.
    */
   width: number;
+  /**
+   * The lanes' left edge in CLIENT pixels — where the ruler's x = 0 is on
+   * screen. The panel's toolbar row reads it to put the time navigator over
+   * the lanes exactly, and subtracts its own left edge. 0 while unmeasured.
+   */
+  left: number;
+  /**
+   * Pixels at the lanes' right edge covered by an overlay — the row minimap,
+   * when there are more rows than fit — so a control sized to the lanes can
+   * stop where the visible clips do. 0 when nothing overlays them.
+   */
+  gutter: number;
 }
 
 type Listener = (state: TimelineViewportState) => void;
 
-let state: TimelineViewportState = { width: 0 };
+const UNMEASURED: TimelineViewportState = { width: 0, left: 0, gutter: 0 };
+let state: TimelineViewportState = UNMEASURED;
 const listeners = new Set<Listener>();
 let scrollFn: ((pixels: number) => void) | null = null;
 
@@ -33,12 +47,36 @@ export function getTimelineViewport(): TimelineViewportState {
   return state;
 }
 
-/** Called by <Timeline> whenever its lane area is measured. */
+function publish(next: TimelineViewportState): void {
+  if (next.width === state.width && next.left === state.left && next.gutter === state.gutter) return;
+  state = next;
+  for (const fn of listeners) fn(state);
+}
+
+/**
+ * Called by <Timeline> whenever its lane area is measured. Width alone: the
+ * left edge and gutter are left as they were, which is what the callers that
+ * only know a width (the fit tests, a width-only publish) want. Width 0 —
+ * "no lanes" — clears the rest too, so nothing keeps positioning against a
+ * panel that has gone.
+ */
 export function setTimelineViewportWidth(width: number): void {
   const next = Math.max(0, Math.round(width));
-  if (next === state.width) return;
-  state = { width: next };
-  for (const fn of listeners) fn(state);
+  publish(next === 0 ? UNMEASURED : { ...state, width: next });
+}
+
+/** The whole geometry, from the mounted timeline's own measurement. */
+export function setTimelineLaneGeometry(geometry: TimelineViewportState): void {
+  const width = Math.max(0, Math.round(geometry.width));
+  if (width === 0) {
+    publish(UNMEASURED);
+    return;
+  }
+  publish({
+    width,
+    left: Math.round(geometry.left),
+    gutter: Math.max(0, Math.round(geometry.gutter)),
+  });
 }
 
 export function subscribeTimelineViewport(fn: Listener): () => void {

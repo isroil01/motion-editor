@@ -21,7 +21,9 @@ import { applyEasingToKeyframes, type EasingPreset } from '@core/animation/keyfr
 import { copyKeyframes, pasteKeyframes, hasClipboard } from '@core/animation/keyframeClipboard';
 import { convertExpressionToKeyframes } from '@core/animation/convertExpressionToKeyframes';
 import { keyframeToCompTime } from '@core/timeline/TimelineController';
+import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { resolvePropertyMeta } from './propertyMeta';
+import { isPinnedProp, setPinnedProp } from './pinnedProps';
 import {
   compositionRootOf,
   isEssentialProp,
@@ -186,8 +188,31 @@ export function buildPropertyMenu(ctx: PropertyMenuContext): ContextMenuItem[] {
   }
 
   items.push(...essentialPropMenuItems(nodeId, prop));
+  items.push(...pinPropMenuItems(nodeId, prop));
 
   return items;
+}
+
+/**
+ * "Pin / Unpin" for one property — the entry that feeds the Pinned sub-tab.
+ *
+ * Offered on every row that has a node, numeric or not, because pinning is
+ * about WHERE a property is listed, not about what kind of value it holds.
+ * Empty when the id names no node (the property-menu unit tests use a bare
+ * id), so those suites stay free of it.
+ */
+export function pinPropMenuItems(nodeId: string, prop: string): ContextMenuItem[] {
+  if (!defaultSceneGraph.getNode(nodeId)) return [];
+  const pinned = isPinnedProp(nodeId, prop);
+  return [
+    { id: 'sep-pin', separator: true },
+    {
+      id: 'pin-toggle',
+      label: pinned ? 'Unpin from Pinned' : 'Pin to Pinned tab',
+      icon: 'push-pin',
+      onSelect: () => { setPinnedProp(nodeId, prop, !pinned); },
+    },
+  ];
 }
 
 /**
