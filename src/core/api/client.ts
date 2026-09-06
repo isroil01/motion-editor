@@ -949,13 +949,19 @@ export const api = {
     request<RenderJobDto>('/render', { method: 'POST', body: JSON.stringify(payload) }).then(
       tap(['renders']),
     ),
+  /**
+   * Hand the server the rasterized frames. Answers 202 as soon as the archive
+   * is on disk; the mux runs after the response. Poll `getRender(id)` for
+   * `progress` and, on `completed`, `resultUrl` — the upload no longer holds a
+   * socket open for the whole encode, which proxies used to cut mid-mux.
+   */
   uploadRenderFrames: (id: string, file: Blob, ext: string) => {
     const form = new FormData();
     form.append('file', file, `frames.${ext}`);
-    return request<{ success: boolean; resultUrl: string }>(`/render/${id}/frames`, {
-      method: 'POST',
-      body: form,
-    }).then(tap(['renders']));
+    return request<{ accepted: boolean; status: 'running'; jobId: string; poll: string }>(
+      `/render/${id}/frames`,
+      { method: 'POST', body: form },
+    ).then(tap(['renders']));
   },
   /**
    * Uncached: this is polled while a job runs, and the whole point of the poll
