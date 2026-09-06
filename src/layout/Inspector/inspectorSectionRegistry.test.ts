@@ -76,13 +76,32 @@ const EMBEDDED: Readonly<Record<string, string>> = {
  */
 const NOT_A_SECTION = new Set(['InspectorSection']);
 
+/**
+ * Whether an export is a React component.
+ *
+ * NOT `typeof x === 'function'`: `React.memo(Fn)` and `React.forwardRef(Fn)`
+ * are objects wrapping a function, so the naive check answers "no" for a
+ * perfectly real section. The consequence is worse than a false negative —
+ * the section vanishes from `SUBJECTS`, every "is it mounted" assertion below
+ * stops covering it, and the suite goes on passing. A discovery suite that
+ * can silently stop seeing its subjects is worse than no suite at all, which
+ * is the whole reason the POSITIVE CONTROL above exists.
+ */
+function isComponentType(value: unknown): boolean {
+  if (typeof value === 'function') return true;
+  const inner = (value as { type?: unknown; render?: unknown } | null)?.type
+    ?? (value as { render?: unknown } | null)?.render;
+  return typeof inner === 'function';
+}
+
 function discoverSectionComponents(): Array<[string, unknown]> {
   const out: Array<[string, unknown]> = [];
   for (const file of readdirSync(__dirname)) {
     if (!file.endsWith('.tsx') || file.includes('.test.')) continue;
     const mod = require(path.join(__dirname, file)) as Record<string, unknown>;
     for (const [name, value] of Object.entries(mod)) {
-      if (typeof value !== 'function') continue;
+      // Memoized sections are OBJECTS. See `isComponentType`.
+      if (!isComponentType(value)) continue;
       if (!/^[A-Z][A-Za-z0-9]*Section$/.test(name)) continue;
       if (NOT_A_SECTION.has(name)) continue;
       out.push([name, value]);
@@ -132,7 +151,7 @@ describe('the discovery found real subjects', () => {
   it('the registry itself is not empty, and every row names a component', () => {
     expect(INSPECTOR_SECTIONS.length).toBeGreaterThan(10);
     for (const def of INSPECTOR_SECTIONS) {
-      expect({ id: def.id, hasComponent: typeof def.Component === 'function' })
+      expect({ id: def.id, hasComponent: isComponentType(def.Component) })
         .toEqual({ id: def.id, hasComponent: true });
     }
   });

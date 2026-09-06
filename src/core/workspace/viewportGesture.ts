@@ -32,6 +32,7 @@
 
 import { beginAnimEdit, recordAnimEdit, runAnimEdit } from '@core/animation/animationCommands';
 import { bumpScene, bumpSceneRevision } from '@stores/sceneStore';
+import { useUIStore } from '@stores/uiStore';
 
 type AnimTx = ReturnType<typeof beginAnimEdit>;
 
@@ -50,6 +51,21 @@ export function viewportGestureActive(): boolean {
 /** Open a gesture. Pair with `endViewportGesture` on pointerup/cancel/blur. */
 export function beginViewportGesture(): void {
   depth++;
+  /*
+    The gesture IS the drag, so it raises the drag flag itself.
+
+    `useUIStore.isDragging` is what the render loop reads (through
+    `renderQualityStore.interacting`) to decide whether the RAM preview may be
+    SERVED: mid-gesture the cache key does not move, so a served frame is the
+    pre-drag picture. The canvas selection drag set the flag from its own
+    pointer handlers; the 3D gizmo, the light / camera handles and the focus
+    plane did not — they opened a gesture and wrote props, and the viewport
+    kept blitting the cached frame over their live renders. On screen: the
+    gizmo wireframe followed the pointer while the object stayed put, then
+    jumped when the idle pump or the release invalidated the cache. Raising it
+    here covers every gesture caller at once instead of one handler at a time.
+  */
+  if (depth === 1) useUIStore.getState().setDragging(true);
 }
 
 /**
@@ -60,6 +76,7 @@ export function endViewportGesture(): void {
   if (depth === 0) return;
   depth--;
   if (depth > 0) return;
+  useUIStore.getState().setDragging(false);
   const pending = tx;
   tx = null;
   if (pending) recordAnimEdit(pending.commit(txLabel, txMergeKey));

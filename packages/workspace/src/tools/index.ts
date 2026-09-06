@@ -31,5 +31,6 @@ export {
   drawToolOptions,
   CurvatureTool,
   TextTool,
+  RotoTool,
   createBuiltinTools,
 } from './builtin';

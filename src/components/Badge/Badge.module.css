@@ -1,0 +1,70 @@
+.root {
+  --badge-fg: var(--color-text-secondary);
+  --badge-bg: var(--color-surface-2);
+  --badge-border: var(--color-border);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height-xs);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  border: var(--border-width-control) solid var(--badge-border);
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  letter-spacing: var(--letter-spacing-wide);
+  white-space: nowrap;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.root[data-size="sm"] {
+  height: 16px;
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-uppercase);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  flex: none;
+}
+
+/* Tinted variants: the status colour at 14% for the fill, full strength for
+   the text and the dot. The same recipe for every one so they read as a set. */
+.root[data-variant="info"] {
+  --badge-fg: var(--color-info);
+  --badge-bg: color-mix(in srgb, var(--color-info) 14%, transparent);
+  --badge-border: color-mix(in srgb, var(--color-info) 30%, transparent);
+}
+
+.root[data-variant="success"] {
+  --badge-fg: var(--color-success);
+  --badge-bg: color-mix(in srgb, var(--color-success) 14%, transparent);
+  --badge-border: color-mix(in srgb, var(--color-success) 30%, transparent);
+}
+
+.root[data-variant="warning"] {
+  --badge-fg: var(--color-warning);
+  --badge-bg: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  --badge-border: color-mix(in srgb, var(--color-warning) 30%, transparent);
+}
+
+.root[data-variant="danger"] {
+  --badge-fg: var(--color-danger);
+  --badge-bg: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  --badge-border: color-mix(in srgb, var(--color-danger) 30%, transparent);
+}
+
+.root[data-variant="accent"] {
+  --badge-fg: var(--color-primary-foreground);
+  --badge-bg: var(--color-primary);
+  --badge-border: transparent;
+}

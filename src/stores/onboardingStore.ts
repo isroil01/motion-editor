@@ -79,17 +79,31 @@ export const TOUR_ANCHORS = {
   /** DemoPanels — the Assets panel. Reserved. */
   assetsPanel: '[data-tour="assets-panel"]',
   /**
-   * The timeline root. Selected by the chords it claims rather than by a new
-   * attribute: `Timeline.tsx` already carries this, it is unique in the app,
-   * and it is load-bearing (ShortcutManager reads it), so it cannot quietly
-   * disappear the way a decorative attribute could.
+   * The timeline root.
+   *
+   * It used to be selected by the exact chord list in `data-shortcut-claim`,
+   * on the reasoning that the attribute is load-bearing and cannot quietly
+   * disappear. True — but the LIST can grow, and it did the moment the snap
+   * switch claimed `s`, which silently unhooked this anchor. Back to
+   * `data-tour`, like every other entry here.
    */
-  timeline: '[data-shortcut-claim="delete backspace Ctrl+a Meta+a"]',
+  timeline: '[data-tour="timeline"]',
   /** The viewport transport row, by the label it already has. */
   transport: '[role="toolbar"][aria-label="Viewport transport and tools"]',
   /** The timeline's Graph Editor toggle, by the label it already has. */
   graphEditor: '[aria-label="Toggle Graph Editor"]',
+  // ── Power tour ──────────────────────────────────────────────────────
+  /** The status bar's timeline zoom cluster (Fit lives there). OWNER: StatusBar/TimelineZoom.tsx. */
+  timelineZoom: '[data-tour="timeline-zoom"]',
+  /** The Presets panel's quick-apply (`+`) affordance. OWNER: Motion/MotionPresetsPanel.tsx. */
+  quickApply: '[data-tour="quick-apply"]',
+  /** The command-palette trigger in the top bar. OWNER: TopNav / CommandPalette. */
+  commandPalette: '[data-tour="command-palette"]',
 } as const;
+
+/** Which tour is running. `first-run` is the original; `power` is the second-run one. */
+export type TourId = 'first-run' | 'power';
+export const POWER_TOUR_ID: TourId = 'power';
 
 /** What a step is waiting for. Purely descriptive — the overlay picks an icon. */
 export type TourActionKind = 'click' | 'tool' | 'create' | 'keyframe';
@@ -165,6 +179,18 @@ function graphEditorOpen(): boolean {
   }
 }
 
+function paletteOpen(): boolean {
+  try {
+    // Lazy: the palette store imports the palette's context detector, which
+    // this store must not pull in at module scope.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy seam, see layoutStore.ts
+    const { useCommandPaletteStore } = require('@stores/commandPaletteStore') as typeof import('@stores/commandPaletteStore');
+    return useCommandPaletteStore.getState().open;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Counts as they were when the tour started. See the "Baselines" note above.
  * Module state rather than store state: the checks are plain closures in
@@ -182,7 +208,20 @@ export function resetTourBaseline(): void {
   baseline = { layers: 0, keyframes: 0 };
 }
 
-export const TOUR_STEPS: ReadonlyArray<TourStep> = [
+/**
+ * The steps of the tour that is RUNNING.
+ *
+ * Mutable on purpose, and by contents rather than by reference: the overlay
+ * reads `TOUR_STEPS[index]` and `TOUR_STEPS.length` directly, so a second tour
+ * has to arrive through the same array or the overlay would need to know
+ * there is a second tour. `start(tourId)` swaps the contents in; `skip` and
+ * `finish` put the first-run steps back. (The cleaner shape — the overlay
+ * reading `useOnboardingStore(s => s.steps)` — is one line in the overlay,
+ * which this file does not own; `steps` is exposed on the store for it.)
+ */
+export const TOUR_STEPS: TourStep[] = [];
+
+export const FIRST_RUN_STEPS: ReadonlyArray<TourStep> = [
   {
     id: 'add-shape',
     title: 'Draw something',
@@ -274,6 +313,79 @@ export const TOUR_STEPS: ReadonlyArray<TourStep> = [
   },
 ];
 
+/**
+ * The second-run tour: the shortcuts a person who has finished the first tour
+ * is now ready for. Narration mostly — these are things to know, not tasks to
+ * pass — with a check on the two that can be observed (playback and the
+ * palette), so the tour still moves when the user tries them.
+ */
+export const POWER_STEPS: ReadonlyArray<TourStep> = [
+  {
+    id: 'jkl',
+    title: 'J, K and L',
+    body: 'In the timeline J and K hop between keyframes. In the Source Monitor they are the editor’s shuttle: J plays backwards, L forwards, again for 2× and 4×, K stops. Space still plays the comp.',
+    anchor: TOUR_ANCHORS.timeline,
+    placement: 'top',
+    action: {
+      kind: 'click',
+      check: () => isPlaying(),
+      hint: 'Press Space (or L in the Source Monitor) to play.',
+    },
+    whenMissing: 'The timeline is closed — reopen it with the bottom panel toggle.',
+  },
+  {
+    id: 'reveal',
+    title: 'U shows what moves',
+    body: 'Select a layer and press U: every animated property unfolds and everything else stays out of the way. Press U twice quickly (UU) for only the properties you changed from their defaults.',
+    anchor: TOUR_ANCHORS.timeline,
+    placement: 'top',
+    whenMissing: 'The timeline is closed — reopen it with the bottom panel toggle.',
+  },
+  {
+    id: 'fit',
+    title: '; fits the view',
+    body: 'Semicolon zooms the timeline to the whole composition; Alt+; fits the work area. The zoom cluster in the status bar does the same by mouse.',
+    anchor: TOUR_ANCHORS.timelineZoom,
+    placement: 'top',
+    whenMissing: 'The zoom cluster lives in the status bar under the timeline.',
+  },
+  {
+    id: 'quick-apply',
+    title: 'Quick apply with +',
+    body: 'Hover a preset and press + (or click its plus) to drop it on the selected layers at the playhead, without leaving the panel. Drag it onto the canvas to aim it at one layer.',
+    anchor: TOUR_ANCHORS.quickApply,
+    placement: 'left',
+    whenMissing: 'Open the Presets panel (Window ▸ Presets) to see quick apply.',
+  },
+  {
+    id: 'palette',
+    title: 'Everything, by name',
+    body: 'Ctrl/Cmd+Shift+P opens the command palette: every command, panel, preset and doc section, searchable. Type ? for the shortcut list.',
+    anchor: TOUR_ANCHORS.commandPalette,
+    placement: 'bottom',
+    action: {
+      kind: 'click',
+      check: () => paletteOpen(),
+      hint: 'Press Ctrl+Shift+P (Cmd+Shift+P on a Mac).',
+    },
+    whenMissing: 'The palette also opens from View ▸ Command Palette.',
+  },
+];
+
+/** The steps a tour id names. */
+export function stepsForTour(id: TourId): ReadonlyArray<TourStep> {
+  return id === 'power' ? POWER_STEPS : FIRST_RUN_STEPS;
+}
+
+/** Swap the running steps in, by contents — see the note on `TOUR_STEPS`. */
+function loadSteps(id: TourId): void {
+  TOUR_STEPS.splice(0, TOUR_STEPS.length, ...stepsForTour(id));
+}
+
+// The first-run steps are the default contents: every reader that imports
+// `TOUR_STEPS` before any tour starts sees the tour that auto-starts.
+loadSteps('first-run');
+
 // ── Persistence ──────────────────────────────────────────────────────────
 //
 // `SEEN_KEY` is the key `Providers` already writes on `onDone` and reads to
@@ -318,7 +430,39 @@ function writeFlag(key: string, value: boolean): void {
  * dismissed the start screen still has history, and should not be treated as
  * new because they happened to close a file.
  */
+/**
+ * The local edition's start screen sits OVER the editor shell, so a tour that
+ * auto-starts on shell mount would spotlight a toolbar the user cannot reach
+ * yet (observed 2026-09-03 on a fresh profile: step 1 "Draw something" over
+ * the project browser). While it is visible the tour waits; dismissing it
+ * re-runs the first-run check.
+ */
+let startScreenVisible = false;
+
+export function setStartScreenVisible(visible: boolean): void {
+  if (startScreenVisible === visible) return;
+  startScreenVisible = visible;
+  if (visible) {
+    // The shell's mount effect runs BEFORE the start screen's (it is the
+    // earlier sibling), so a boot-time auto-start may already be up. Retract
+    // it — without marking the tour seen, since nobody has seen it — and the
+    // dismissal below re-offers it.
+    const st = useOnboardingStore.getState();
+    if (st.active && st.autoStarted) {
+      useOnboardingStore.setState({ active: false, autoStarted: false });
+      stopPoll();
+    }
+    return;
+  }
+  const store = useOnboardingStore.getState();
+  if (editorMounted && !store.active && canAutoStart()) {
+    store.start();
+    useOnboardingStore.setState({ autoStarted: true });
+  }
+}
+
 export function canAutoStart(): boolean {
+  if (startScreenVisible) return false;
   if (readFlag(SEEN_KEY) || readFlag(DISMISSED_KEY)) return false;
   const core = tryCoreServices();
   if (!core) return true;
@@ -389,6 +533,7 @@ let editorMounted = false;
 export function resetOnboardingRuntime(): void {
   stopPoll();
   editorMounted = false;
+  startScreenVisible = false;
   resetTourBaseline();
 }
 
@@ -401,7 +546,12 @@ interface OnboardingStore {
   done: boolean;
   /** This run was begun by boot rather than by a person. */
   autoStarted: boolean;
-  start: () => void;
+  /** Which tour `TOUR_STEPS` currently holds. */
+  tourId: TourId;
+  /** The running tour's steps — the same array as `TOUR_STEPS`, for readers that prefer the store. */
+  steps: ReadonlyArray<TourStep>;
+  /** Begin a tour. No id means the first-run tour. */
+  start: (tourId?: TourId) => void;
   next: () => void;
   back: () => void;
   skip: () => void;
@@ -417,15 +567,36 @@ interface OnboardingStore {
   onEditorMounted: () => void;
 }
 
+/**
+ * Skip and finish are the same act with different words. Only the FIRST-RUN
+ * tour writes the seen flag: the power tour is asked for by name from Help,
+ * and finishing it must neither mark the first-run tour seen for a profile
+ * that never took it nor be gated by that flag. Ending either puts the
+ * first-run steps back so the auto-start path always finds its own tour.
+ */
+function endTour(tourId: TourId, set: (patch: Partial<OnboardingStore>) => void): void {
+  if (tourId === 'first-run') {
+    set({ active: false, done: true });
+    writeFlag(SEEN_KEY, true);
+  } else {
+    set({ active: false, tourId: 'first-run' });
+    loadSteps('first-run');
+  }
+  stopPoll();
+}
+
 export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
   active: false,
   index: 0,
   done: readFlag(SEEN_KEY),
   autoStarted: false,
+  tourId: 'first-run',
+  steps: TOUR_STEPS,
 
-  start: () => {
+  start: (tourId = 'first-run') => {
     captureBaseline();
-    set({ active: true, index: 0, autoStarted: !editorMounted });
+    loadSteps(tourId);
+    set({ active: true, index: 0, autoStarted: !editorMounted && tourId === 'first-run', tourId });
     syncPoll();
   },
 
@@ -445,15 +616,11 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
   },
 
   skip: () => {
-    set({ active: false, done: true });
-    writeFlag(SEEN_KEY, true);
-    stopPoll();
+    endTour(get().tourId, set);
   },
 
   finish: () => {
-    set({ active: false, done: true });
-    writeFlag(SEEN_KEY, true);
-    stopPoll();
+    endTour(get().tourId, set);
   },
 
   setDontShowAgain: (value) => {
@@ -505,3 +672,26 @@ export function registerTourCommand(): void {
 }
 
 registerTourCommand();
+
+export const HELP_POWER_TOUR_COMMAND = asCommandId('help.powerTour');
+
+/**
+ * The power tour's command. Menu row to add in `menuModel.ts` ▸ Help, under
+ * "Take the Tour":
+ *
+ *   { commandId: 'help.powerTour', label: 'Power-user Tour' }
+ */
+export function registerPowerTourCommand(): void {
+  try {
+    getCommandRegistry().register({
+      id: HELP_POWER_TOUR_COMMAND,
+      label: 'Power-user Tour',
+      description: 'JKL, U / UU, ; to fit, quick apply with + and the command palette.',
+      icon: 'tour',
+      enabled: () => true,
+      execute: () => { useOnboardingStore.getState().start(POWER_TOUR_ID); },
+    });
+  } catch {
+    /* no registry yet — the modal host registers it once the editor mounts */
+  }
+}

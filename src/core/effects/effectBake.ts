@@ -530,3 +530,57 @@ export function applyEffectChain(
     }
   }
 }
+
+// ── CPU bake instrumentation ────────────────────────────────────────────────
+
+/** What the last completed frame paid on the CPU, by effect type. */
+export interface CpuBakeSample {
+  /** Layers whose whole effect chain ran through the Canvas2D bake. */
+  bakedLayers: number;
+  /** Canvas2D-only effect types that forced those bakes, most frequent first. */
+  forcedBy: ReadonlyArray<{ type: string; count: number }>;
+}
+
+/**
+ * Counts the layers a frame CPU-bakes and which effects made it do so.
+ *
+ * Exists so "playback is slow with effects" can be answered with a number in
+ * the Performance HUD rather than a guess: the bake is the one path where an
+ * effect's cost is paid per frame on the main thread, and 117 of 183 effects
+ * took it when this was written. Ports are prioritised off what this reports.
+ * A frame boundary is `beginFrame`; `sample` returns the last CLOSED frame so
+ * the HUD never reads a half-counted one. Plain module state, no store: the
+ * render loop must not re-render React.
+ */
+class CpuBakeStats {
+  private live = new Map<string, number>();
+  private liveLayers = 0;
+  private closed: CpuBakeSample = { bakedLayers: 0, forcedBy: [] };
+
+  beginFrame(): void {
+    this.closed = {
+      bakedLayers: this.liveLayers,
+      forcedBy: [...this.live.entries()]
+        .map(([type, count]) => ({ type, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+    this.live = new Map();
+    this.liveLayers = 0;
+  }
+
+  /** Record one baked layer and the effects that could not go to the GPU. */
+  noteBakedLayer(effects: ReadonlyArray<Effect> | undefined): void {
+    this.liveLayers += 1;
+    for (const e of effects ?? []) {
+      if (e.enabled === false) continue;
+      if (!isGpuUnbakeableEffect(e.type)) continue;
+      this.live.set(e.type, (this.live.get(e.type) ?? 0) + 1);
+    }
+  }
+
+  sample(): CpuBakeSample {
+    return this.closed;
+  }
+}
+
+export const cpuBakeStats = new CpuBakeStats();

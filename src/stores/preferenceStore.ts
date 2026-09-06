@@ -18,7 +18,21 @@ export interface Preferences {
   uiScale: number;
   buttonSize: 'sm' | 'md' | 'lg';
   iconSize: 'sm' | 'md' | 'lg';
-  sidebarDensity: 'compact' | 'default' | 'comfortable';
+  /**
+   * UI density — ONE attribute (`data-density` on the root) that every
+   * density-aware token reads: control height, row height, font size, panel
+   * padding (see tokens/density.css). It replaced `sidebarDensity`, which
+   * injected two runtime variables that exactly one stylesheet read; a
+   * persisted `sidebarDensity` is migrated on read.
+   */
+  density: 'compact' | 'default' | 'comfortable';
+  /**
+   * Force the high-contrast theme (themes/high-contrast.css) regardless of the
+   * OS. When OFF and the theme mode is "system", the OS's own
+   * `prefers-contrast: more` still turns it on — following the OS is what
+   * "system" means.
+   */
+  highContrast: boolean;
   timelineAutoKeyframe: boolean;
   /**
    * How generated motion should feel: the duration, travel, stagger and easing
@@ -150,7 +164,72 @@ export interface Preferences {
    * from the layout tree. Falls back to the first tab the layer HAS when the
    * remembered one is empty for it.
    */
-  inspectorTab: 'transform' | 'style' | 'layer' | 'animation';
+  inspectorTab: 'pinned' | 'transform' | 'style' | 'layer' | 'effects' | 'animation';
+  /**
+   * Draw a mini keyframe lane under every animated inspector row — the
+   * Blender/Cavalry strip that shows WHERE a property's keyframes are without
+   * opening the timeline. Off by default: it costs a row of height per
+   * animated property, which is the wrong trade for someone who lives in the
+   * timeline anyway. Toggled from the Properties panel's ⋯ menu.
+   */
+  inspectorShowLane: boolean;
+  /**
+   * Where each FLOATING dialog was last left, by modal id (`{ x, y, w, h }` in
+   * CSS pixels). A floating dialog — Composition Settings, Keyframe Velocity,
+   * the Smoother — is a tool you park beside the thing you are editing, and a
+   * tool that comes back in the middle of the screen on every open undoes the
+   * parking. Sparse: a dialog never dragged has no entry and opens centred.
+   * Clamped to the viewport on read, so a position saved on a wider monitor
+   * cannot come back off-screen.
+   */
+  dialogGeometry: Record<string, DialogGeometry>;
+  /**
+   * The app version whose What's New dialog has been shown. Compared against
+   * the running version at boot; a mismatch opens the changelog once, then
+   * this is stamped so it does not open again until the next release.
+   */
+  lastSeenVersion: string;
+  /** Crash-recovery autosave interval, seconds. */
+  autosaveIntervalSec: number;
+  /** How many autosave snapshots to keep (a ring; the newest is the recovery offer). */
+  autosaveKeep: number;
+  /**
+   * A folder that also receives a JSON copy of every autosave (desktop only —
+   * needs the shell's file bridge). `null` keeps autosaves in app settings only.
+   */
+  autosaveLocation: string | null;
+  /**
+   * Project paths pinned to the top of the start screen. A preference rather
+   * than MRU data: the MRU is written by every open and save, and a pin has to
+   * survive that churn.
+   */
+  pinnedProjects: string[];
+  // ── Timeline view preferences ──────────────────────────────────────────
+  /**
+   * How the lanes follow the playhead during playback. `page` jumps the view
+   * one screen when the playhead leaves it (AE); `continuous` keeps it a
+   * third of the way in; `off` never scrolls on its own.
+   */
+  timelineFollowMode: 'off' | 'page' | 'continuous';
+  /** Clip and keyframe snapping. Alt still inverts whatever this says. */
+  timelineSnap: boolean;
+  /** Row height, px — the three presets (28 / 36 / 46) or a dragged value. */
+  timelineRowHeight: number;
+  /** Which of the optional In / Out / Duration / Stretch columns are shown. */
+  timelineExtraColumns: string[];
+  /**
+   * Show the seven AE switches only on row hover (or when a row pins them),
+   * keeping the header column to eye / solo / lock / name at rest.
+   */
+  timelineSwitchesOnHover: boolean;
+}
+
+/** A floating dialog's remembered frame, CSS pixels relative to the viewport. */
+export interface DialogGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 interface PreferenceActions {
@@ -166,7 +245,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   uiScale: 1,
   buttonSize: 'md',
   iconSize: 'md',
-  sidebarDensity: 'default',
+  density: 'default',
+  highContrast: false,
   timelineAutoKeyframe: false,
   motionFeel: 'smooth',
   editorReduceMotion: false,
@@ -192,6 +272,18 @@ export const DEFAULT_PREFERENCES: Preferences = {
   effectFavorites: [],
   inspectorSections: {},
   inspectorTab: 'transform',
+  inspectorShowLane: false,
+  dialogGeometry: {},
+  lastSeenVersion: '',
+  autosaveIntervalSec: 60,
+  autosaveKeep: 5,
+  autosaveLocation: null,
+  pinnedProjects: [],
+  timelineFollowMode: 'page',
+  timelineSnap: true,
+  timelineRowHeight: 28,
+  timelineExtraColumns: [],
+  timelineSwitchesOnHover: true,
 };
 
 /** Pluggable persistence backend. */
@@ -206,7 +298,12 @@ export const localStorageBackend: PreferenceBackend = {
     try {
       const raw = window.localStorage.getItem('motion-editor.preferences');
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as Partial<Preferences>;
+      const parsed = JSON.parse(raw) as Partial<Preferences> & { sidebarDensity?: Preferences['density'] };
+      // `sidebarDensity` became `density` when density turned into a token
+      // tier. Carry the old choice across; `setMany` drops the stale key.
+      if (parsed.density === undefined && parsed.sidebarDensity !== undefined) {
+        parsed.density = parsed.sidebarDensity;
+      }
       // ONE-TIME migration to the proxies-on default. `write` persists the
       // whole object, so every pre-existing profile carries useProxies:false
       // whether or not the user ever touched the toggle — flipping only the
@@ -260,7 +357,10 @@ export const usePreferenceStore = create<PreferenceStore>()(
         });
       }
       // Document-level prefs take effect immediately.
-      if (key === 'uiScale' || key === 'buttonSize' || key === 'iconSize' || key === 'sidebarDensity' || key === 'editorReduceMotion') applyUiPreferences();
+      if (
+        key === 'uiScale' || key === 'buttonSize' || key === 'iconSize' || key === 'density' ||
+        key === 'highContrast' || key === 'editorReduceMotion' || key === 'theme'
+      ) applyUiPreferences();
     },
 
     setMany: (values) => {
@@ -282,35 +382,79 @@ export const usePreferenceStore = create<PreferenceStore>()(
 );
 
 /**
+ * The theme MODE the user chose (dark / light / system), as distinct from the
+ * theme currently resolved onto `data-theme`.
+ *
+ * The ThemeManager owns the mode and is reached lazily, the same way
+ * layoutStore reaches the SettingsManager: a static import would evaluate
+ * coreServices at module scope, and this store is imported by Button, Icon and
+ * half the component library. Before the core has booted (tests, the first
+ * render) there is no manager, and "dark" is the boot default it would report.
+ */
+function currentThemeMode(): 'light' | 'dark' | 'system' {
+  try {
+    // MUST stay lazy — see the doc comment above and layoutStore's identical seam.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { tryCoreServices } = require('@core/services/coreServices') as typeof import('@core/services/coreServices');
+    return tryCoreServices()?.theme.getMode() ?? 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+/** `(prefers-contrast: more)`, or false where matchMedia does not exist (jsdom). */
+function osPrefersMoreContrast(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-contrast: more)').matches
+    : false;
+}
+
+let contrastMql: MediaQueryList | null = null;
+
+/**
  * Push the document-level preferences onto the DOM.
  *
  * Only the ones the DOM is the right home for: whole-page zoom, the
- * reduced-motion class, and the density variables. `buttonSize`/`iconSize` are
- * read directly by Button, IconButton and Icon — see the note below.
+ * reduced-motion class, and three ATTRIBUTES the token layer keys on:
+ *
+ *   data-density     compact | default | comfortable   (tokens/density.css)
+ *   data-contrast    "more" when the high-contrast theme is in force
+ *   data-theme-mode  the chosen mode, so a stylesheet can tell "system" from
+ *                    a resolved "dark" (themes/high-contrast.css gates its
+ *                    `prefers-contrast` fallback on it)
+ *
+ * Density used to be two runtime CSS variables set here in raw pixels, which
+ * meant the one stylesheet that read them could never be checked against the
+ * scale. The attribute selects a tier of TOKENS instead.
+ *
+ * `buttonSize` and `iconSize` are deliberately NOT here. They used to publish
+ * `--app-button-scale` / `--app-icon-scale`, which no stylesheet ever read —
+ * Button, IconButton and Icon each compute their own multiplier from the
+ * preference in JS. Two mechanisms for one setting is bad enough; these two
+ * had drifted to different numbers (icons scaled 0.88/1.18 here against
+ * 0.82/1.25 in Icon.tsx), so whichever a reader believed was wrong half the
+ * time. The JS path is the one that works, so it is the one that stays.
  */
 export function applyUiPreferences(): void {
-  const { uiScale, sidebarDensity, editorReduceMotion } = usePreferenceStore.getState();
+  const { uiScale, density, highContrast, editorReduceMotion } = usePreferenceStore.getState();
   const root = document.documentElement as HTMLElement & { style: CSSStyleDeclaration & { zoom?: string } };
 
   root.style.zoom = uiScale === 1 ? '' : String(uiScale);
   root.classList.toggle('reduce-motion', editorReduceMotion);
 
-  /**
-   * Density, as CSS variables the item styles read.
-   *
-   * `buttonSize` and `iconSize` are deliberately NOT here. They used to publish
-   * `--app-button-scale` / `--app-icon-scale`, which no stylesheet ever read —
-   * Button, IconButton and Icon each compute their own multiplier from the
-   * preference in JS. Two mechanisms for one setting is bad enough; these two
-   * had drifted to different numbers (icons scaled 0.88/1.18 here against
-   * 0.82/1.25 in Icon.tsx), so whichever a reader believed was wrong half the
-   * time. The JS path is the one that works, so it is the one that stays.
-   */
-  const padMap = { compact: '4px 8px', default: '8px 12px', comfortable: '12px 16px' };
-  const fontMap = { compact: '11px', default: '12px', comfortable: '13px' };
+  root.setAttribute('data-density', density || 'default');
 
-  root.style.setProperty('--sidebar-item-padding', padMap[sidebarDensity || 'default']);
-  root.style.setProperty('--sidebar-item-font-size', fontMap[sidebarDensity || 'default']);
+  const mode = currentThemeMode();
+  root.setAttribute('data-theme-mode', mode);
+  const contrastOn = highContrast || (mode === 'system' && osPrefersMoreContrast());
+  if (contrastOn) root.setAttribute('data-contrast', 'more');
+  else root.removeAttribute('data-contrast');
+
+  // Follow the OS while in system mode: re-run when its contrast setting flips.
+  if (contrastMql === null && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    contrastMql = window.matchMedia('(prefers-contrast: more)');
+    contrastMql.addEventListener?.('change', () => applyUiPreferences());
+  }
 
   window.dispatchEvent(new Event('resize'));
 }

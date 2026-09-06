@@ -465,15 +465,16 @@ function stiffnessSignature(sVert: Float64Array): string {
 }
 
 /**
- * Resolve each pin to the mesh vertex its weight column peaks on (argmax). This
- * is the vertex the pin hard-constrains. Returns the distinct constrained-vertex
- * count so the caller can gate (ARAP needs ≥2 handles to be meaningful).
+ * The hard constraints one ARAP solve runs under, per vertex: `pinnedFlag[i]`
+ * marks a handle, `targetX/Y[i]` is where it must land and `cos/sin[i]` the
+ * local frame (rotation · uniform scale) fixed at it. `distinct` counts the
+ * handles and `key` names the set, for the factor cache.
+ *
+ * `resolvePinnedVertices` derives one from a pin list; `bendPins.ts` derives
+ * the drivers' and then ADDS a rigid region to it, which is why the shape is
+ * public and mutable rather than an opaque return.
  */
-function resolvePinnedVertices(
-  pins: DeformPin[],
-  restMesh: DeformedMesh,
-  n: number,
-): {
+export interface ArapHandles {
   pinnedFlag: Uint8Array;
   targetX: Float64Array;
   targetY: Float64Array;
@@ -481,7 +482,18 @@ function resolvePinnedVertices(
   sin: Float64Array;
   distinct: number;
   key: string;
-} {
+}
+
+/**
+ * Resolve each pin to the mesh vertex its weight column peaks on (argmax). This
+ * is the vertex the pin hard-constrains. Returns the distinct constrained-vertex
+ * count so the caller can gate (ARAP needs ≥2 handles to be meaningful).
+ */
+export function resolvePinnedVertices(
+  pins: DeformPin[],
+  restMesh: DeformedMesh,
+  n: number,
+): ArapHandles {
   const pinnedFlag = new Uint8Array(n);
   const targetX = new Float64Array(n);
   const targetY = new Float64Array(n);
@@ -560,6 +572,30 @@ export function deformArap(
   lbsResult: Float32Array,
   maxRotationDeg?: number,
 ): Float32Array {
+  const n = restMesh.vertices.length / 4;
+  if (n === 0) return lbsResult;
+  const handles = resolvePinnedVertices(pins, restMesh, n);
+  return deformArapWithHandles(pins, restMesh, handles, lbsResult, maxRotationDeg);
+}
+
+/**
+ * The ARAP solve under an EXPLICIT handle set.
+ *
+ * `pins` here contribute only their stiffness field; which vertices are held,
+ * and where, is entirely `handles`. `deformArap` builds those from the pins;
+ * the bend-pin pass builds them from the drivers plus a rigidly transformed
+ * region (see `bendPins.ts`). `warmStart` is the initial guess AND the value
+ * returned verbatim when the solve cannot run (fewer than two handles, empty
+ * mesh, non-finite result) — never throws, never returns NaN.
+ */
+export function deformArapWithHandles(
+  pins: DeformPin[],
+  restMesh: DeformedMesh,
+  handles: ArapHandles,
+  warmStart: Float32Array,
+  maxRotationDeg?: number,
+): Float32Array {
+  const lbsResult = warmStart;
   const verts = restMesh.vertices;
   const n = verts.length / 4;
   if (n === 0) return lbsResult;
@@ -567,8 +603,7 @@ export function deformArap(
   const topo = buildTopology(restMesh);
   const { restX, restY, off, nbrIdx, nbrW, diag } = topo;
 
-  const { pinnedFlag, targetX, targetY, cos: pinCos, sin: pinSin, distinct, key } =
-    resolvePinnedVertices(pins, restMesh, n);
+  const { pinnedFlag, targetX, targetY, cos: pinCos, sin: pinSin, distinct, key } = handles;
 
   // Need at least two distinct handles for a rigidity problem; otherwise the LBS
   // path already gives an exact rigid translate/rotation (single/zero pin).

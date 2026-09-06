@@ -49,6 +49,8 @@ import { flattenComposition } from '@core/scene/sceneDerive';
 import type { SceneNode, ID } from '@core/types';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useGuidesStore, type Camera3dMode } from '@stores/guidesStore';
+import { useViewportDisplayStore } from '@stores/viewportDisplayStore';
+import { subscribeTime } from '@stores/playbackClockStore';
 import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import { getEventBus } from '@core/events/EventBus';
 import { readGeometry, localBounds, makeHitTestLocal, isDrawableKind as drawable } from './geometry';
@@ -414,15 +416,30 @@ export function createSceneGraphPort(viewOf?: () => Camera3dMode): SceneGraphPor
     },
     onChanged(listener: () => void): () => void {
       const unsubScene = useSceneRevision.subscribe(listener);
-      let lastTime: number | undefined;
-      const unsubTime = useProjectStore.subscribe((s) => {
-        const activeTab = s.tabs[s.activeTabId ?? ''];
-        const t = activeTab?.time;
-        if (t !== lastTime) {
-          lastTime = t;
+      // The LIVE clock, not the tab record: the record is a ≤4Hz mirror while
+      // playing, so a hit-test index keyed on it lagged the picture by up to a
+      // quarter second. Re-bound whenever the active tab changes.
+      let offTime: (() => void) | null = null;
+      let boundTab: string | null = null;
+      const bindTime = (): void => {
+        const tab = useProjectStore.getState().activeTabId;
+        if (tab === boundTab) return;
+        offTime?.();
+        boundTab = tab;
+        offTime = tab ? subscribeTime(tab, () => listener()) : null;
+      };
+      bindTime();
+      const unsubTab = useProjectStore.subscribe((s, prev) => {
+        if (s.activeTabId !== prev.activeTabId) {
+          bindTime();
           listener();
         }
       });
+      const unsubTime = (): void => {
+        unsubTab();
+        offTime?.();
+        offTime = null;
+      };
       // The VIEW is an input to every node this port emits.
       //
       // `worldMatrix` / `worldBounds` / `worldCorners` are all projected through
@@ -938,6 +955,17 @@ function perspectiveDelta3D(
   };
 }
 
+/**
+ * Snap to Pixel (View ▸ Snap to Pixel): round a layer-local coordinate or size
+ * to a whole pixel when the toggle is on. Applied at the WRITE, so a drag, an
+ * arrow-key nudge and a resize all land on integers, and a sub-pixel delta
+ * accumulates until it crosses a pixel rather than being dropped — the layer
+ * still moves under a slow drag, one pixel at a time.
+ */
+export function snapPx(v: number): number {
+  return useViewportDisplayStore.getState().snapToPixel ? Math.round(v) : v;
+}
+
 function moveNodes(payload: MoveNodesPayload, viewOf?: () => Camera3dMode): void {
   const autoKeyframe = usePreferenceStore.getState().timelineAutoKeyframe;
   const rawTime = useProjectStore.getState().tabs[useProjectStore.getState().activeTabId ?? '']?.time ?? 0;
@@ -1017,12 +1045,14 @@ function moveNodes(payload: MoveNodesPayload, viewOf?: () => Camera3dMode): void
           const lt = getRemappedTime(node.id, rawTime);
           const curX = defaultAnimation.sample(node.id, 'x', lt) ?? g.x;
           const curY = defaultAnimation.sample(node.id, 'y', lt) ?? g.y;
-          defaultAnimation.setKeyframe(node.id, 'x', lt, curX + delta.x);
-          defaultAnimation.setKeyframe(node.id, 'y', lt, curY + delta.y);
+          const nx = snapPx(curX + delta.x);
+          const ny = snapPx(curY + delta.y);
+          defaultAnimation.setKeyframe(node.id, 'x', lt, nx);
+          defaultAnimation.setKeyframe(node.id, 'y', lt, ny);
           const cx = cidOf(node, 'x');
           const cy = cidOf(node, 'y');
-          defaultSceneGraph.writeProp(node.id, cx, 'x', curX + delta.x);
-          defaultSceneGraph.writeProp(node.id, cy, 'y', curY + delta.y);
+          defaultSceneGraph.writeProp(node.id, cx, 'x', nx);
+          defaultSceneGraph.writeProp(node.id, cy, 'y', ny);
           // Motion Sketch records HERE and nowhere else, because this is the
           // one place a viewport drag has already become the layer's OWN x/y —
           // through the parent's inverse world matrix above, on the keyframe
@@ -1030,7 +1060,7 @@ function moveNodes(payload: MoveNodesPayload, viewOf?: () => Camera3dMode): void
           // would need a second copy of both conversions and would be wrong
           // under a moving parent in exactly the way F23 was. No-ops unless a
           // recording is armed for this node.
-          recordMotionSketchSample(node.id, curX + delta.x, curY + delta.y, lt);
+          recordMotionSketchSample(node.id, nx, ny, lt);
           // Depth is NOT run through the parent inverse above: that is a 2×3
           // affine with no z, so it cannot express the depth axis. A 3D parent
           // chain's own depth handling lives in nodeMatrix.parentWorld3d.
@@ -1061,8 +1091,8 @@ function moveNodes(payload: MoveNodesPayload, viewOf?: () => Camera3dMode): void
     }
     const cidX = cidOf(node, 'x');
     const cidY = cidOf(node, 'y');
-    defaultSceneGraph.writeProp(node.id, cidX, 'x', g.x + delta.x);
-    defaultSceneGraph.writeProp(node.id, cidY, 'y', g.y + delta.y);
+    defaultSceneGraph.writeProp(node.id, cidX, 'x', snapPx(g.x + delta.x));
+    defaultSceneGraph.writeProp(node.id, cidY, 'y', snapPx(g.y + delta.y));
     if (dz !== null) {
       const curZ = readNode3D(node).z ?? 0;
       defaultSceneGraph.writeProp(node.id, cidOf(node, 'z'), 'z', curZ + dz);
@@ -1216,8 +1246,8 @@ function resizeNode(payload: ResizeNodePayload): void {
    * before the modifier existed. Falling back beats swallowing the gesture.
    */
   const sizing = payload.size !== undefined && authoredSize;
-  const nextW = payload.size ? Math.max(1, Math.abs(payload.size.x)) : baseW;
-  const nextH = payload.size ? Math.max(1, Math.abs(payload.size.y)) : baseH;
+  const nextW = payload.size ? snapPx(Math.max(1, Math.abs(payload.size.x))) : baseW;
+  const nextH = payload.size ? snapPx(Math.max(1, Math.abs(payload.size.y))) : baseH;
   const b = payload.bounds;
   // Prefer the scale the TOOL resolved. Inferring it here as
   // `worldAABB.width / localWidth` is wrong for anything rotated — rotation
@@ -1260,7 +1290,8 @@ function resizeNode(payload: ResizeNodePayload): void {
   // measured on screen; `x`/`y`/`scaleX`/`scaleY` are stored relative to the
   // parent. Identity for an unparented layer, so nothing changes there.
   const ps = parentSpaceOf(node.id, rawTime);
-  const localCentre = Matrix.transformPoint(ps.inv, centre);
+  const localCentreRaw = Matrix.transformPoint(ps.inv, centre);
+  const localCentre = { x: snapPx(localCentreRaw.x), y: snapPx(localCentreRaw.y) };
   const localScaleX = scaleX / ps.scaleX;
   const localScaleY = scaleY / ps.scaleY;
 

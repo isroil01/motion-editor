@@ -388,7 +388,6 @@
   position: absolute;
   inset: 0 auto 0 0;
   background: var(--color-primary);
-  transition: width 120ms linear;
 }
 
 .progressText {
@@ -402,20 +401,6 @@
   mix-blend-mode: difference;
 }
 
-.footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  flex-shrink: 0;
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface-1);
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-  margin-top: auto;
-}
 
 .fileMeta {
   display: flex;
@@ -435,12 +420,6 @@
   color: var(--color-text-primary);
 }
 
-.footerActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  flex-shrink: 0;
-}
 
 @media (max-width: 720px) {
   .layout {
@@ -449,23 +428,43 @@
     max-height: none;
   }
 
-  .footer {
-    flex-direction: column;
-    align-items: stretch;
-  }
 
-  .footerActions {
-    justify-content: stretch;
-  }
-
-  .footerActions > :global(button) {
-    flex: 1;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .formatCard,
-  .progressBar {
+  .formatCard {
     transition: none;
   }
+}
+
+/* ── Panel host ─────────────────────────────────────────────────────
+   The same form in a dock slot: the preview sits ABOVE the settings, and
+   the shell is the panel's scroll area rather than a dialog body. */
+.shellPanel {
+  height: auto;
+  min-height: 0;
+}
+
+.layoutStacked {
+  grid-template-columns: 1fr;
+  height: auto;
+  max-height: none;
+}
+
+/* The in-form Cancel during an export — a plain secondary button, sized to
+   sit on the progress row. */
+.cancelBtn {
+  flex: none;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  background: var(--color-hover);
 }

@@ -1,0 +1,95 @@
+.root {
+  --chip-bg: var(--color-surface-2);
+  --chip-fg: var(--color-text-secondary);
+  --chip-border: var(--color-border);
+
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-height-sm);
+  border-radius: var(--radius-full);
+  border: var(--border-width-control) solid var(--chip-border);
+  background: var(--chip-bg);
+  color: var(--chip-fg);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  overflow: hidden;
+  transition: var(--motion-hover-transition);
+}
+
+.root[data-size="sm"] {
+  height: var(--control-height-2xs);
+  font-size: var(--font-size-micro);
+}
+
+.root[data-selectable]:hover:not([data-disabled]) {
+  --chip-bg: var(--color-surface-3);
+  --chip-fg: var(--color-text-primary);
+}
+
+.root[data-selected] {
+  --chip-bg: var(--color-primary-subtle);
+  --chip-fg: var(--color-primary);
+  --chip-border: color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+
+.root[data-disabled] {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+.main,
+.remove {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: default;
+}
+
+.main {
+  padding: 0 var(--space-3);
+}
+
+.root[data-selectable] .main {
+  cursor: pointer;
+}
+
+/* When there is a remove button the label side gives up its right padding so
+   the two do not double up. */
+.main:has(+ .remove) {
+  padding-right: var(--space-1);
+}
+
+.remove {
+  padding: 0 var(--space-2) 0 var(--space-1);
+  cursor: pointer;
+  opacity: var(--opacity-muted);
+}
+
+.remove:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--color-danger);
+}
+
+.main:focus-visible,
+.remove:focus-visible {
+  outline: none;
+  box-shadow: inset var(--shadow-focus-ring);
+}
+
+.icon {
+  flex: none;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -34,13 +34,13 @@ import { useCompositionStore } from '@stores/compositionStore';
 import { useUIStore } from '@stores/uiStore';
 import { Project3D } from '@motion/scene';
 import { is3DEnabled } from './threeD';
-import type { LightType } from './light';
+import { readNodeLight, type LightType } from './light';
 import {
   isEnvironmentPresetId,
   DEFAULT_ENVIRONMENT_PRESET,
   type EnvironmentSky,
 } from './environmentLight';
-import { flattenScene, readNodeKind } from './sceneDerive';
+import { flattenComposition, flattenScene, readNodeKind } from './sceneDerive';
 import {
   defaultPrimitiveSpec,
   isPrimitiveMeshType,
@@ -1141,8 +1141,60 @@ export interface LightSeed {
 }
 
 /** Insert a Light layer */
+/** Intensity of the ambient fill that accompanies a comp's first positional light. */
+export const AMBIENT_FILL_INTENSITY = 35;
+
+/**
+ * True when `rootId` already holds a light that lifts every surface — an
+ * ambient or an environment probe — so a new positional light is not the
+ * only thing lighting the scene.
+ */
+export function compHasAmbientLight(rootId: string): boolean {
+  return flattenComposition(defaultSceneGraph, rootId).some((n) => {
+    if (readNodeKind(n) !== 'light') return false;
+    const t = readNodeLight(n).type;
+    return t === 'ambient' || t === 'environment';
+  });
+}
+
 export function insertLight(seed: LightSeed = {}): void {
   const rootId = activeCompRootId();
+  /*
+    The first POSITIONAL light in a comp brings an ambient fill with it.
+
+    Once a scene has any light, surfaces are lit ONLY by lights — that is what a
+    light rig means, and After Effects does the same. But the first thing a
+    user sees after adding one point light to a 3D scene is every face the
+    light does not reach going fully black: "only the lit part of my cube
+    shows". AE users add an Ambient light by habit; nothing here taught that,
+    so the app does it once, as a layer the user can see, dim or delete —
+    NOT as a hidden renderer floor, which would re-grade every saved scene and
+    could not be turned off. Inserted BEFORE the main light so the light asked
+    for stays topmost and selected, and skipped when the comp already has an
+    ambient or environment light (a second point light must not add a second
+    fill).
+  */
+  const positional = seed.type !== 'ambient' && seed.type !== 'environment';
+  if (positional && !compHasAmbientLight(rootId)) {
+    const fill = makeNode('light', 'Ambient Fill');
+    const ft = fill.components.find((c) => c.type === 'Transform');
+    const compSize = useCompositionStore.getState();
+    if (ft) {
+      ft.props.x = compSize.width / 2;
+      ft.props.y = compSize.height / 2;
+      ft.props.lightType = 'ambient';
+      ft.props.intensity = AMBIENT_FILL_INTENSITY;
+      ft.props.castShadows = false;
+    }
+    const fs = fill.components.find((c) => c.type === 'Style');
+    if (fs) fs.props.fill = '#ffffff';
+    defaultSceneGraph.addChild(rootId, fill);
+    useUIStore.getState().notify({
+      level: 'info',
+      message: 'Added an Ambient Fill light so faces the new light does not reach stay visible — dim or delete it for harder lighting.',
+      durationMs: 7000,
+    });
+  }
   const node = makeNode('light', seed.name?.trim() || 'Light 1');
   const compSize = useCompositionStore.getState();
   // Seed position + keyframeable intensity/radius; warm colour via Style.fill.

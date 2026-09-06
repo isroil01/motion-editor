@@ -1,36 +1,60 @@
 /**
- * TransportBar — the whole tool row that used to sit atop the timeline panel:
- * the layer split / trim buttons, the transport itself (go-to-start · prev ·
- * play · next · go-to-end · loop · marker), the viewport tools and the zoom
- * field. The preview-quality picker was here too, and is now in the Preview
- * menu inside `ViewportTools` — one home for every fidelity-for-speed lever
- * instead of a picker here and a second copy of it in View Options.
+ * TransportBar — the ONE row under the stage.
  *
- * All of it drives the VIEWPORT, so all of it lives with the viewport. Moving
- * only the play cluster would have been the worse half-measure: the buttons on
- * either side of it act on what the stage is showing too, and splitting one row
- * across two panels means hunting in two places for controls that were adjacent
- * a moment ago. The timeline's top row is the composition tabs' now.
- * See TransportBar.module.css.
+ * Left to right:
+ *
+ *   [split · trim in · trim out] · timecode current / total ·
+ *   [go to start · previous frame · PLAY · next frame · go to end] ·
+ *   [loop · marker] · the scene tools (`ViewportTools`: motion path, the 3D
+ *   switch, auto-keyframe, the status badges) · the display controls
+ *   (`ViewportDisplayControls`: layout, channel, resolution, preview, LUT,
+ *   overlays, snapshot + compare, display mode, bookmarks, pop out) · the
+ *   zoom field
+ *
+ * The five transport buttons in the middle are the only set of them in the
+ * app. The JKL shuttle and the in / out marks that used to sit beside them as
+ * seven more buttons are keyboard chords (J K L · I O · Shift+I Shift+O) and
+ * rows in Composition ▸ Transport; what remains of them here is a small
+ * rate badge beside PLAY that appears only while a shuttle is running, so the
+ * keys stay discoverable without costing seven slots.
+ *
+ * All of it drives the VIEWPORT, so all of it lives with the viewport. The
+ * timeline's own tools are in the timeline panel's toolbar row. The display
+ * controls used to sit at the right end of the tabs row above the stage; they
+ * came down here because that row was "too many buttons on the right" and
+ * this one had the room — and because they, too, are about the viewport.
+ *
+ * The row cannot wrap. It is a `1fr auto 1fr` grid with play in the middle,
+ * and when the right column outweighs what it has, the ladder in
+ * `transportOverflow.ts` sheds from it — the display controls first, one by
+ * one, then the bar's own groups — into the bar's single `⋯` menu. Play does
+ * not move.
  *
  * Everything here reads the timeline controller and the workspace store
  * directly, so the bar takes no props and can be dropped anywhere in the
- * viewport region.
+ * viewport region (the popout timeline mounts a second copy).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@components/Icon';
+import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { cn } from '@utils/cn';
 import { getTimelineController } from '@core/timeline/TimelineController';
 import { bumpScene } from '@stores/sceneStore';
 import { ViewportTools } from './ViewportTools';
-import { ZoomField } from '@layout/TopNav/ViewControls';
+import { ViewportDisplayControlsView, displayOverflowItems, useViewportDisplayModel } from './ViewportDisplayControls';
+import { ZoomField, useZoomPercent, zoomMenuItems } from './ZoomField';
 import { framesToTimecode } from '@core/time/timecode';
 import { useWorkspaceStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useSelectionStore } from '@stores/selectionStore';
-import { isDemoted, useTransportOverflow } from './transportOverflow';
+import { displayLevelFor, isDemoted, type TransportGroup } from './transportOverflow';
 import { useTransportDemote } from './useTransportDemote';
+import {
+  getCompositionShuttle,
+  subscribeCompositionShuttleRate,
+} from '@core/timeline/transportController';
 import styles from './TransportBar.module.css';
 
 export function TransportBar(): JSX.Element {
@@ -48,11 +72,16 @@ export function TransportBar(): JSX.Element {
     setLooping(getTimelineController().isLooping());
   }, [activeTabId]);
 
-  const time = ws?.time ?? 0;
+  // The live clock — the tab record above is only a ≤4Hz mirror while playing.
+  const time = useCurrentTime();
 
   const barRef = useRef<HTMLDivElement>(null);
   const level = useTransportDemote(barRef);
-  const shed = (group: Parameters<typeof isDemoted>[0]): boolean => isDemoted(group, level);
+  const shed = (group: TransportGroup): boolean => isDemoted(group, level);
+  // The display controls' share of the ladder — its first ten rungs.
+  const displayLevel = displayLevelFor(level);
+  const display = useViewportDisplayModel();
+  const zoom = useZoomPercent();
 
   const splitAtPlayhead = (): void => {
     getTimelineController().splitSelectedAtPlayhead(selectedIds);
@@ -76,48 +105,57 @@ export function TransportBar(): JSX.Element {
     ctrl.addMarkerAtPlayhead();
   };
 
-  // Everything the row has shed, as menu items for View Options. Built here
-  // because these are the handlers' home; `ViewControls` only renders them.
-  const setOverflowItems = useTransportOverflow((s) => s.setItems);
-  const overflowItems = useMemo(() => {
-    const items = [];
+  // Everything the row has shed, as rows of the bar's own `⋯` menu, in row
+  // order: the clip edits, loop and marker, the display controls, the zoom.
+  // Built here because these are the handlers' home.
+  const displayItems = displayOverflowItems(display, displayLevel);
+  const overflowItems = useMemo<DropdownItem[]>(() => {
+    const items: DropdownItem[] = [];
     if (shed('clipEdits')) {
       items.push(
-        { type: 'item' as const, id: 'tb-split', label: 'Split Layer at Playhead', icon: 'scissors' as const, shortcut: 'Ctrl+Shift+D', onSelect: splitAtPlayhead },
-        { type: 'item' as const, id: 'tb-trim-in', label: 'Trim In-Point to Playhead', icon: 'trim-in' as const, shortcut: 'Alt+[', onSelect: trimInToPlayhead },
-        { type: 'item' as const, id: 'tb-trim-out', label: 'Trim Out-Point to Playhead', icon: 'trim-out' as const, shortcut: 'Alt+]', onSelect: trimOutToPlayhead },
+        { type: 'item', id: 'tb-split', label: 'Split Layer at Playhead', icon: 'scissors', shortcut: 'Ctrl+Shift+D', onSelect: splitAtPlayhead },
+        { type: 'item', id: 'tb-trim-in', label: 'Trim In-Point to Playhead', icon: 'trim-in', shortcut: 'Alt+[', onSelect: trimInToPlayhead },
+        { type: 'item', id: 'tb-trim-out', label: 'Trim Out-Point to Playhead', icon: 'trim-out', shortcut: 'Alt+]', onSelect: trimOutToPlayhead },
       );
     }
     if (shed('loopMarker')) {
+      if (items.length) items.push({ type: 'separator' });
       items.push(
-        { type: 'checkbox' as const, id: 'tb-loop', label: 'Loop Playback', checked: looping, onChange: toggleLoop },
-        { type: 'item' as const, id: 'tb-marker', label: selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker', icon: 'marker' as const, onSelect: addMarker },
+        { type: 'checkbox', id: 'tb-loop', label: 'Loop Playback', checked: looping, onChange: toggleLoop },
+        { type: 'item', id: 'tb-marker', label: selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker', icon: 'marker', onSelect: addMarker },
       );
+    }
+    if (displayItems.length > 0) {
+      if (items.length) items.push({ type: 'separator' });
+      items.push(...displayItems);
+    }
+    if (shed('zoom')) {
+      if (items.length) items.push({ type: 'separator' });
+      items.push({ type: 'item', id: 'tb-zoom', label: `Zoom: ${Math.round(zoom)}%`, icon: 'zoom-in', submenu: zoomMenuItems(zoom) });
     }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, looping, selectedIds]);
-
-  useEffect(() => {
-    setOverflowItems(overflowItems);
-    return () => setOverflowItems([]);
-  }, [overflowItems, setOverflowItems]);
+  }, [level, looping, selectedIds, zoom, displayItems]);
 
   return (
-    <div ref={barRef} className={styles.bar} role="toolbar" aria-label="Viewport transport and tools">
+    <div
+      ref={barRef}
+      className={styles.bar}
+      role="toolbar"
+      aria-label="Viewport transport and tools"
+      // The JKL chords read `[data-transport-bar]` as "the viewport has focus"
+      // — see `viewportCommands.transportChordsActive`.
+      data-transport-bar=""
+    >
       {/*
         Left of play: everything about TIME — clip edits at the playhead, the
         timecode, the loop flag, the marker key.
-        Right of play: everything about DISPLAY — the viewport's own tools and
-        its zoom.
+        Right of play: everything about the SCENE — the viewport's own tools
+        and its zoom.
 
-        The split is what makes the row look balanced. Loop, marker and quality
-        used to trail the right-hand group, which left three controls and a
-        timecode on one side of the play button against ten on the other: play
-        sat on the bar's exact midpoint and still read as pushed left, because
-        the eye weighs the mass either side of it, not the geometry. It also
-        reads better — you no longer cross the viewport tools to reach a
-        playback setting.
+        The split is what makes the row look balanced: the eye weighs the mass
+        either side of the play button, not the geometry, so the two sides are
+        kept roughly even.
       */}
       <div className={styles.sideLeft}>
       {/* Layer clip operations. First to leave the row when it runs short:
@@ -129,6 +167,7 @@ export function TransportBar(): JSX.Element {
               type="button"
               className={styles.btn}
               title="Split Layer at Playhead (Ctrl+Shift+D)"
+              aria-label="Split Layer at Playhead"
               onClick={splitAtPlayhead}
             >
               <Icon name="scissors" size="sm" />
@@ -137,6 +176,7 @@ export function TransportBar(): JSX.Element {
               type="button"
               className={styles.btn}
               title="Trim In-Point to Playhead (Alt+[)"
+              aria-label="Trim In-Point to Playhead"
               onClick={trimInToPlayhead}
             >
               <Icon name="trim-in" size="sm" />
@@ -145,6 +185,7 @@ export function TransportBar(): JSX.Element {
               type="button"
               className={styles.btn}
               title="Trim Out-Point to Playhead (Alt+])"
+              aria-label="Trim Out-Point to Playhead"
               onClick={trimOutToPlayhead}
             >
               <Icon name="trim-out" size="sm" />
@@ -162,46 +203,6 @@ export function TransportBar(): JSX.Element {
         {framesToTimecode(time, fps, startFrame)}
         <span className={styles.timecodeTotal}>/ {framesToTimecode(duration, fps, startFrame)}</span>
       </div>
-
-      {/* Loop and marker. Not transport controls — one is a playback mode, the
-          other writes to the composition — and running them with the transport
-          put PLAY third of seven, so the cluster's midpoint fell on "next
-          frame" and the button you aim at from memory sat off centre. */}
-      {!shed('loopMarker') && (
-        <>
-          <div className={styles.divider} />
-
-          <div className={styles.cluster}>
-            <button
-              type="button"
-              className={cn(styles.btn, looping && styles.btnActive)}
-              title={looping ? 'Loop Playback: ON' : 'Loop Playback: OFF'}
-              onClick={toggleLoop}
-            >
-              <Icon name="loop" size="sm" />
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              title={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
-              onClick={addMarker}
-            >
-              <Icon name="marker" size="sm" />
-            </button>
-          </div>
-        </>
-      )}
-
-      {/* Preview resolution used to sit here as a second picker, next to the
-          one in View Options that reads the same store — two controls for one
-          setting, each able to show the other's stale label. It now has exactly
-          one home: the Preview menu, on this same bar, with the rest of the
-          fidelity-for-speed levers (adaptive resolution, motion blur, draft,
-          onion skin). Nothing about the store or the rendering changed.
-
-          `quality` stays in TRANSPORT_DEMOTE_ORDER: that file is not this
-          change's to edit, and a rung that sheds nothing costs one extra
-          measure pass, not correctness. */}
       </div>
 
       {/* The centre column: go-to-start · prev · PLAY · next · go-to-end.
@@ -215,6 +216,7 @@ export function TransportBar(): JSX.Element {
           type="button"
           className={styles.btn}
           title="Go to Start (Home)"
+          aria-label="Go to Start"
           onClick={() => getTimelineController().goToStart()}
         >
           <Icon name="skip-back" size="sm" />
@@ -223,6 +225,7 @@ export function TransportBar(): JSX.Element {
           type="button"
           className={styles.btn}
           title="Previous Frame (Page Up)"
+          aria-label="Previous Frame"
           onClick={() => getTimelineController().previousFrame()}
         >
           <Icon name="chevron-left" size="sm" />
@@ -231,14 +234,17 @@ export function TransportBar(): JSX.Element {
           type="button"
           className={cn(styles.btn, styles.playBtn, ws?.playing && styles.playBtnActive)}
           title={ws?.playing ? 'Pause Playback (Space)' : 'Start Playback (Space)'}
+          aria-label={ws?.playing ? 'Pause' : 'Play'}
           onClick={() => getTimelineController().togglePlay()}
         >
           <Icon name={ws?.playing ? 'pause' : 'play'} size="md" />
         </button>
+        <ShuttleRateBadge />
         <button
           type="button"
           className={styles.btn}
           title="Next Frame (Page Down)"
+          aria-label="Next Frame"
           onClick={() => getTimelineController().nextFrame()}
         >
           <Icon name="chevron-right" size="sm" />
@@ -247,22 +253,62 @@ export function TransportBar(): JSX.Element {
           type="button"
           className={styles.btn}
           title="Go to End (End)"
+          aria-label="Go to End"
           onClick={() => getTimelineController().goToEnd()}
         >
           <Icon name="skip-forward" size="sm" />
         </button>
       </div>
 
-      {/* Motion path, the 3D switch, auto-keyframe, rulers / safe / channels,
-          fit-to-view, pop out — the viewport's own controls. */}
       <div className={styles.sideRight}>
+      {/* Loop and marker. Not transport controls — one is a playback mode, the
+          other writes to the composition — so they sit just outside the five,
+          on the side the scene tools are on. */}
+      {!shed('loopMarker') && (
+        <>
+          <div className={styles.cluster}>
+            <button
+              type="button"
+              className={cn(styles.btn, looping && styles.btnActive)}
+              title={looping ? 'Loop Playback: ON' : 'Loop Playback: OFF'}
+              aria-label="Loop Playback"
+              aria-pressed={looping}
+              onClick={toggleLoop}
+            >
+              <Icon name="loop" size="sm" />
+            </button>
+            <button
+              type="button"
+              className={styles.btn}
+              title={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
+              aria-label={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
+              onClick={addMarker}
+            >
+              <Icon name="marker" size="sm" />
+            </button>
+          </div>
+
+          <div className={styles.divider} />
+        </>
+      )}
+
+      {/* Motion path, the 3D switch, auto-keyframe and the two status badges
+          — the controls that act on the SCENE. */}
       <div className={styles.cluster}>
         <ViewportTools />
       </div>
 
-      {/* Last to go, and the only group that leaves without a menu entry: the
-          wheel, the +/- keys and "Fit in view" inside View Options all still
-          reach the viewport's zoom. */}
+      {/* How the frame is SHOWN — layout, channel, resolution, preview, LUT,
+          overlays, snapshot + compare, display mode, bookmarks, pop out.
+          First to leave when the row runs short, one at a time from the
+          right, into the `⋯` below (`overflow="host"`: the group renders no
+          trigger of its own). */}
+      <div className={styles.cluster}>
+        <ViewportDisplayControlsView model={display} level={displayLevel} overflow="host" />
+      </div>
+
+      {/* Last to go: the wheel and the +/- keys still reach the viewport's
+          zoom, and the `⋯` menu lists the presets while it is shed. */}
       {!shed('zoom') && (
         <>
           <div className={styles.divider} />
@@ -272,7 +318,49 @@ export function TransportBar(): JSX.Element {
           </div>
         </>
       )}
+
+      {overflowItems.length > 0 && (
+        <Dropdown
+          placement="top-end"
+          trigger={
+            <button type="button" className={styles.btn} title="More transport controls" aria-label={`More transport controls (${overflowItems.length})`}>
+              <Icon name="more-horizontal" size="sm" />
+            </button>
+          }
+          items={overflowItems}
+        />
+      )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The shuttle's rate, beside PLAY, only while a shuttle is running.
+ *
+ * J / K / L drive `core/timeline/transportController` — the same shuttle the
+ * Source Monitor has, the same 1× / 2× / 4× ladder. The seven buttons that
+ * used to sit here to teach the keys are gone; this badge is what is left of
+ * them. It costs nothing at rest and, the moment someone presses L, says
+ * `▶▶ 1×` where the eye already is, with the keys in its tooltip.
+ *
+ * Reads the shuttle's own `onRateChange`, not a poll — a shuttle at 4× must
+ * not cost a re-render per tick.
+ */
+function ShuttleRateBadge(): JSX.Element | null {
+  const [rate, setRate] = useState(() => getCompositionShuttle().rate());
+  useEffect(() => subscribeCompositionShuttleRate(setRate), []);
+  if (rate === 0) return null;
+  const speed = Math.abs(rate);
+  const dir = rate < 0 ? '◀◀' : '▶▶';
+  return (
+    <span
+      className={styles.shuttleRate}
+      role="status"
+      aria-label={`Shuttle ${rate < 0 ? 'reverse' : 'forward'} ${speed}×`}
+      title="Shuttle running — J / L again for 2× and 4×, K stops (I / O mark in and out)"
+    >
+      {dir} {speed}×
+    </span>
   );
 }

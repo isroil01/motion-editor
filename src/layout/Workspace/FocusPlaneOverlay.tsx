@@ -52,7 +52,7 @@ import { Gizmo3D, SceneGizmos } from '@motion/workspace';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { useGuidesStore, type Camera3dMode } from '@stores/guidesStore';
 import { useCompositionStore } from '@stores/compositionStore';
-import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useFocusPlaneStore } from '@stores/focusPlaneStore';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
@@ -70,6 +70,7 @@ import {
 } from '@core/scene/camera3d';
 import type { RenderView } from '@core/rendering/RenderBackend';
 import { useSceneRefGeometry } from './useSceneRefGeometry';
+import { beginViewportGesture, endViewportGesture } from '@core/workspace/viewportGesture';
 import {
   buildFocusPlaneGizmo,
   focusDistanceFromDrag,
@@ -99,7 +100,12 @@ const HANDLE_PICK_R = 12;
  * frustums are blue "reach", bodies amber, POI pink and dashed). A new colour
  * here would have added a fourth meaning nobody could look up.
  */
-const FOCUS_COLOR = '#ff9ecb';
+/**
+ * The focus plane's pink. Read from the token at module scope rather than
+ * hardcoded, so it moves with `--color-overlay-focus` — the same value the
+ * HUD dot in this overlay's CSS uses, from one definition.
+ */
+const FOCUS_COLOR = 'var(--color-overlay-focus)';
 
 const RING_STYLE: Record<FocusRingKind, { width: number; dash: string; opacity: number }> = {
   focus: { width: 1.6, dash: '7 4', opacity: 0.95 },
@@ -183,7 +189,7 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
   // panes share, so this overlay cannot disagree with them about the view.
   const { camera, orthoView, activeCameraId, scene3d } = useSceneRefGeometry(camera3dMode);
   const selectedIds = useSelectionStore((s) => s.ids);
-  const time = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
   // Frame-coalesced: a focus drag bumps the revision per pointer event and this
   // overlay only has to track it visually.
   const sceneTick = useSceneRevisionFrame();
@@ -316,6 +322,9 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
         // makes a slow drag accelerate.
         axisPerUnit: screenAxisPerUnit(giz.centre, giz.forward, project),
       };
+      // The drag flag: without it the RAM preview kept serving the pre-drag
+      // frame while the focus plane moved (see beginViewportGesture).
+      beginViewportGesture();
       useFocusPlaneStore.getState().setDragDistance(giz.distance);
     };
 
@@ -347,6 +356,7 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
     const onUp = (e: PointerEvent): void => {
       if (!drag) return;
       drag = null;
+      endViewportGesture();
       useFocusPlaneStore.getState().setDragDistance(null);
       if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
     };
@@ -360,6 +370,7 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
       svg.removeEventListener('pointermove', onMove);
       svg.removeEventListener('pointerup', onUp);
       svg.removeEventListener('pointercancel', onUp);
+      if (drag) { drag = null; endViewportGesture(); }
       useFocusPlaneStore.getState().setDragDistance(null);
     };
   }, [mounted]);
@@ -387,7 +398,7 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
           <polygon
             key={ring.kind}
             points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-            fill={ring.kind === 'focus' ? 'rgba(255, 158, 203, 0.06)' : 'none'}
+            fill={ring.kind === 'focus' ? 'var(--color-overlay-focus-fill)' : 'none'}
             stroke={FOCUS_COLOR}
             strokeWidth={st.width}
             strokeOpacity={active && ring.kind === 'focus' ? 1 : st.opacity}
@@ -409,12 +420,17 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
           />
           {/* A dark ring under the fill keeps the dot legible over bright
               artwork as well as dark. */}
-          <circle cx={centre.x} cy={centre.y} r={(hovered || active ? 7 : 5) + 1.5} fill="rgba(0,0,0,0.45)" />
+          <circle
+            cx={centre.x}
+            cy={centre.y}
+            r={(hovered || active ? 7 : 5) + 1.5}
+            style={{ fill: 'var(--color-overlay-handle-halo)' }}
+          />
           <circle
             cx={centre.x}
             cy={centre.y}
             r={hovered || active ? 7 : 5}
-            fill={hovered || active ? FOCUS_COLOR : 'rgba(0,0,0,0.35)'}
+            fill={hovered || active ? FOCUS_COLOR : 'var(--color-overlay-handle-idle)'}
             stroke={FOCUS_COLOR}
             strokeWidth={1.5}
           />

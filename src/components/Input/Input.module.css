@@ -44,6 +44,7 @@
 .field:focus-within {
   border-color: var(--color-primary);
   background: var(--color-surface-0);
+  outline: none;
 }
 
 /**
@@ -68,9 +69,16 @@
   background: transparent;
   border: none;
   outline: none;
+  box-shadow: none;
   color: inherit;
   font: inherit;
   height: 100%;
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .input::placeholder {

@@ -25,6 +25,46 @@
   --color-category-null:   var(--color-layer-null);
   --color-category-3d:     var(--color-layer-3d);
 
+  /* ── 3D axes (X red · Y green · Z blue — the AE / Blender convention) ──
+     Overridden under `[data-cvd="deuteranopia"]` below with an Okabe–Ito
+     triple that stays tellable apart without red–green discrimination. */
+  --color-axis-x: var(--color-red-500);
+  --color-axis-y: var(--color-green-500);
+  --color-axis-z: var(--color-blue-500);
+
+  /* ── File-type label palette (asset browser glyphs, badges, chips) ──
+     SEVEN families, not thirteen: the asset list used to colour PSD, RAW,
+     SVG, GIF and "pro video" each their own hex, which is more categories
+     than anyone can hold and made the column read as confetti. One hue per
+     kind of thing. Violet is NOT here on purpose — it is reserved for AI. */
+  --color-filetype-video: var(--color-blue-500);
+  --color-filetype-audio: var(--color-rose-500);
+  --color-filetype-image: var(--color-emerald-500);
+  --color-filetype-comp:  var(--color-indigo-500);
+  --color-filetype-font:  var(--color-sky-400);
+  --color-filetype-data:  var(--color-orange-600);   /* Lottie / JSON / CSV */
+  --color-filetype-other: var(--color-slate-400);
+
+  /* ── Layer KINDS in the Layers panel (icon tints) ───────────────────
+     Vivid on purpose, unlike the muted `--color-layer-*` timeline lane
+     tints: these colour an 18px glyph, not a 26px bar behind text, so they
+     can carry more saturation without swamping the row. Every kind owns a
+     hue so the eye can find "the camera" in a forty-row tree without
+     reading. Consumed by `ScenePanel.tsx` through `KIND_COLOR`. */
+  --color-kind-group:      #a78bfa;
+  --color-kind-null:       var(--color-slate-400);
+  --color-kind-shape:      #2dd4bf;
+  --color-kind-text:       var(--color-blue-400);
+  --color-kind-image:      #f59e0b;
+  --color-kind-video:      var(--color-rose-500);
+  --color-kind-svg:        #34d399;
+  --color-kind-audio:      var(--color-emerald-500);
+  --color-kind-camera:     #fb923c;
+  --color-kind-light:      #facc15;
+  --color-kind-adjustment: #c084fc;
+  --color-kind-particle:   var(--color-pink-500);
+  --color-kind-comp:       var(--color-indigo-500);
+
   /* ── Temporal accent (After Effects blue/cyan interactive highlight) ── */
   --color-temporal:          #2988ff;
   --color-temporal-strong:   #4097ff;
@@ -57,6 +97,33 @@
   --color-timeline-keyframe-stroke-active: var(--color-primary);
   --color-timeline-selected: var(--color-selection);
   --color-timeline-ai-marker: var(--color-ai-primary);
+  /* ── Timeline keyframe interpolation (TIMELINE-KF-TOKENS) ─────────
+     AE colours the diamond by HOW it interpolates: linear is the neutral
+     grey, bezier/eased the panel's primary, auto-bezier a quieter tint of
+     it, hold the warning amber (a hold is a discontinuity, which is what
+     amber says everywhere else). Read by `Timeline.module.css` through
+     `data-interp` on the glyph. The heat lane and the transcript lane share
+     the block so every timeline-only colour has one anchor. */
+  --color-timeline-kf-linear: var(--color-timeline-keyframe);
+  --color-timeline-kf-bezier: var(--color-primary);
+  --color-timeline-kf-auto:   color-mix(in srgb, var(--color-primary) 55%, var(--color-timeline-keyframe));
+  --color-timeline-kf-hold:   var(--color-warning, #e0a63a);
+  --color-timeline-heat:      color-mix(in srgb, var(--color-warning, #e0a63a) 55%, transparent);
+  --color-timeline-transcript-word: var(--color-surface-2);
+  --color-timeline-transcript-word-selected: var(--color-selection);
+  /* Marker ramp (TIMELINE-MARKER-TOKENS). Eight, because a marker's colour is
+     a CATEGORY — "music beat" vs "note for the client" — and a category you
+     can pick sixteen million of is one nobody reads back. Literal hues rather
+     than semantic aliases: two markers that both resolved to `--color-primary`
+     in some theme would be the same category to the eye. */
+  --color-timeline-marker-blue:   #3b82f6;
+  --color-timeline-marker-purple: #a855f7;
+  --color-timeline-marker-green:  #34c98e;
+  --color-timeline-marker-yellow: #e0c53a;
+  --color-timeline-marker-orange: #ef8f3c;
+  --color-timeline-marker-red:    #ef5350;
+  --color-timeline-marker-cyan:   #22c3d6;
+  --color-timeline-marker-grey:   #9aa0a6;
 
   /* ── Layer-switch accents (timeline track toggles) ────────────── */
   /* Saturated "on" hues for the AE-style layer switches. Darkened in the
@@ -117,6 +184,111 @@
      workspace rather than as empty space. */
   --color-checkerboard-a: #1a1a1a;
   --color-checkerboard-b: #252525;
+
+  /* ── Viewport overlay chrome ─────────────────────────────────────────
+     VIEWPORT-OVERLAY-TOKENS (unique anchor — do not fold into a neighbour)
+
+     Everything the overlay painters and the SVG handle layers draw ON TOP OF
+     the rendered frame: the HUD chips, the little glass panels, the handle
+     fills, the light/camera wireframes and the focus ring. These used to be
+     ~78 hex and rgba() literals spread over six overlay files, each file
+     having invented its own "dark glass" and its own white.
+
+     They are deliberately THEME-FIXED (defined once here, not re-stated under
+     `[data-theme="light"]`), for the same reason `--color-checkerboard-*` is:
+     an overlay sits over the rendered COMPOSITION, not over the app's ground.
+     Its contrast partner is whatever the user's footage happens to be, which
+     no editor theme predicts — so a light theme must not lighten a chip that
+     is about to sit on a white sky. The one thing that does follow the theme
+     is the CVD axis triple above, because those three encode meaning.
+
+     `-hi` is the "this one is active/hovered" step of the colour above it. */
+
+  /* Glass panels and chips drawn over the frame (HUD, gizmo readout, focus
+     distance). Dark, translucent, with a hairline and a lift. */
+  --color-overlay-panel-bg:     rgba(18, 20, 26, 0.90);
+  --color-overlay-panel-border: rgba(255, 255, 255, 0.20);
+  --color-overlay-panel-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  /* Text on those panels, and the "selected"/"active" fill of a white handle. */
+  --color-overlay-text:         #ffffff;
+  /* A handle's resting fill and the dark halo drawn under a bright marker, so
+     it stays visible over a white frame. */
+  --color-overlay-handle:       rgba(255, 255, 255, 0.85);
+  --color-overlay-handle-halo:  rgba(0, 0, 0, 0.45);
+  --color-overlay-handle-idle:  rgba(0, 0, 0, 0.35);
+  --color-overlay-stroke:       rgba(255, 255, 255, 0.90);
+  --color-overlay-stroke-soft:  rgba(255, 255, 255, 0.55);
+  --color-overlay-stroke-dark:  rgba(0, 0, 0, 0.80);
+
+  /* The 3D gizmo's rotation ring and its live-angle readout dot. */
+  --color-overlay-gizmo-rotate:    #ff2d55;
+
+  /* Camera / light wireframes drawn by SceneGeometryOverlay:
+       -light  the lamp body, its cone, feather and radius rings
+       -camera the frustum
+       -poi    the point-of-interest tether (shared with the focus ring)
+       -bounds the plain layer box */
+  --color-overlay-light:   var(--color-amber-400);
+  --color-overlay-camera:  var(--color-sky-400);
+  --color-overlay-poi:     #ff9ecb;
+  --color-overlay-bounds:  var(--color-slate-400);
+
+  /* Depth-of-field focus plane: the ring, and the tint inside it. */
+  --color-overlay-focus:      var(--color-overlay-poi);
+  --color-overlay-focus-fill: rgba(255, 158, 203, 0.06);
+
+  /* ── Bone rig (BoneOverlay) ───────────────────────────────────────
+     A skeleton's overlay says four things at once and each needs its own hue,
+     because they co-occur: a bone can be selected AND in an IK chain AND
+     hovered in the same frame, and the whole point of the colour is to tell
+     you which. So this is a semantic set, not a palette:
+
+       -bone      a resting bone
+       -draft     the bone being drawn, the brush cursor, and hover
+       -ik        an IK goal, and any bone the solver is driving
+       -pole      the pole vector that decides which way an elbow bends
+       -selected  the one bone or controller under edit
+       -vertex    the picked skinning vertex
+
+     The `-fill` partners are the same hue at the polygon alpha the body is
+     drawn with; they are stated rather than derived because `color-mix` over a
+     token would round differently and these were tuned against footage.
+
+     THEME-FIXED, like every other overlay colour above: their contrast partner
+     is the user's artwork, which no editor theme predicts. */
+  --color-overlay-rig-bone:          #ffaa00;
+  --color-overlay-rig-bone-fill:     rgba(255, 170, 0, 0.25);
+  --color-overlay-rig-draft:         #00e699;
+  --color-overlay-rig-draft-fill:    rgba(0, 230, 153, 0.35);
+  --color-overlay-rig-ik:            #ff0055;
+  --color-overlay-rig-ik-fill:       rgba(255, 0, 85, 0.22);
+  --color-overlay-rig-pole:          #a855f7;
+  --color-overlay-rig-selected:      #2b7eff;
+  --color-overlay-rig-selected-fill: rgba(43, 126, 255, 0.45);
+  --color-overlay-rig-vertex:        #33aaff;
+  /* The skinning mesh, when no bone is selected: a wash faint enough to read
+     as structure rather than as a fill, over whatever the layer's artwork is. */
+  --color-overlay-rig-mesh-fill:     rgba(255, 170, 0, 0.04);
+  --color-overlay-rig-mesh-edge:     rgba(255, 170, 0, 0.22);
+
+  /* Controller side. NOT the `--color-layer-*` tokens: those encode layer KIND
+     (text / shape / image / video), there is no left/right/centre triple to
+     reuse, and borrowing three kind tokens would give a rig colour a meaning it
+     does not carry and drift the moment someone retints "video". Chosen to
+     separate at a glance from the four rig hues above — amber and cyan sit away
+     from green/magenta/purple, and centre is neutral so a spine control never
+     reads as a side. */
+  --color-overlay-rig-side-left:   #ffb020;
+  --color-overlay-rig-side-right:  #3fd0ff;
+  --color-overlay-rig-side-centre: #c8cedb;
+  /* A controller that this mode has switched off — desaturated, so the side
+     colour reads as "live". */
+  --color-overlay-rig-inert:       #6b7280;
+  /* Drawn wide and dark under every controller outline so it survives artwork
+     that happens to share its side colour. Deeper than the generic
+     `--color-overlay-handle-halo` on purpose: a controller outline is thin and
+     the halo is the only thing separating it from a busy frame. */
+  --color-overlay-rig-halo:        rgba(0, 0, 0, 0.55);
 }
 
 /* Timeline chrome is the one domain group that CANNOT be theme-fixed:
@@ -129,6 +301,8 @@
   /* Light lanes: a crisp dark active edge instead of a washed-out white halo. */
   --color-timeline-keyframe-stroke:        rgba(0, 0, 0, 0.25);
   --color-timeline-keyframe-stroke-active: var(--color-slate-950);
+  --color-timeline-kf-auto:   color-mix(in srgb, var(--color-primary) 45%, var(--color-timeline-keyframe));
+  --color-timeline-heat:      color-mix(in srgb, var(--color-warning, #b8860b) 45%, transparent);
   --color-canvas-dot: rgba(0, 0, 0, 0.05);
   --color-checkerboard-a: #ffffff;
   --color-checkerboard-b: #e3e5ea;
@@ -159,4 +333,29 @@
 
   /* AI semantic accents on light backgrounds */
   --color-ai-light:           var(--color-violet-700);
+
+  /* File-type hues darkened one step so a 12px label still clears 3:1 on a
+     white row; the light-theme status tokens do the same. */
+  --color-filetype-video: var(--color-blue-600);
+  --color-filetype-audio: var(--color-rose-600);
+  --color-filetype-image: var(--color-emerald-600);
+  --color-filetype-font:  var(--color-sky-500);
+  --color-filetype-other: var(--color-slate-500);
+}
+
+/*
+ * Colour-vision-deficiency palette. `[data-cvd="deuteranopia"]` on the root
+ * (written by the preference layer when the user asks for it) swaps the axis
+ * triple for Okabe–Ito vermillion / yellow / blue — the pair red–green that a
+ * deuteranope cannot separate is gone, and the three stay distinct under
+ * protanopia as well. Yellow drops to its deep variant on light grounds.
+ */
+[data-cvd="deuteranopia"] {
+  --color-axis-x: var(--color-cvd-vermillion);
+  --color-axis-y: var(--color-cvd-yellow);
+  --color-axis-z: var(--color-cvd-blue);
+}
+
+[data-theme="light"][data-cvd="deuteranopia"] {
+  --color-axis-y: var(--color-cvd-yellow-deep);
 }

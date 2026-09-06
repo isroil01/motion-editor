@@ -24,6 +24,42 @@ import {
   type RenderJobSpec,
 } from '@core/export/renderJob';
 import { readPersisted, writePersisted } from '@core/settings/persistedValue';
+import { useUIStore } from './uiStore';
+
+/** The tray/toast job a queue entry runs under. */
+const jobIdFor = (job: RenderJob): string => `render:${job.id}`;
+
+/**
+ * The toast's one action when a render lands: reveal the file if the shell can
+ * (a `file.reveal` bridge — not in every build), else put its path on the
+ * clipboard, which is the next best thing to a Finder window.
+ */
+function revealAction(path: string): { label: string; onSelect(): void } {
+  const shell = (window as { motionEditor?: { file?: { reveal?: (p: string) => Promise<void> } } }).motionEditor;
+  if (shell?.file?.reveal) {
+    const reveal = shell.file.reveal;
+    return { label: 'Reveal file', onSelect: () => { void reveal(path).catch(() => undefined); } };
+  }
+  return {
+    label: 'Copy path',
+    onSelect: () => {
+      void navigator.clipboard?.writeText(path).then(
+        () => useUIStore.getState().notify({ level: 'info', message: 'Path copied', durationMs: 1800 }),
+        () => undefined,
+      );
+    },
+  };
+}
+
+/** Open the docs section for a failed render — the toast's "Learn more". */
+function learnMoreAction(): { label: string; onSelect(): void } {
+  return {
+    label: 'Learn more',
+    onSelect: () => {
+      void import('@layout/Help/openHelp').then(({ openHelp }) => openHelp('renderFailed'));
+    },
+  };
+}
 
 // Re-exported so the panels, the Export dialog and the AI export tool keep
 // importing the queue's vocabulary from the queue. The DEFINITIONS moved to
@@ -499,6 +535,13 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
         // 0% while ffmpeg's staging dir holds 400 frames was the visible half
         // of pause meaning "start over".
         get().updateJob(job.id, { status: 'rendering', progress: job._resume || job._adopt ? job.progress : 0 });
+        // The tray and a progress toast follow the render from here on; before
+        // this only plugins were told anything about a queued render.
+        useUIStore.getState().startJob({
+          id: jobIdFor(job),
+          label: `Rendering ${job.compositionName}…`,
+          progress: job._resume || job._adopt ? job.progress : 0,
+        });
 
         /*
           Pick a previous session's staging dir back up.
@@ -541,6 +584,7 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
           if (f < 1 && lastProgress >= 0 && f - lastProgress < 0.01) return;
           lastProgress = f;
           get().updateJob(job.id, { progress: f });
+          useUIStore.getState().updateJob(jobIdFor(job), { progress: f });
         };
         try {
           // `true`: the queue is the one caller whose renders must survive a
@@ -548,6 +592,12 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
           const output = await renderJobOutput(job, onProgress, abort.signal, pending, true);
           if (output.kind === 'paused') {
             const intent = get()._intent;
+            useUIStore.getState().finishJob(jobIdFor(job), {
+              status: 'cancelled',
+              message: intent === 'discard'
+                ? `Discarded the render of ${job.compositionName}`
+                : `${intent === 'stop' ? 'Stopped' : 'Paused'} ${job.compositionName} at ${Math.round((output.resume.nextOffset / output.resume.render.totalFrames) * 100)}%`,
+            });
             if (intent === 'discard') {
               // The only path that throws work away, and only because someone
               // asked for it by name: the sink is disposed (ffmpeg killed, the
@@ -589,6 +639,10 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
             const elapsedMs = Date.now() - started;
             get().updateJob(job.id, { status: 'skipped', progress: 1, elapsedMs });
             notifyPlugins({ status: 'skipped', job, fileName: null, elapsedMs });
+            useUIStore.getState().finishJob(jobIdFor(job), {
+              status: 'cancelled',
+              message: `${job.compositionName} rendered, but no file was saved`,
+            });
             continue;
           }
           const doneMs = Date.now() - started;
@@ -606,8 +660,20 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
           // the directory is something about the user's machine it has no use
           // for. See `RenderFinishedInfo`.
           notifyPlugins({ status: 'done', job, fileName: name, elapsedMs: doneMs });
+          // The full path only exists on the desktop (`saveTo`); a browser
+          // download has nothing to reveal, so the toast has no action there.
+          const hasPath = output.kind !== 'blob' && /[/\\]/.test(savedTo);
+          useUIStore.getState().finishJob(jobIdFor(job), {
+            status: 'done',
+            message: `Rendered ${job.compositionName} → ${name}`,
+            ...(hasPath ? { detail: savedTo, action: revealAction(savedTo) } : {}),
+          });
         } catch (e) {
           if (abort.signal.aborted) {
+            useUIStore.getState().finishJob(jobIdFor(job), {
+              status: 'cancelled',
+              message: `Stopped rendering ${job.compositionName}`,
+            });
             // Non-resumable paths (sequences, browser sinks) still lose their
             // partial work on pause — the resumable path never reaches here
             // aborted, it returns 'paused' instead. Back to `queued` at 0
@@ -629,6 +695,12 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
             stagingJobId: undefined,
           });
           notifyPlugins({ status: 'failed', job, fileName: null, elapsedMs: failMs, error: message });
+          useUIStore.getState().finishJob(jobIdFor(job), {
+            status: 'failed',
+            message: `Render of ${job.compositionName} failed`,
+            detail: message,
+            action: learnMoreAction(),
+          });
         }
       }
       if (get()._abort === myAbort) set({ isRunning: false, _abort: null });

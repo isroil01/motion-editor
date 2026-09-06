@@ -50,6 +50,7 @@ import { CurveEditor } from './CurveEditor';
 import { useSceneRevision } from '@stores/sceneStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { useActiveWorkspace } from '@stores/projectStore';
+import { useTrackNavigator } from '@layout/Inspector/AnimToggle';
 import { defaultAnimation } from '@motion/animation';
 import { Color } from '@motion/renderer';
 import { runAnimEdit } from '@core/animation/animationCommands';
@@ -193,6 +194,7 @@ function EffectOpacityRow({ nodeId, effect }: { nodeId: string; effect: Effect }
   const layerT = compToKeyframeTime(nodeId, time);
   const stored = effect.opacity ?? 100;
   const display = animated ? defaultAnimation.sample(nodeId, path, layerT) ?? stored : stored;
+  const navigator = useTrackNavigator(nodeId, [path], 'Effect Opacity', () => [display]);
 
   // Same split `writeEffectParams` makes for declared params: keyframe when the
   // property is already animated, set the static value when it is not. Written
@@ -238,6 +240,7 @@ function EffectOpacityRow({ nodeId, effect }: { nodeId: string; effect: Effect }
         label="Effect Opacity"
         animated={animated}
         onStopwatch={toggle}
+        navigator={navigator}
         onReset={animated ? undefined : () => setEffectOpacity(nodeId, effect.id, undefined)}
         compact
       >
@@ -340,6 +343,13 @@ function EffectParamRow({
 
   const value = effectParam(effect, param.key);
   const label = `${def.label} ${param.label}`;
+  // The navigator's tracks, decided by param type — called unconditionally so
+  // the hook count never depends on which parameter this row is drawing.
+  const navPrefix = effectPropPath(effect.id, param.key);
+  const navTracks = param.type === 'color'
+    ? [`${navPrefix}_r`, `${navPrefix}_g`, `${navPrefix}_b`, `${navPrefix}_a`]
+    : [navPrefix];
+  const navigator = useTrackNavigator(nodeId, navTracks, label);
 
   // A RESOLVED param is computed by the render pipeline every frame (Audio
   // Spectrum's band magnitudes). Rendering a control for it would give the user
@@ -385,7 +395,7 @@ function EffectParamRow({
     };
     return (
       <ParamLine>
-        <PropertyRow label={param.label} animated={animated} onStopwatch={toggleColorAnim} compact>
+        <PropertyRow label={param.label} animated={animated} onStopwatch={toggleColorAnim} navigator={navigator} compact>
           <ColorPicker
             value={displayed}
             onChange={(hex) => {
@@ -576,6 +586,7 @@ function EffectParamRow({
         label={param.label}
         animated={animated}
         onStopwatch={toggle}
+        navigator={navigator}
         onReset={
           typeof meta.defaultValue === 'number' && meta.resettable
             ? () => updateEffectParam(nodeId, effect.id, param.key, meta.defaultValue as number)

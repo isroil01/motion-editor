@@ -59,6 +59,78 @@ export function captureRecovery(time: number): RecoverySnapshot | null {
 export function persistRecovery(snap: RecoverySnapshot | null): void {
   if (!snap || !snap.projectId) return;
   getSettingsManager().set(KEY, snap);
+  keepRing(snap);
+  void copyToFolder(snap);
+}
+
+// ── Keep-N ring + folder copy (Preferences ▸ Files) ──────────────────────
+//
+// `KEY` is always the NEWEST snapshot and is what the launch-time recovery
+// offer reads, unchanged. The ring behind it keeps the last N so a snapshot
+// that captured a mistake is not the only one there is; and a folder, when
+// the user names one on the desktop, receives a JSON copy of each write so
+// an autosave survives a wiped settings store too.
+
+const RING_KEY = 'recovery.ring';
+export const AUTOSAVE_KEEP_MIN = 1;
+export const AUTOSAVE_KEEP_MAX = 50;
+
+/** The preference store, reached lazily (this module is on the boot path). */
+function autosavePrefs(): { keep: number; location: string | null } {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy seam: this module is on the boot path, see layoutStore.ts
+    const { usePreferenceStore } = require('@stores/preferenceStore') as typeof import('@stores/preferenceStore');
+    const s = usePreferenceStore.getState();
+    const keep = typeof s.autosaveKeep === 'number' && Number.isFinite(s.autosaveKeep)
+      ? Math.min(AUTOSAVE_KEEP_MAX, Math.max(AUTOSAVE_KEEP_MIN, Math.round(s.autosaveKeep)))
+      : 5;
+    return { keep, location: typeof s.autosaveLocation === 'string' && s.autosaveLocation ? s.autosaveLocation : null };
+  } catch {
+    return { keep: 5, location: null };
+  }
+}
+
+/** A ring entry is the whole snapshot — light enough at N ≤ 50 for a settings store. */
+export function readRecoveryRing(): RecoverySnapshot[] {
+  try {
+    const v = getSettingsManager().get<RecoverySnapshot[] | null>(RING_KEY, null);
+    return Array.isArray(v) ? v.filter((r) => r && typeof r.savedAt === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+function keepRing(snap: RecoverySnapshot): void {
+  try {
+    const { keep } = autosavePrefs();
+    const ring = [snap, ...readRecoveryRing().filter((r) => r.savedAt !== snap.savedAt)].slice(0, keep);
+    getSettingsManager().set(RING_KEY, ring);
+  } catch {
+    /* the primary snapshot is already written; the ring is a bonus */
+  }
+}
+
+let ringSlot = 0;
+
+/** Where the folder copy of a snapshot goes: a slot that wraps at keep-N. */
+export function autosaveFileName(projectId: string, slot: number): string {
+  const safe = projectId.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  return `${safe}-autosave-${slot}.json`;
+}
+
+async function copyToFolder(snap: RecoverySnapshot): Promise<void> {
+  const { keep, location } = autosavePrefs();
+  if (!location) return;
+  const write = typeof window !== 'undefined' ? window.motionEditor?.file?.write : undefined;
+  if (!write) return;
+  const slot = ringSlot++ % keep;
+  const sep = location.includes('\\') ? '\\' : '/';
+  const path = `${location.replace(/[\\/]+$/, '')}${sep}${autosaveFileName(snap.projectId ?? 'project', slot)}`;
+  try {
+    await write(path, JSON.stringify(snap));
+  } catch {
+    /* an unwritable folder must not stop the in-app snapshot, which already landed */
+  }
 }
 
 export function readRecovery(): RecoverySnapshot | null {

@@ -56,6 +56,19 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             <button type="button" className={styles.secondary} onClick={this.reset}>Try again</button>
             <button type="button" className={styles.primary} onClick={() => window.location.reload()}>Reload editor</button>
           </div>
+          {/* Lazily imported: the help opener pulls in the modal store and the
+              docs glob, and a boundary that fails to render its own fallback
+              because of an import cycle would be the one thing worse than the
+              error it caught. */}
+          <button
+            type="button"
+            className={styles.link}
+            onClick={() => {
+              void import('@layout/Help/openHelp').then(({ openHelp }) => openHelp('errorBoundary'));
+            }}
+          >
+            Learn more about recovering from errors
+          </button>
         </div>
       </div>
     );

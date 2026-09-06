@@ -15,7 +15,7 @@
  */
 
 import { ValueField } from '@components/ValueField';
-import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 import { useActiveWorkspace } from '@stores/projectStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import { defaultAnimation } from '@motion/animation';
@@ -74,14 +74,16 @@ export function KeyframeRow({
   return (
     <div className={styles.popoverRow}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
-        <Checkbox
-          checked={animated}
-          onChange={() => {
+        <AnimToggle
+          nodeId={nodeId}
+          tracks={[prop]}
+          label={label}
+          animated={animated}
+          values={() => [display]}
+          onToggle={() => {
             if (animated) runAnimEdit(`Remove ${prop} animation`, () => defaultAnimation.removeTrack(nodeId, prop));
             else runAnimEdit(`Animate ${prop}`, () => defaultAnimation.setKeyframe(nodeId, prop, layerT, value));
           }}
-          title={animated ? `Stop animating ${label}` : `Animate ${label} — adds a keyframe at the playhead`}
-          style={{ width: 13, height: 13 }}
         />
         <span className={styles.popoverLabel}>{label}</span>
       </div>

@@ -121,7 +121,7 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
               y1={guideData.originLineScreen.start.y}
               x2={guideData.originLineScreen.end.x}
               y2={guideData.originLineScreen.end.y}
-              stroke="#ff2d55"
+              stroke="var(--color-overlay-gizmo-rotate)"
               strokeWidth={2}
               strokeDasharray="4 4"
             />
@@ -130,7 +130,7 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
               cx={guideData.originLineScreen.start.x}
               cy={guideData.originLineScreen.start.y}
               r={4}
-              fill="#ff2d55"
+              fill="var(--color-overlay-gizmo-rotate)"
             />
           </>
         )}
@@ -143,12 +143,12 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
               y1={line.start.y}
               x2={line.end.x}
               y2={line.end.y}
-              stroke="#ff2d55"
+              stroke="var(--color-overlay-gizmo-rotate)"
               strokeWidth={1.5}
               strokeDasharray="2 2"
               strokeOpacity={0.8}
             />
-            <circle cx={line.end.x} cy={line.end.y} r={3} fill="#ff2d55" />
+            <circle cx={line.end.x} cy={line.end.y} r={3} fill="var(--color-overlay-gizmo-rotate)" />
           </g>
         ))}
 
@@ -167,19 +167,32 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
                 alignItems: 'center',
                 padding: '4px 10px',
                 borderRadius: '6px',
-                background: 'rgba(18, 20, 26, 0.90)',
+                // The overlay "glass panel" recipe, from the tokens rather
+                // than a fourth private copy of it: the HUD chip, the focus
+                // readout and the view cube's dial all drew the same dark
+                // translucent card with slightly different numbers.
+                background: 'var(--color-overlay-panel-bg)',
                 backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: '#ffffff',
+                border: '1px solid var(--color-overlay-panel-border)',
+                color: 'var(--color-overlay-text)',
                 fontSize: '11px',
                 fontWeight: 600,
                 fontFamily: 'system-ui, -apple-system, sans-serif',
                 fontVariantNumeric: 'tabular-nums',
-                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.5)',
+                boxShadow: 'var(--color-overlay-panel-shadow)',
                 whiteSpace: 'nowrap',
               }}
             >
-              <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#ff2d55', marginRight: 6 }} />
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'var(--color-overlay-gizmo-rotate)',
+                  marginRight: 6,
+                }}
+              />
               {guideData.badgeText}
             </div>
           </foreignObject>
@@ -204,13 +217,25 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
         {/* markerUnits="userSpaceOnUse" + size ÷ view scale keeps the arrow
             heads a constant ~13px on screen inside the zoom-scaled group. */}
         <marker id="arrow-x" viewBox="0 0 10 10" refX="6" refY="5" markerUnits="userSpaceOnUse" markerWidth={13.2 / s} markerHeight={13.2 / s} orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={activeHandle === 'pos_x' || hoverHandle === 'pos_x' ? '#ff6961' : '#ff3b30'} />
+          <path
+            d="M 0 0 L 10 5 L 0 10 z"
+            style={{ fill: 'var(--color-axis-x)' }}
+            opacity={activeHandle === 'pos_x' || hoverHandle === 'pos_x' ? 1 : 0.82}
+          />
         </marker>
         <marker id="arrow-y" viewBox="0 0 10 10" refX="6" refY="5" markerUnits="userSpaceOnUse" markerWidth={13.2 / s} markerHeight={13.2 / s} orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={activeHandle === 'pos_y' || hoverHandle === 'pos_y' ? '#30d158' : '#34c759'} />
+          <path
+            d="M 0 0 L 10 5 L 0 10 z"
+            style={{ fill: 'var(--color-axis-y)' }}
+            opacity={activeHandle === 'pos_y' || hoverHandle === 'pos_y' ? 1 : 0.82}
+          />
         </marker>
         <marker id="arrow-z" viewBox="0 0 10 10" refX="6" refY="5" markerUnits="userSpaceOnUse" markerWidth={13.2 / s} markerHeight={13.2 / s} orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={activeHandle === 'pos_z' || hoverHandle === 'pos_z' ? '#409cff' : '#007aff'} />
+          <path
+            d="M 0 0 L 10 5 L 0 10 z"
+            style={{ fill: 'var(--color-axis-z)' }}
+            opacity={activeHandle === 'pos_z' || hoverHandle === 'pos_z' ? 1 : 0.82}
+          />
         </marker>
       </defs>
 
@@ -245,7 +270,7 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
               key={plane.type}
               points={pointsStr}
               fill={isSelected ? plane.hoverColor : plane.color}
-              stroke={isSelected ? '#ffffff' : 'none'}
+              stroke={isSelected ? 'var(--color-overlay-text)' : 'none'}
               strokeWidth={1 / s}
             />
           );
@@ -316,7 +341,7 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
                   width={8 / s}
                   height={8 / s}
                   fill={isSelected ? axis.hoverColor : axis.color}
-                  stroke="#ffffff"
+                  stroke="var(--color-overlay-text)"
                   strokeWidth={1 / s}
                   rx={1 / s}
                 />
@@ -330,8 +355,8 @@ export const Gizmo3dOverlay: React.FC<Gizmo3dOverlayProps> = ({
           cx={renderedGizmo.centerScreen.x}
           cy={renderedGizmo.centerScreen.y}
           r={(activeHandle === 'scale_center' || hoverHandle === 'scale_center' ? 7 : 5) / s}
-          fill={activeHandle === 'scale_center' || hoverHandle === 'scale_center' ? '#ffffff' : 'rgba(255, 255, 255, 0.85)'}
-          stroke="rgba(0, 0, 0, 0.8)"
+          fill={activeHandle === 'scale_center' || hoverHandle === 'scale_center' ? 'var(--color-overlay-text)' : 'var(--color-overlay-handle)'}
+          stroke="var(--color-overlay-stroke-dark)"
           strokeWidth={1.5 / s}
         />
       </g>

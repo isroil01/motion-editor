@@ -52,6 +52,21 @@
   --line-height-normal: 1.45;
   --line-height-loose:  1.6;
 
+  /* Line height PAIRED per font size, in px, so a row built from mixed sizes
+     still lands on the 4px grid. Each is the size × a ratio that tightens as
+     the size grows (1.45 at caption sizes, 1.2 at display), rounded to an even
+     pixel. Use `--line-height-{size}` with `--font-size-{size}`. */
+  --line-height-micro: 14px;
+  --line-height-xs:    16px;
+  --line-height-sm:    16px;
+  --line-height-md:    18px;
+  --line-height-lg:    20px;
+  --line-height-xl:    22px;
+  --line-height-2xl:   26px;
+  --line-height-3xl:   30px;
+  --line-height-4xl:   38px;
+  --line-height-5xl:   42px;
+
   --letter-spacing-tight:  -0.02em;
   --letter-spacing-normal:  -0.011em;
   --letter-spacing-wide:    0.02em;

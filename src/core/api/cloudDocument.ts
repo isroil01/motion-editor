@@ -16,6 +16,7 @@ import { sceneProjectIO } from '@core/scene/sceneProjectIO';
 import { defaultAnimation, type AnimSnapshot } from '@motion/animation';
 import { getTimelineController } from '@core/timeline/TimelineController';
 import { useProjectStore, type CompositionSettings, type SerializedWorkspaceTabs } from '@stores/projectStore';
+import { commitAllTimes } from '@stores/playbackClockStore';
 import { useMotionBlurStore, type MotionBlurSettings } from '@stores/motionBlurStore';
 import { useGuidesStore, type GuidesSettings } from '@stores/guidesStore';
 import { useColorManagementStore, type ColorManagementSettings } from '@stores/colorManagementStore';
@@ -132,6 +133,9 @@ export interface EditorDocument {
 
 /** Snapshot every authored subsystem into one self-contained document. */
 export function captureDocument(): EditorDocument {
+  // A save taken mid-playback must carry the playhead the user sees, not the
+  // 4 Hz mirror the project store keeps during playback.
+  commitAllTimes();
   const ws = useProjectStore.getState();
   const openTabs: SerializedWorkspaceTabs = {
     tabOrder: [...ws.tabOrder],

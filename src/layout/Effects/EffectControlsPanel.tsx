@@ -8,7 +8,7 @@ import { useSelectionStore } from '@stores/selectionStore';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useLayoutStore } from '@stores/layoutStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
-import { getNodeEffects } from '@core/effects/effects';
+import { getNodeEffects, getNodeFxEnabled, setNodeFxEnabled } from '@core/effects/effects';
 import { readPathOps } from '@core/scene/pathOps';
 import { nodeHasCloner } from '@core/scene/clonerExpand';
 import { nodeHasPhysics } from '@core/simulation/physicsBodies';
@@ -29,11 +29,23 @@ const QUICK_CATEGORIES = [
 ];
 
 export function EffectControlsPanel(): JSX.Element {
-  const primary = useSelectionStore((s) => s.primary);
+  const selected = useSelectionStore((s) => s.primary);
   useSceneRevision((s) => s.rev);
 
-  const [locked, setLocked] = useState(false);
-  const [masterFx, setMasterFx] = useState(true);
+  // Lock (AE's padlock): the panel stays on the layer it was locked to while
+  // the selection moves on — so an effect can be tuned while picking other
+  // layers as its map/matte source. A locked layer that is deleted unlocks.
+  const [lockedId, setLockedId] = useState<string | null>(null);
+  const locked = lockedId !== null && !!defaultSceneGraph.getNode(lockedId);
+  const primary = locked ? lockedId : selected;
+
+  // Master "fx" switch: the layer's own fxEnabled flag — the same switch the
+  // timeline's fx column flips — not local state that changed nothing.
+  const masterFx = primary ? getNodeFxEnabled(primary) : true;
+  const setMasterFx = (on: boolean): void => {
+    if (primary) setNodeFxEnabled(primary, on);
+  };
+  const setLocked = (on: boolean): void => setLockedId(on && selected ? selected : null);
 
   const node = primary ? defaultSceneGraph.getNode(primary) : undefined;
   const count = primary ? getNodeEffects(primary).length : 0;

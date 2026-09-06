@@ -238,6 +238,58 @@ export function DockPanel({
   // collapsed region renders a single DockPanel, which is therefore also last.
   const showCollapseToggle = !isSplit || splitPosition === 'bottom';
 
+  /**
+   * Keyboard traversal of the rail — the tablist pattern.
+   *
+   * The roving tabindex was already here (only the active tab is in the tab
+   * order), but nothing MOVED it: Tab landed on the active icon and the only
+   * way to the next panel was the mouse. Up/Down walk the rail (Left/Right
+   * too, so a user who thinks of it as a tab strip is not wrong), Home/End
+   * jump, and Enter/Space open the focused panel. Focus moves on arrow keys
+   * without activating — activation on every arrow press would re-render the
+   * whole content pane per step, and a user scanning icons by keyboard does
+   * not want fourteen panels to flash past.
+   */
+  const onRailKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const tabs = Array.from(
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    );
+    if (tabs.length === 0) return;
+    const current = tabs.findIndex((t) => t === document.activeElement);
+    let next = -1;
+    switch (e.key) {
+      case 'ArrowDown':
+      case 'ArrowRight':
+        next = current < 0 ? 0 : (current + 1) % tabs.length;
+        break;
+      case 'ArrowUp':
+      case 'ArrowLeft':
+        next = current < 0 ? tabs.length - 1 : (current - 1 + tabs.length) % tabs.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = tabs.length - 1;
+        break;
+      case 'Enter':
+      case ' ':
+        if (current >= 0) {
+          e.preventDefault();
+          tabs[current]?.click();
+        }
+        return;
+      default:
+        return;
+    }
+    e.preventDefault();
+    const target = tabs[next];
+    if (!target) return;
+    // Roving tabindex: the focused tab becomes the one Tab returns to.
+    for (const t of tabs) t.tabIndex = t === target ? 0 : -1;
+    target.focus();
+  };
+
   const rail = (
     <div
       className={styles.rail}
@@ -246,6 +298,7 @@ export function DockPanel({
       aria-label={isLeft ? 'Sidebar panels' : 'Inspector panels'}
       onDragOver={onDragOver}
       onDrop={onDrop(null)}
+      onKeyDown={onRailKeyDown}
     >
       {allItems.map((item) => {
         const isActive = item.id === effectiveActiveId && !isCollapsed;

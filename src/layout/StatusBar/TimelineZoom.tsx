@@ -80,7 +80,7 @@ export function TimelineZoom(): JSX.Element {
   const pct = Math.round((pps / ZOOM_DEFAULT) * 100);
 
   return (
-    <div className={styles.zoom}>
+    <div className={styles.zoom} data-tour="timeline-zoom">
       <button
         type="button"
         className={styles.iconBtn}

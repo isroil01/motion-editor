@@ -419,6 +419,16 @@ export interface TextSpec {
   paragraphSpacing?: number;
   /** Paint the per-glyph stroke over the fill rather than under it. */
   strokeOverFill?: boolean;
+  /** Character panel: case, small caps, super/subscript, scale, baseline shift. */
+  textTransform?: string;
+  fontVariant?: string;
+  verticalAlign?: string;
+  verticalScale?: number;
+  horizontalScale?: number;
+  baselineShift?: number;
+  /** The layer's own text stroke — colour and width in px. */
+  textStroke?: string;
+  textStrokeWidth?: number;
   /** Per-character style overrides. Free on the GPU path: the runs are baked
    *  into the texture, so the shader never learns text had more than one font. */
   runs?: ReadonlyArray<RichRun>;
@@ -910,7 +920,17 @@ export class AppTextureProvider implements TextureProvider {
    *   Interpret Footage would keep serving the bitmap uploaded under the old
    *   setting and the inspector would appear to do nothing.
    */
-  setImage(key: string, src: string, fillColor?: string, premultipliedFile?: boolean, bake?: ImageBakeSpec, mediaTime?: number): void {
+  /**
+   * Returns whether the texture on screen for `key` IS this request — false
+   * while a decode (or a live-SVG raster, or a re-bake) is still in flight and
+   * whatever `get()` hands out is a stand-in: the previous frame's picture, the
+   * last style's bake, or the 1×1 placeholder. The backend folds that into
+   * `frameMediaExact`, so a frame rendered before the pixels landed is never
+   * put in the RAM preview — it used to be, and the cache then replayed the
+   * blank frame at that timecode until something unrelated invalidated it
+   * ("my SVG imported but shows nothing until I scrub").
+   */
+  setImage(key: string, src: string, fillColor?: string, premultipliedFile?: boolean, bake?: ImageBakeSpec, mediaTime?: number): boolean {
     // The bake belongs in the key: it changes the TEXTURE, so two layers on the
     // same file with different styles must not share one upload, and editing a
     // style has to invalidate what is already there.
@@ -926,7 +946,8 @@ export class AppTextureProvider implements TextureProvider {
     const fileId = (fillColor ? `${src}#fill=${fillColor}` : src) + (premultipliedFile ? '#premul' : '') + timeSig;
     const fullKey = fileId + bakeSig;
     const existing = this.entries.get(key);
-    if (existing && existing.src === fullKey) return; // already loading or loaded
+    // Already loading (→ not settled) or loaded (→ settled) for this exact request.
+    if (existing && existing.src === fullKey) return existing.ready;
     // Keep the last good texture on screen while the new bake/decode runs.
     // Dropping it for a 1×1 transparent placeholder is the "eye blink": every
     // Inner Glow / Stroke / Fill tweak replaced the entry with ready:false,
@@ -962,6 +983,7 @@ export class AppTextureProvider implements TextureProvider {
     // in a one-shot render there is no later.
     if (this.exactMediaTiming) this.mediaWaits.push(decoding);
     void decoding;
+    return false;
   }
 
   /**
@@ -1047,6 +1069,7 @@ export class AppTextureProvider implements TextureProvider {
       `|wd${spec.fontWidth ?? ''}|sl${spec.fontSlant ?? ''}` +
       `|${spec.align ?? ''}|${spec.letterSpacing ?? 0}|${spec.lineHeight ?? ''}` +
       `|${spec.paragraphSpacing ?? 0}|${spec.strokeOverFill ? 'sof' : ''}` +
+      `|${spec.textTransform ?? ''}|${spec.fontVariant ?? ''}|${spec.verticalAlign ?? ''}|${spec.verticalScale ?? ''}|${spec.horizontalScale ?? ''}|${spec.baselineShift ?? ''}|${spec.textStroke ?? ''}|${spec.textStrokeWidth ?? ''}` +
       `|${spec.runs && spec.runs.length ? JSON.stringify(spec.runs) : ''}${fxSig}${fillSig}` +
       // Animator output and path placement change the baked pixels, so they
       // belong in the cache key — otherwise frame 1 of a sweep is reused for

@@ -206,9 +206,18 @@ export function TrackPointOverlay(): JSX.Element | null {
 
   // Tracked paths, each sample projected through the video layer's transform
   // AT ITS OWN TIME — a path on a moving layer is a comp-space curve.
+  //
+  // Only the samples within a second of the playhead are drawn. The full walk
+  // used to be drawn at once: on a track that wandered or coasted, a hundred
+  // dots and a zig-zagging line over the footage read as a corrupted frame —
+  // "my video broke when I tracked it" — when the pixels underneath were fine.
+  // A window shows where the feature IS and where it is going; the timeline
+  // holds the whole path as keyframes once it is applied.
+  const PATH_WINDOW_S = 1;
   const paths = result
     ? result.tracks.map((track) =>
         track
+          .filter((s) => Math.abs(s.compTime - time) <= PATH_WINDOW_S)
           .map((s) => {
             const c = trackSampleToComp(
               node.id, s.x, s.y, s.compTime, result.sourceWidth, result.sourceHeight, comp,

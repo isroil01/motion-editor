@@ -67,10 +67,10 @@ rediscovered in git history and believed a second time.
 | Path operators | 9 | `src/core/scene/pathOps.ts` → `PathOpType` (less `none`) |
 | Mask modes | 7 | `src/core/effects/mask.ts` → `MaskMode` |
 | Light types | 5 | `src/core/scene/light.ts` → `LightType` |
-| Canvas tools | 21 | `packages/workspace/src/tools/builtin.ts` |
+| Canvas tools | 22 | `packages/workspace/src/tools/builtin.ts` |
 | AI tools | 65 | `packages/ai-tools/src/tools/{read,write,craft,compose}.ts` |
 | Export formats | 18 | `videoSink.ts` → `VideoFormat` + `exportManager.ts` → `ExportFormat` |
-| Stores | 54 | `src/stores/*.ts` |
+| Stores | 61 | `src/stores/*.ts` |
 | Packages | 13 | `packages/*` |
 
 <!-- /FEATURE-COUNTS -->
@@ -91,7 +91,7 @@ style would have left this table wrong with every test still green.
 ```
 Electron main ── IPC ──▶ renderer (React 19 + Vite)
                           │
-                          ├── src/stores/*        54 Zustand stores
+                          ├── src/stores/*        61 Zustand stores
                           ├── src/core/*          41 subsystems (effects, scene, rig, text…)
                           └── packages/*          13 workspace packages
                                 ├── scene       scene graph + components
@@ -266,7 +266,42 @@ them in would make every `activeTool === 'select'` check in the viewport wrong.
 **Clip edges snap** (2026-09-01) to other clips, the playhead, markers, the work
 area and the comp bounds, with a guide line; the frame grid stays the fallback.
 **Fit Composition** (`;`) and **Fit Work Area** (`Alt+;`) sit in the zoom control
-and the View menu.
+and the View menu. **Fit Selection** (`Shift+;`, `fitSelection.ts`) joins them:
+keyframes win over clips when both are selected, and a selection at one instant
+gets half a second either side rather than an infinite zoom.
+
+**Snapping is a switch, not only a held key** (2026-09-04, `snapCommands.ts`):
+a magnet button in `TimelineTools`, `S` **with the timeline focused** (the root
+claims the chord via `data-shortcut-claim`, so the global `S` — reveal Scale —
+survives everywhere else), persisted as `timelineSnap`. **Alt still inverts it**
+for one drag in both directions.
+
+**The playhead can pull the lanes along** (`playheadFollow.ts`): *off*, *page*
+(jump one screen when it leaves the view — After Effects) or *continuous* (park
+it a third of the way across), persisted as `timelineFollowMode`; and a drag
+that comes within **24px** of a lane edge auto-scrolls, ramping from a creep to
+20px per frame at the edge itself.
+
+**Keyboard, not only pointer**: the layer rows are a `role="listbox"` with a
+**roving tabindex** — one tab stop for the list, `↑`/`↓`/`Home`/`End` to move,
+`Shift` to extend, `Enter` for the disclosure, `Space` for visibility. Selected
+keyframes nudge with `←`/`→` (one frame; `Shift` ten) and `Alt+↑`/`Alt+↓` (value),
+and a **300ms burst is one undo entry** (`keyframeNudge.ts`) — holding an arrow
+for a second must cost one Ctrl+Z, not thirty. `Alt+click` a disclosure twirls a
+layer and everything under it; **Ctrl+`** / **Ctrl+Shift+`** collapse and expand
+every layer (`expandCollapse.ts`).
+
+**The time navigator is a window, not a fill** (`timeNavigator.ts`): the box over
+the comp shows what the lanes show — drag its body to pan, its ends to zoom,
+double-click to fit the comp, click outside it to seek. The **timecode readout
+is a field**: click it and type `1:04`, `320f`, `2.5s` or `+10` (`goToTime.ts`),
+in place, instead of the modal that used to take over the panel.
+
+**Optional In / Out / Duration columns** (`timelineColumns.ts`) are per-user
+(`timelineExtraColumns`) and off by default; widths live in one place so
+`TL_COLUMN_WIDTHS`, `--tl-col-extra` and `headerWidthFor` cannot drift. There is
+**no Stretch column**: nothing in the engine exposes a per-layer time stretch to
+drive it, and a column that shows 100% and refuses every edit is worse than none.
 
 **Per-cut transitions** (`core/timeline/transitions.ts`, `transitionStore.ts`,
 `Timeline/transitionPalette.tsx`): cross dissolve, dip to black, dip to white and

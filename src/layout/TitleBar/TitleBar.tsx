@@ -11,8 +11,21 @@ import { useLayoutStore } from '@stores/layoutStore';
 import { usePresentationStore } from '@stores/presentationStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { openExportDialog } from '@layout/Export/ExportDialog';
+import { ProjectStatus } from '@layout/ProjectStatus/ProjectStatus';
+import { AccountButton } from '@layout/Auth/AccountButton';
+import { useNativeMenuSync } from '@layout/Menu/useNativeMenuSync';
 import { UpdateButton } from './UpdateButton';
 import styles from './TitleBar.module.css';
+
+/**
+ * Keeps the native (Alt) menu generated from the same model the in-app bar
+ * draws. A component rather than a bare hook call so it mounts only on the
+ * editor route — the groups it serialises name commands that exist there.
+ */
+function NativeMenuSync(): null {
+  useNativeMenuSync();
+  return null;
+}
 
 export function TitleBar(): JSX.Element | null {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -58,6 +71,14 @@ export function TitleBar(): JSX.Element | null {
           </>
         )}
       </div>
+      {/* Centre: which project, whether it is saved, how long ago. The web
+          build mounts the same component in TopNav's centre. */}
+      {isEditor && (
+        <div className={styles.center}>
+          <NativeMenuSync />
+          <ProjectStatus />
+        </div>
+      )}
       <div className={styles.right}>
         {/* First in the cluster, and far from Export: a pending update is the
             one thing here the user has not already gone looking for. Renders
@@ -138,6 +159,10 @@ export function TitleBar(): JSX.Element | null {
               <Icon name="export" size="sm" weight="bold" />
               <span>Export</span>
             </button>
+            {/* Account, up from the status bar: beside Preview and Export is
+                where "who am I signed in as" belongs. Renders nothing in the
+                local edition. */}
+            <AccountButton />
           </div>
         )}
         <div className={styles.windowActions}>

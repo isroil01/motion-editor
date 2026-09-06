@@ -13,10 +13,14 @@
  *   Ctrl/Cmd+C              → copy selected keyframes to clipboard
  *   Ctrl/Cmd+V              → paste keyframes at playhead (onto selected layers)
  *   Ctrl/Cmd+Alt+S          → smooth motion path for selected layers
+ *   ← / →                   → nudge selected KEYFRAMES one frame (Shift: ten)
+ *   Alt+↑ / Alt+↓           → nudge their VALUE by one (Shift: ten)
  *
- * Deliberately avoids Arrow keys and Space — those are owned by the viewport
- * (nudge / temporary-hand) when it has focus. Ignores events originating from
- * text inputs. Mount once near the editor root.
+ * Space is owned by the viewport. Arrow keys are shared with it by SELECTION:
+ * they nudge keyframes only while some are selected, which is exactly when the
+ * viewport's layer-nudge is not what you meant — and when nothing is selected
+ * here the event is left entirely alone, so the viewport keeps its gesture.
+ * Ignores events originating from text inputs. Mount once near the editor root.
  */
 
 import { useEffect } from 'react';
@@ -28,13 +32,37 @@ import { performRedo, performUndo } from '@stores/historyStore';
 import { copyKeyframes, pasteKeyframes } from '@core/animation/keyframeClipboard';
 import { smoothMotionPath } from '@core/motion/motionPath';
 import { runAnimEdit } from '@core/animation/animationCommands';
+import { createSelectionNudger, nudgeForKey } from './keyframeNudge';
 
 export function useTimelineKeys(): void {
   useEffect(() => {
+    // One batcher for the hook's lifetime: a BURST of presses is one undo
+    // step (holding → for a second must cost one Ctrl+Z, not thirty), and the
+    // batch is what remembers that a burst is in progress.
+    const nudger = createSelectionNudger();
     const onKey = (e: KeyboardEvent): void => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       const c = getTimelineController();
+
+      // ── Arrow-key keyframe nudge ────────────────────────────────
+      // Before the Ctrl branch, and gated on a keyframe selection so the
+      // viewport keeps the arrows whenever this is not what you meant.
+      if (!e.ctrlKey && !e.metaKey && e.key.startsWith('Arrow')) {
+        if (useKeyframeSelectionStore.getState().ids.size > 0) {
+          const delta = nudgeForKey(e.key, { shift: e.shiftKey, alt: e.altKey }, 1 / (c.fps || 30));
+          if (delta) {
+            e.preventDefault();
+            e.stopPropagation();
+            nudger.push(delta);
+            return;
+          }
+        }
+        return;
+      }
+      // Anything else lands while a burst is open — commit it first, so the
+      // nudge and whatever follows are two undo entries and not one.
+      if (nudger.isOpen()) nudger.flush();
 
       // ── Ctrl/Cmd combos ─────────────────────────────────────────
       if (e.ctrlKey || e.metaKey) {
@@ -152,7 +180,11 @@ export function useTimelineKeys(): void {
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      // An unmount mid-burst must still record the moves that were applied.
+      nudger.flush();
+      window.removeEventListener('keydown', onKey);
+    };
   }, []);
 }
 

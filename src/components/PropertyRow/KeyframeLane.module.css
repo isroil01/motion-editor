@@ -1,0 +1,49 @@
+/* The mini keyframe lane under an animated inspector row. Stretched to the row
+   (`preserveAspectRatio="none"`), so the strokes below are in viewBox units and
+   `vector-effect: non-scaling-stroke` keeps them one CSS pixel. */
+
+.lane {
+  display: block;
+  width: 100%;
+  height: var(--control-height-2xs);
+  cursor: pointer;
+  overflow: visible;
+}
+
+.dragging {
+  cursor: ew-resize;
+}
+
+.track {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.diamond {
+  fill: var(--color-primary);
+  stroke: var(--color-panel);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  cursor: ew-resize;
+}
+
+.diamond:hover {
+  fill: var(--color-primary-hover);
+}
+
+.diamondGhost {
+  opacity: 0.35;
+}
+
+.diamondDrag {
+  fill: var(--color-primary-hover);
+  pointer-events: none;
+}
+
+.playhead {
+  stroke: var(--color-danger);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}

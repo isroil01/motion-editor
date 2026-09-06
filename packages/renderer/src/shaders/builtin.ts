@@ -23,6 +23,13 @@ export interface ShaderSource {
 // here would bury everything else.
 import { GLASS_COMPOSITE } from './glass';
 import { FX_ROUND_SIX_SHADERS } from './fxRoundSix';
+import { FX_ROUND_EIGHT_SHADERS } from './fxRoundEight';
+import { FX_ROUND_NINE_SHADERS } from './fxRoundNine';
+import { FX_ROUND_TEN_SHADERS } from './fxRoundTen';
+import { FX_ROUND_ELEVEN_SHADERS } from './fxRoundEleven';
+import { FX_ROUND_TWELVE_SHADERS } from './fxRoundTwelve';
+import { FX_ROUND_THIRTEEN_SHADERS } from './fxRoundThirteen';
+import { FX_ROUND_FOURTEEN_SHADERS } from './fxRoundFourteen';
 export { GLASS_COMPOSITE };
 
 import {
@@ -6651,6 +6658,19 @@ export const BUILTIN_SHADERS: readonly ShaderSource[] = [
   VIGNETTE_FX, BLACK_AND_WHITE_FX, TRITONE_FX, PHOTO_FILTER_FX, THRESHOLD_FX, VIBRANCE_FX,
   // Round-six waves 2–3: warps + neighbourhood passes (fxRoundSix.ts).
   ...FX_ROUND_SIX_SHADERS,
+  // Round eight: the keying set (fxRoundEight.ts).
+  ...FX_ROUND_EIGHT_SHADERS,
+  // Round nine: per-pixel colour / channel / transition set (fxRoundNine.ts).
+  ...FX_ROUND_NINE_SHADERS,
+  // Round ten: separable neighbourhood passes + drawn generators (fxRoundTen.ts).
+  ...FX_ROUND_TEN_SHADERS,
+  // Round eleven: advanced distort / transition / stylize set (fxRoundEleven.ts).
+  ...FX_ROUND_ELEVEN_SHADERS,
+  // Rounds twelve + thirteen: noise / transitions / windowed blurs / grid warps, interiors and particle generators.
+  ...FX_ROUND_TWELVE_SHADERS,
+  ...FX_ROUND_THIRTEEN_SHADERS,
+  // Round fourteen: the histogram colour autos (fxRoundFourteen.ts).
+  ...FX_ROUND_FOURTEEN_SHADERS,
   SOLID3D,
   // Shadow-map casters. No `-linear` twin and no premultiply handling: neither
   // samples a texture — they write a packed distance, not a colour.

@@ -11,16 +11,22 @@
   gap: 6px;
   z-index: 1;
   padding: 3px 10px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  transition: background var(--motion-duration-fast) var(--motion-ease-standard),
+              border-color var(--motion-duration-fast) var(--motion-ease-standard);
   min-width: 0;
+  -webkit-app-region: no-drag;
 }
 
 .status:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.09);
+  background: var(--color-surface-3);
+  border-color: var(--color-border-strong);
+}
+
+.compact {
+  padding: 2px 8px;
 }
 
 .name {
@@ -45,6 +51,12 @@
   height: 6px;
   border-radius: 50%;
   background: var(--color-modified);
-  box-shadow: 0 0 6px rgba(224, 168, 60, 0.45);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-modified) 45%, transparent);
   flex-shrink: 0;
+}
+
+.saved {
+  font-size: var(--font-size-micro);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
 }

@@ -134,7 +134,16 @@ export const APP_MENU: MenuGroupModel[] = [
       // Import sits with Export rather than under Layer: what arrives is a
       // FILE from outside the project, and the layer tree it becomes is the
       // consequence, not the request.
-      { commandId: 'file.import3DModel', label: 'Import 3D Model…' },
+      {
+        // Three doors into the same library. Nested so File stays under its
+        // entry cap; the panel's own Import button offers the same three.
+        label: 'Import',
+        children: [
+          { commandId: 'assets.importFiles', label: 'Files…' },
+          { commandId: 'assets.importFolder', label: 'Folder…' },
+          { commandId: 'file.import3DModel', label: '3D Model…' },
+        ],
+      },
       { commandId: 'file.export', label: 'Export…' },
       { separator: true },
       // Registered ONLY under `cloudProjectsEnabled()` (see Providers) —
@@ -242,6 +251,21 @@ export const APP_MENU: MenuGroupModel[] = [
         ],
       },
       { separator: true },
+      {
+        // In / out marking, beside the composition they apply to. The shuttle
+        // itself (J / K / L) is a chord, not a menu row.
+        label: 'Transport',
+        children: [
+          { commandId: 'transport.markIn', label: 'Mark In' },
+          { commandId: 'transport.markOut', label: 'Mark Out' },
+          { commandId: 'transport.goToIn', label: 'Go to In Point' },
+          { commandId: 'transport.goToOut', label: 'Go to Out Point' },
+          { commandId: 'transport.clearInOut', label: 'Clear In and Out' },
+          { separator: true },
+          { commandId: 'transport.audioScrub', label: 'Audio Scrubbing' },
+        ],
+      },
+      { separator: true },
       { commandId: 'comp.saveFrame', label: 'Save Frame As PNG' },
       { commandId: 'comp.copyFrame', label: 'Copy Frame to Clipboard' },
       { separator: true },
@@ -307,6 +331,18 @@ export const APP_MENU: MenuGroupModel[] = [
           { commandId: 'layer.nullsFromPathLive', label: 'Nulls From Path Points (Points Follow Nulls)' },
           { commandId: 'layer.shapesFromText', label: 'Shapes From Text' },
           { commandId: 'layer.autoTrace', label: 'Auto-trace…' },
+        ],
+      },
+      {
+        // AE's Layer ▸ Camera: the rig verbs. Every one existed as a prop you
+        // could type into; none existed as a thing you could ask for.
+        label: 'Camera',
+        children: [
+          { commandId: 'camera.createOrbitNull', label: 'Create Orbit Null' },
+          { separator: true },
+          { commandId: 'camera.setFocusToLayer', label: 'Set Focus Distance to Layer' },
+          { commandId: 'camera.linkFocusToLayer', label: 'Link Focus Distance to Layer' },
+          { commandId: 'camera.linkFocusToPoi', label: 'Link Focus Distance to Point of Interest' },
         ],
       },
       {
@@ -430,8 +466,21 @@ export const APP_MENU: MenuGroupModel[] = [
       {
         label: 'Time',
         children: [
+          // AE's Layer ▸ Time, in AE's order. All of these existed as switches
+          // in the Compositing section and the viewport's Video submenu; the
+          // menu listed only the ramps, so the app looked unable to reverse
+          // or freeze footage.
+          { commandId: 'time.enableTimeRemap', label: 'Enable Time Remapping' },
+          { commandId: 'time.reverseLayer', label: 'Time-Reverse Layer' },
+          { commandId: 'time.timeStretch', label: 'Time Stretch…' },
+          { commandId: 'time.freezeFrame', label: 'Freeze Frame' },
+          { separator: true },
           { commandId: 'time.speedRamp.quarter', label: 'Speed Ramp to 25%' },
           { commandId: 'time.speedRamp.normal', label: 'Speed Ramp back to 100%' },
+          { separator: true },
+          { commandId: 'time.frameBlend.none', label: 'Frame Blend: Off' },
+          { commandId: 'time.frameBlend.mix', label: 'Frame Blend: Frame Mix' },
+          { commandId: 'time.frameBlend.pixelMotion', label: 'Frame Blend: Pixel Motion' },
         ],
       },
       {
@@ -457,6 +506,16 @@ export const APP_MENU: MenuGroupModel[] = [
       { commandId: BuiltinCommands.ToggleLeftSidebar, label: 'Toggle Scene Panel' },
       { commandId: BuiltinCommands.ToggleRightInspector, label: 'Toggle Inspector' },
       { commandId: BuiltinCommands.ToggleTimeline, label: 'Toggle Timeline' },
+      {
+        // The one-key modes (Tab / Shift+Tab). Beside the three toggles they
+        // compose, so the menu shows the chord a user would otherwise only
+        // discover by pressing Tab and wondering where the panels went.
+        label: 'Focus Mode',
+        children: [
+          { commandId: 'view.focusMode.viewportTimeline', label: 'Viewport + Timeline' },
+          { commandId: 'view.focusMode.viewport', label: 'Viewport Only' },
+        ],
+      },
       { separator: true },
       {
         label: 'Guides & Grid',
@@ -464,17 +523,120 @@ export const APP_MENU: MenuGroupModel[] = [
           { commandId: 'view.grid', label: 'Show Grid' },
           { commandId: 'view.proportionalGrid', label: 'Show Proportional Grid' },
           { commandId: 'view.snapToGrid', label: 'Snap to Grid' },
+          { commandId: 'view.snapToPixel', label: 'Snap to Pixel' },
           { commandId: 'view.rulers', label: 'Toggle Rulers' },
           { commandId: 'view.safeAreas', label: 'Toggle Safe Areas' },
+          { separator: true },
+          { commandId: 'view.guides.show', label: 'Show Guides' },
+          { commandId: 'view.guides.lockAll', label: 'Lock Guides' },
+          { commandId: 'view.guides.unlockAll', label: 'Unlock Guides' },
+          { commandId: 'view.guides.clear', label: 'Clear Guides' },
         ],
       },
       // A PREVIEW setting, like the guides above it: proxies change what the
       // viewport decodes and nothing about what an export writes.
       { commandId: 'view.useProxies', label: 'Use Proxies' },
+      {
+        // The Assets panel's own view state. Nested rather than listed flat:
+        // these act on one panel, and View is already close to its entry cap.
+        label: 'Assets Panel',
+        children: [
+          { commandId: 'assets.toggleGridView', label: 'Grid View' },
+          { commandId: 'assets.toggleUnusedFilter', label: 'Show Unused Only' },
+          { commandId: 'assets.toggleMetadataDrawer', label: 'Metadata Drawer' },
+          { commandId: 'assets.revealInFolder', label: 'Reveal in File Manager' },
+        ],
+      },
       { separator: true },
       { commandId: 'view.fitSelection', label: 'Fit Selection in View' },
-      { commandId: 'timeline.zoomToFit', label: 'Fit Composition in Timeline' },
-      { commandId: 'timeline.zoomToWorkArea', label: 'Fit Work Area in Timeline' },
+      {
+        // Everything that frames or reshapes the timeline PANEL, kept apart
+        // from the edit-mode tools below it. Nested because View is capped at
+        // fourteen top-level entries and these four zooms were most of the
+        // pressure on it.
+        label: 'Timeline',
+        children: [
+          { commandId: 'timeline.zoomToFit', label: 'Fit Composition' },
+          { commandId: 'timeline.zoomToWorkArea', label: 'Fit Work Area' },
+          { commandId: 'timeline.fitSelection', label: 'Fit Selection' },
+          { separator: true },
+          { commandId: 'timeline.expandAll', label: 'Expand All Layers' },
+          { commandId: 'timeline.collapseAll', label: 'Collapse All Layers' },
+          { separator: true },
+          { commandId: 'timeline.toggleSnap', label: 'Snap in Timeline' },
+        ],
+      },
+      {
+        // How the viewport DRAWS: the display mode, the readout over it, and
+        // the monitor-only look. Nothing here changes a rendered frame.
+        label: 'Viewport',
+        children: [
+          { commandId: 'view.displayMode.shaded', label: 'Shaded' },
+          { commandId: 'view.displayMode.wireframe', label: 'Wireframe' },
+          { commandId: 'view.displayMode.bounds', label: 'Bounding Boxes' },
+          { separator: true },
+          { commandId: 'view.hud', label: 'Performance HUD' },
+          { commandId: 'view.pixelAspectCorrection', label: 'Pixel Aspect Correction' },
+          { separator: true },
+          { commandId: 'view.viewerLut.load', label: 'Load Viewer LUT…' },
+          { commandId: 'view.viewerLut.clear', label: 'Clear Viewer LUT' },
+          { separator: true },
+          {
+            // Snapshot and compare are one workflow: take a frame, then look
+            // at it against the live one.
+            label: 'Snapshot & Compare',
+            children: [
+              { commandId: 'view.snapshot', label: 'Take Snapshot' },
+              { commandId: 'view.compareToggle', label: 'Show Snapshot' },
+              { commandId: 'view.compareFlip', label: 'Flip Comparison' },
+              { separator: true },
+              { commandId: 'view.compareMode.toggle', label: 'Mode: Toggle' },
+              { commandId: 'view.compareMode.side-by-side', label: 'Mode: Side by Side' },
+              { commandId: 'view.compareMode.wipe', label: 'Mode: Wipe' },
+              { commandId: 'view.compareMode.difference', label: 'Mode: Difference' },
+              { separator: true },
+              { commandId: 'view.compareClear', label: 'Clear Snapshot' },
+            ],
+          },
+          {
+            label: 'Camera Bookmarks',
+            children: [
+              { commandId: 'view.cameraBookmark.recall1', label: 'Recall 1' },
+              { commandId: 'view.cameraBookmark.recall2', label: 'Recall 2' },
+              { commandId: 'view.cameraBookmark.recall3', label: 'Recall 3' },
+              { commandId: 'view.cameraBookmark.recall4', label: 'Recall 4' },
+              { commandId: 'view.cameraBookmark.recall5', label: 'Recall 5' },
+              { commandId: 'view.cameraBookmark.recall6', label: 'Recall 6' },
+              { commandId: 'view.cameraBookmark.recall7', label: 'Recall 7' },
+              { commandId: 'view.cameraBookmark.recall8', label: 'Recall 8' },
+              { commandId: 'view.cameraBookmark.recall9', label: 'Recall 9' },
+              { separator: true },
+              { commandId: 'view.cameraBookmark.save1', label: 'Save to 1' },
+              { commandId: 'view.cameraBookmark.save2', label: 'Save to 2' },
+              { commandId: 'view.cameraBookmark.save3', label: 'Save to 3' },
+              { commandId: 'view.cameraBookmark.save4', label: 'Save to 4' },
+              { commandId: 'view.cameraBookmark.save5', label: 'Save to 5' },
+              { commandId: 'view.cameraBookmark.save6', label: 'Save to 6' },
+              { commandId: 'view.cameraBookmark.save7', label: 'Save to 7' },
+              { commandId: 'view.cameraBookmark.save8', label: 'Save to 8' },
+              { commandId: 'view.cameraBookmark.save9', label: 'Save to 9' },
+            ],
+          },
+          {
+            // AE's View ▸ Switch 3D View + Look At. The two view switches had
+            // shortcuts (1 / 2) and no menu line; Look At is new. Inside
+            // Viewport because View sits at its fourteen-entry cap.
+            label: '3D View',
+            children: [
+              { commandId: 'view.activeCamera', label: 'Active Camera' },
+              { commandId: 'view.lastCustom', label: 'Last Custom View' },
+              { separator: true },
+              { commandId: 'view.lookAtSelected', label: 'Look at Selected Layers' },
+              { commandId: 'view.lookAtAll', label: 'Look at All Layers' },
+            ],
+          },
+        ],
+      },
       {
         label: 'Timeline Tools',
         children: [
@@ -505,6 +667,8 @@ export const APP_MENU: MenuGroupModel[] = [
     id: 'window',
     label: 'Window',
     items: [
+      // Its chord (Ctrl/Cmd+Shift+P) is the palette's own listener, not a
+      // registry binding — see the command's registration for why.
       { commandId: 'view.commandPalette', label: 'Command Palette' },
       { commandId: 'view.presentation', label: 'Present (Preview)' },
       { separator: true },
@@ -512,6 +676,7 @@ export const APP_MENU: MenuGroupModel[] = [
       { commandId: 'view.transcript', label: 'Transcript' },
       { commandId: 'view.effectControls', label: 'Effect Controls' },
       { commandId: 'view.renderQueue', label: 'Render Queue' },
+      { commandId: 'view.export', label: 'Export' },
       { commandId: 'view.graphEditor', label: 'Graph Editor' },
       { separator: true },
       // Built per render from WorkspaceManager — half of it is user data. See
@@ -529,6 +694,12 @@ export const APP_MENU: MenuGroupModel[] = [
     label: 'Help',
     items: [
       { commandId: 'help.tour', label: 'Take a Tour' },
+      { commandId: 'help.powerTour', label: 'Power-user Tour' },
+      { separator: true },
+      { commandId: 'help.docs', label: 'Documentation' },
+      // The palette's `?` mode — a heading search over docs/*.md.
+      { commandId: 'help.searchDocs', label: 'Search Documentation…' },
+      { commandId: 'help.whatsNew', label: "What's New…" },
       { separator: true },
       { commandId: ProjectCommands.About, label: 'About Premation' },
     ],

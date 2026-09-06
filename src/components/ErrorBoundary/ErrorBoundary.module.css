@@ -77,3 +77,17 @@
 }
 
 .secondary:hover { background: var(--color-hover); }
+
+.link {
+  align-self: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-top: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link:hover { color: var(--color-text-secondary); }

@@ -48,6 +48,7 @@ import { paneViewTransform } from './useSceneRefGeometry';
 import { useGizmo3d } from './useGizmo3d';
 import { Gizmo3dOverlay } from './Gizmo3dOverlay';
 import { FocusPlaneOverlay } from './FocusPlaneOverlay';
+import paneStyles from './SecondaryViewPane.module.css';
 
 export interface SecondaryViewPaneProps {
   /** View mode to render. Omit to bind to the store's `secondaryViewMode`. */
@@ -59,6 +60,12 @@ export interface SecondaryViewPaneProps {
    * the 4-up caller passes each pane its grid quadrant.
    */
   style?: CSSProperties;
+  /**
+   * Positioning class. The 4-up caller passes its quadrant rect from
+   * `Workspace.module.css`; the default (2-up right half) lives in this
+   * component's own module and is overridden by cascade order.
+   */
+  className?: string;
 }
 
 /** Labels for the pane's compact view selector. */
@@ -68,7 +75,7 @@ const VIEW_OPTIONS: ReadonlyArray<{ id: Camera3dMode; label: string }> = [
   ...CUSTOM_VIEW_IDS.map((v) => ({ id: v as Camera3dMode, label: CUSTOM_VIEW_LABEL[v] })),
 ];
 
-export function SecondaryViewPane({ mode: modeProp, onModeChange, style }: SecondaryViewPaneProps = {}): JSX.Element {
+export function SecondaryViewPane({ mode: modeProp, onModeChange, style, className }: SecondaryViewPaneProps = {}): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const time = useActiveWorkspace()?.time ?? 0;
@@ -173,18 +180,12 @@ export function SecondaryViewPane({ mode: modeProp, onModeChange, style }: Secon
     <div
       ref={containerRef}
       data-secondary-view-pane=""
+      className={className ? `${paneStyles.pane} ${className}` : paneStyles.pane}
       style={{
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        left: '50%',
-        right: 0,
-        overflow: 'hidden',
-        borderLeft: '1px solid var(--color-border, rgba(255,255,255,0.12))',
-        background: 'var(--color-pasteboard, var(--color-workspace, #1e1e1e))',
         // The active viewer is called out, as in AE — without it there is no way
-        // to tell which pane a keyboard action will land in.
-        outline: activePane === mode ? '1px solid var(--color-accent, #4c8dff)' : 'none',
+        // to tell which pane a keyboard action will land in. Inline because it
+        // changes per render; the pane's BOX is `paneStyles.pane`.
+        outline: activePane === mode ? '1px solid var(--color-accent)' : 'none',
         outlineOffset: -1,
         ...style,
       }}

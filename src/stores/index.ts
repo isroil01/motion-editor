@@ -14,3 +14,16 @@ export {
 export type { Preferences, PreferenceStore, PreferenceBackend } from './preferenceStore';
 export { useProjectStore as useWorkspaceStore, useActiveTab as useActiveWorkspace } from './projectStore';
 export type { TabInfo as WorkspaceInfo } from './projectStore';
+export {
+  usePlaybackClockStore,
+  useCurrentTime,
+  useCurrentFrame,
+  subscribeTime,
+  commitTime,
+  commitAllTimes,
+  getTime as getPlayheadTime,
+  getFrame as getPlayheadFrame,
+  setTime as setPlayheadTime,
+  PLAYBACK_MIRROR_INTERVAL_MS,
+} from './playbackClockStore';
+export type { ClockEntry, PlaybackClockState } from './playbackClockStore';

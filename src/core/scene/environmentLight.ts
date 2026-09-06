@@ -24,6 +24,8 @@
  * vertical axis and is keyframeable — an animated sky costs nothing.
  */
 
+import { LruCache, envAtlasKey, hashEnvPixels } from './envAtlasCache';
+
 export interface EnvPixels {
   width: number;
   height: number;
@@ -728,10 +730,26 @@ export function buildEnvSpecularAtlas(base: EnvPixels, id: string): EnvSpecularM
  * fills `assetShCache` (see environmentImage.ts).
  */
 const assetPixelCache = new Map<string, EnvPixels>();
+/**
+ * assetId -> the content hash of the pixels above.
+ *
+ * Computed ONCE here, at the moment an image lands, and never on the per-frame
+ * path: hashing a 256×128 equirect is ~98 000 word mixes, which is cheap once
+ * per decode and absurd sixty times a second. This is what lets the atlas
+ * cache be keyed on what a sky IS rather than on what it is called — see
+ * `envAtlasCache.ts` for why that distinction was costing O(N²) prefilters.
+ */
+const assetPixelHash = new Map<string, string>();
 
 export function setEnvironmentAssetPixels(assetId: string, px: EnvPixels): void {
   assetPixelCache.set(assetId, px);
-  specularCache.clear();
+  assetPixelHash.set(assetId, hashEnvPixels(px));
+  // NO cache flush. New pixels hash to a new key, so they are a new atlas and
+  // a new `id` (i.e. a real GPU re-upload) without disturbing any other sky's
+  // entry. The old `specularCache.clear()` here is what made opening a project
+  // with N HDRIs rebuild the prefilter O(N²) times, and it did not even
+  // achieve the re-upload it was there for — the rebuilt atlas carried the
+  // same id, so a renderer keyed on id kept the stale texture.
 }
 
 export function hasEnvironmentAssetPixels(assetId: string): boolean {
@@ -740,9 +758,19 @@ export function hasEnvironmentAssetPixels(assetId: string): boolean {
 
 /** Drop one asset's cached equirect (or all of them) — a re-import, or a test. */
 export function clearEnvironmentAssetPixels(assetId?: string): void {
-  if (assetId === undefined) assetPixelCache.clear();
-  else assetPixelCache.delete(assetId);
-  specularCache.clear();
+  if (assetId === undefined) {
+    assetPixelCache.clear();
+    assetPixelHash.clear();
+    // The one place a flush is still right: "forget everything" is a test
+    // fixture and a project close, and there is no content left to key on.
+    specularCache.clear();
+  } else {
+    assetPixelCache.delete(assetId);
+    assetPixelHash.delete(assetId);
+    // Nothing to invalidate: the sky now resolves to the default preset, which
+    // is a different content key. The dropped asset's atlas ages out on its
+    // own rather than taking every other sky's atlas with it.
+  }
 }
 
 /** The base equirect a sky REFLECTS — a preset, or a decoded image. */
@@ -763,29 +791,62 @@ export function environmentEquirect(sky: unknown): EnvPixels {
   );
 }
 
-/** sky key -> its atlas. One entry per sky the project uses. */
-const specularCache = new Map<string, EnvSpecularMap>();
-const SPECULAR_CACHE_MAX = 8;
+/**
+ * Content key -> its prefiltered atlas, LRU-bounded.
+ *
+ * Eight entries, evicted one at a time. It used to be eight entries flushed
+ * ALL AT ONCE at the bound, which meant a project holding nine skies threw
+ * away eight good atlases to make room for the ninth and then rebuilt them —
+ * a bound is supposed to cost you the least useful entry, not all of them.
+ */
+const specularCache = new LruCache<EnvSpecularMap>(8);
 
 /**
- * The prefiltered reflection map for a sky, memoised.
+ * The identity of the environment a sky RESOLVES to, for cache purposes.
+ *
+ * A preset is fully determined by its name — `presetPixels` is procedural — so
+ * the name IS the content. An image is determined by its pixels, so it carries
+ * the hash computed when those pixels landed. An image whose decode has not
+ * arrived yet resolves to the default preset, because that is genuinely what
+ * this frame will reflect; keying it under the image's own name would cache
+ * the fallback as if it were the image and never rebuild once the decode
+ * landed.
+ */
+function environmentContentId(sky: unknown): string {
+  const assetId = environmentSkyAssetId(sky);
+  if (assetId === null) {
+    return isEnvironmentPresetId(sky) ? sky : DEFAULT_ENVIRONMENT_PRESET;
+  }
+  const hash = assetPixelHash.get(assetId);
+  if (hash === undefined) return DEFAULT_ENVIRONMENT_PRESET;
+  return `asset:${assetId}#${hash}`;
+}
+
+/**
+ * The prefiltered reflection map for a sky, memoised on its CONTENT.
  *
  * Depends on the SKY ALONE — intensity and rotation are shader uniforms — so a
- * keyframed environment rebuilds nothing and re-uploads nothing. The cache key
- * carries the layout too, so changing the atlas dimensions cannot serve a
- * stale shape to a shader that expects the new one.
+ * keyframed environment rebuilds nothing and re-uploads nothing. The key
+ * carries the atlas layout too, so changing the dimensions cannot serve a
+ * stale shape to a shader that expects the new one, and it carries the pixels'
+ * hash, so re-importing an HDRI under the same asset id is a genuinely new
+ * texture with a genuinely new `id` rather than a rebuild the GPU ignores.
  */
 export function environmentSpecularMap(sky: unknown): EnvSpecularMap {
-  const assetId = environmentSkyAssetId(sky);
-  // An image sky with no pixels yet IS the default preset this frame; keying
-  // it under its own id would cache the fallback under the image's name and
-  // never rebuild once the decode landed.
-  const resolved = assetId !== null && !assetPixelCache.has(assetId) ? DEFAULT_ENVIRONMENT_PRESET : sky;
-  const key = `${String(resolved)}|${ENV_SPEC_WIDTH}x${ENV_SPEC_HEIGHT}x${ENV_SPEC_LEVELS}`;
+  const key = envAtlasKey(
+    environmentContentId(sky),
+    ENV_SPEC_WIDTH,
+    ENV_SPEC_HEIGHT,
+    ENV_SPEC_LEVELS,
+  );
   const hit = specularCache.get(key);
   if (hit) return hit;
   const map = buildEnvSpecularAtlas(environmentEquirect(sky), key);
-  if (specularCache.size >= SPECULAR_CACHE_MAX) specularCache.clear();
   specularCache.set(key, map);
   return map;
+}
+
+/** Test/inspection only — which skies the prefilter cache is holding. */
+export function environmentSpecularCacheKeys(): string[] {
+  return specularCache.keys();
 }

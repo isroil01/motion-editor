@@ -23,7 +23,11 @@ import { MAX_DEMOTE_LEVEL } from './transportOverflow';
 /** Slack before restoring, so a 1px rounding difference cannot start a loop. */
 const HYSTERESIS_PX = 12;
 
-export function useTransportDemote(ref: RefObject<HTMLElement | null>): number {
+/**
+ * @param maxLevel How many groups the row can shed in total — the transport's
+ *   ladder by default; the tabs row and the timeline toolbar pass their own.
+ */
+export function useTransportDemote(ref: RefObject<HTMLElement | null>, maxLevel: number = MAX_DEMOTE_LEVEL): number {
   const [level, setLevel] = useState(0);
   /**
    * The level, again, as a ref.
@@ -65,10 +69,22 @@ export function useTransportDemote(ref: RefObject<HTMLElement | null>): number {
       return total;
     };
 
+    /**
+     * Only a horizontal flex run can be measured by summing its children's
+     * widths. A flex COLUMN (the timeline toolbar's timecode block stacks a
+     * time over a frame count) would read as overflowing by the width of its
+     * second line, for ever, and shed every group at any width.
+     */
+    const isFlexRow = (col: Element): boolean => {
+      const cs = getComputedStyle(col);
+      return (cs.display === 'flex' || cs.display === 'inline-flex') && !cs.flexDirection.startsWith('column');
+    };
+
     /** How many pixels short the row is — the worst column decides. */
     const deficit = (): number => {
       let worst = el.scrollWidth - el.clientWidth;
       for (const col of Array.from(el.children)) {
+        if (!isFlexRow(col)) continue;
         worst = Math.max(worst, contentWidth(col) - col.clientWidth);
       }
       return worst;
@@ -84,7 +100,10 @@ export function useTransportDemote(ref: RefObject<HTMLElement | null>): number {
       const n = levelRef.current;
 
       if (overflow > 1) {
-        if (n >= MAX_DEMOTE_LEVEL) return;
+        // The CALLER's ladder, not the transport's constant: the timeline
+        // toolbar has three rungs, and a hook that kept climbing past them
+        // would record undo thresholds for levels that shed nothing.
+        if (n >= maxLevel) return;
         widthToUndo.current[n + 1] = el.clientWidth + overflow + HYSTERESIS_PX;
         levelRef.current = n + 1;
         setLevel(n + 1);
@@ -102,6 +121,14 @@ export function useTransportDemote(ref: RefObject<HTMLElement | null>): number {
     // Runs once per level change too — `level` is a dependency, so each new
     // layout gets measured against the level that produced it.
     measure();
+
+    // No ResizeObserver (jsdom, an old embedded webview): measure once and
+    // rely on the window resize below. Nothing sheds in a layout-less
+    // environment anyway — `clientWidth` reads 0 and `measure` returns early.
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
 
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -121,7 +148,7 @@ export function useTransportDemote(ref: RefObject<HTMLElement | null>): number {
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [ref, level]);
+  }, [ref, level, maxLevel]);
 
   return level;
 }

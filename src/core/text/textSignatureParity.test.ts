@@ -99,7 +99,9 @@ describe('TextSpec → raster cache signature parity', () => {
     // meaningful while measuring nothing.
     expect(fields).toContain('text');
     expect(fields).toContain('glyphs');
-    expect(fields.length).toBe(24);
+    // 24, then +8 (2026-09-05): the Character panel's case / small caps /
+    // super-sub / scale / baseline shift and the layer's own text stroke.
+    expect(fields.length).toBe(32);
   });
 
   it.each(

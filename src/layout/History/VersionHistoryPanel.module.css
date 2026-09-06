@@ -97,8 +97,12 @@
   color: var(--color-text-tertiary);
 }
 
-.restore {
+.restore,
+.compare {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-surface-3);
@@ -109,12 +113,14 @@
   cursor: pointer;
 }
 
-.restore:hover:not(:disabled) {
+.restore:hover:not(:disabled),
+.compare:hover:not(:disabled) {
   color: var(--color-text-primary);
   border-color: var(--color-primary);
 }
 
-.restore:disabled {
+.restore:disabled,
+.compare:disabled {
   opacity: 0.6;
   cursor: default;
 }

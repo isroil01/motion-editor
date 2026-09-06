@@ -318,10 +318,13 @@
   transition: border-color 140ms ease, width 140ms ease;
 }
 
-.projectSearchInput:focus {
+.projectSearchInput:focus,
+.projectSearchInput:focus-visible {
   border-color: var(--color-primary);
   background: var(--color-surface-2);
   width: 240px;
+  outline: none;
+  box-shadow: none;
 }
 
 .filterDropdown {

@@ -9,19 +9,40 @@
   --color-slate-0:   #ffffff;
   --color-slate-50:  #f5f6f9;
   --color-slate-100: #ebedf2;
+  --color-slate-150: #e2e5ec;   /* light surface-3 (popover)     */
   --color-slate-200: #d5dbe5;
   --color-slate-300: #b3bdcd;
   --color-slate-400: #8b98a9;
   --color-slate-500: #647285;
   --color-slate-600: #475364;
-  --color-slate-700: #3a3a3d;
-  /* Premium neutral-black ladder — TRUE neutral (zero blue tint), decisive
-     steps. 0b → 17 → 21 → 2b: panels clearly lift off the frame. */
-  --color-slate-800: #2b2b2e;   /* surface-3 · hover step        */
-  --color-slate-850: #212123;   /* surface-2 · raised controls   */
-  --color-slate-900: #171718;   /* surface-1 · panels            */
-  --color-slate-950: #0b0b0c;   /* surface-0 · frame + wells     */
+  /* The bridge between the cool slate above and the neutral ladder below.
+     It was #3a3a3d — a step that dropped ALL the blue at once (chroma 29 → 3)
+     and read as a different ramp spliced in. Chroma now tapers 29 → 8 → 3 → 2
+     → 1 → 1 → 0, and `tokenContrast.test.ts` pins the ramp monotonic in both
+     luminance and chroma so it cannot break again. */
+  --color-slate-700: #35373d;
+  /* Premium neutral-black ladder — near-neutral (≤3 units of tint), decisive
+     steps. 0b → 13 → 17 → 21 → 2b: panels clearly lift off the frame. */
+  --color-slate-800: #2b2b2e;   /* dark surface-2 · controls     */
+  --color-slate-850: #212123;   /* dark surface-1 · panels       */
+  --color-slate-900: #171718;   /* dark surface-0 · app frame    */
+  --color-slate-925: #131314;   /* dark titlebar / ruler wells   */
+  --color-slate-950: #0b0b0c;   /* dark seams + recessed wells   */
   --color-slate-1000:#000000;   /* workspace · the true-black void */
+
+  /* ── Neutral (zero-tint greys for TEXT on the dark ladder) ─────
+     Off-whites with no blue at all, so body text on a neutral-black panel
+     does not read faintly cold. AA-checked against dark surface-1 (#212123)
+     by `tokenContrast.test.ts`. */
+  --color-neutral-100: #e1e1e1;  /* dark text-primary   12.3:1 */
+  --color-neutral-300: #a6a6a6;  /* dark text-secondary  6.6:1 */
+  --color-neutral-400: #8c8c8c;  /* dark text-tertiary   4.8:1 */
+  --color-neutral-500: #707070;
+  --color-neutral-600: #5a5a5a;  /* decorative only */
+  --color-neutral-700: #444444;
+  --color-neutral-800: #282828;
+  --color-neutral-850: #222222;
+  --color-neutral-900: #1e1e1e;
 
   /* ── Brand blue (Motion Studio selection ramp — spec-exact) ───── */
   --color-blue-300: #93c5fd;  /* focus ring */
@@ -56,6 +77,21 @@
   --color-red-500:    #ef5a6a;
   --color-pink-500:   #ec4899;
   --color-orange-500: #ff6b45;  /* timeline playhead (== coral) */
+  --color-orange-600: #f97316;
+  --color-sky-400:    #38bdf8;
+  --color-emerald-500:#10b981;
+  --color-emerald-600:#1f9e6d;
+  --color-rose-500:   #f43f5e;
+  --color-rose-600:   #d63d4e;
+  --color-indigo-500: #6366f1;
+
+  /* ── Okabe–Ito colour-blind-safe set (deuteranopia / protanopia) ──
+     Consumed ONLY by the `[data-cvd]` axis palette in domain.css. */
+  --color-cvd-vermillion: #d55e00;
+  --color-cvd-yellow:     #f0e442;
+  --color-cvd-yellow-deep:#a89600;  /* the same hue, dark enough for light grounds */
+  --color-cvd-blue:       #0072b2;
+  --color-cvd-sky:        #56b4e9;
 
   /* ── Layer category hues (desaturated so chrome stays quiet;
         colorblind-safe; always paired w/ icon) ──────────────────── */

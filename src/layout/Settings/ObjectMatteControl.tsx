@@ -22,7 +22,11 @@ import { useEffect, useState } from 'react';
 import { Button } from '@components/Button';
 import { Input } from '@components/Input';
 import { SUGGESTED_MODEL, useSamModelStore } from '@core/tracking/samModelInstall';
+import { installObjectMatteJob } from './objectMatteJob';
 import styles from './ObjectMatteControl.module.css';
+
+// The download outlives this control; the job tray and toast follow it.
+installObjectMatteJob();
 
 const MB = 1024 * 1024;
 

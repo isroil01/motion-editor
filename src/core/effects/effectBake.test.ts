@@ -11,15 +11,33 @@ import type { Effect } from './effects';
 
 describe('bake predicates', () => {
   it('flags only the effects the GPU cannot draw at all', () => {
-    for (const t of ['four-color-gradient', 'keylight', 'wave-warp', 'turbulent-displace',
-      'inner-shadow', 'inner-glow', 'satin', 'bevel', 'directional-blur', 'linear-wipe', 'transform']) {
+    // Rounds twelve + thirteen (2026-09-06) ported the interior styles and
+    // turbulent-displace; what is left needs a histogram, text, contour
+    // tracing or an arbitrary-length data array.
+    // Round fourteen (2026-09-06) took the histogram autos too; text, contour
+    // tracing, data arrays and the recursive stroke are what is left.
+    for (const t of ['vegas', 'numbers', 'timecode', 'audio-spectrum', 'audio-waveform', 'lightning']) {
       expect(isGpuUnbakeableEffect(t)).toBe(true);
     }
     // These have GPU forms → they never FORCE a bake. `beam` joined them when
     // it gained a shader (2026-08-12); it kept its Canvas2D pass, so it is
     // still `hasCanvas2dImplementation`, which is the pairing asserted below.
     for (const t of ['blur', 'glow', 'brightness', 'levels', 'curves', 'tint', 'gradient-ramp',
-      'fractal-noise', 'displacement-map', 'fill', 'stroke', 'sharpen', 'noise', 'beam', 'light-sweep', 'lens-flare', 'light-rays']) {
+      'fractal-noise', 'displacement-map', 'fill', 'stroke', 'sharpen', 'noise', 'beam', 'light-sweep', 'lens-flare', 'light-rays',
+      // Round seven (2026-09-06): the footage set moved to shaders.
+      'transform', 'gaussian-blur', 'fast-box-blur', 'radial-blur', 'corner-pin',
+      // Round eight (2026-09-06): the keying set.
+      'keylight', 'wave-warp', 'linear-color-key', 'luma-key', 'simple-choker', 'matte-choker',
+      // Round nine (2026-09-06).
+      'directional-blur', 'linear-wipe', 'shift-channels', 'radial-wipe', 'toner',
+      // Round ten (2026-09-06).
+      'four-color-gradient', 'channel-blur', 'minimax', 'checkerboard', 'circle',
+      // Round eleven (2026-09-06).
+      'warp', 'page-turn', 'radial-shadow', 'lens', 'jaws', 'unmult', 'cc-composite', 'cc-repetile', 'plastic', 'glass', 'hex-tile', 'vector-blur',
+      // Rounds twelve + thirteen (2026-09-06).
+      'turbulent-displace', 'inner-shadow', 'inner-glow', 'satin', 'bevel', 'colorama', 'median', 'card-wipe', 'cartoon', 'mesh-warp', 'bezier-warp', 'snowfall',
+      // Round fourteen (2026-09-06).
+      'equalize', 'auto-levels', 'auto-contrast', 'auto-color']) {
       expect(isGpuUnbakeableEffect(t)).toBe(false);
     }
   });
@@ -73,8 +91,9 @@ describe('bake predicates', () => {
     expect(effectsNeedCpuBake(undefined)).toBe(false);
     expect(effectsNeedCpuBake([])).toBe(false);
     expect(effectsNeedCpuBake([{ id: 'a', type: 'blur', params: { amount: 5 } } as Effect])).toBe(false);
-    expect(effectsNeedCpuBake([{ id: 'a', type: 'satin', enabled: false, params: {} } as Effect])).toBe(false);
-    expect(effectsNeedCpuBake([{ id: 'a', type: 'satin', params: { size: 8 } } as Effect])).toBe(true);
+    // vegas: still CPU-only (contour tracing) after rounds thirteen/fourteen ported the styles and autos.
+    expect(effectsNeedCpuBake([{ id: 'a', type: 'vegas', enabled: false, params: {} } as Effect])).toBe(false);
+    expect(effectsNeedCpuBake([{ id: 'a', type: 'vegas', params: {} } as Effect])).toBe(true);
     // Fill has a GPU material, so on its own it must NOT drag the layer onto
     // the CPU — that was the whole point of giving it one.
     expect(effectsNeedCpuBake([{ id: 'a', type: 'fill', params: { color: '#ff0000', opacity: 100 } } as Effect])).toBe(false);
@@ -85,7 +104,7 @@ describe('bake predicates', () => {
    * land. Verified on pixels because the predicates alone cannot show that the
    * chain actually dispatched to the Fill case.
    */
-  it('applies Fill inside a bake forced by an interior style', () => {
+  it('applies Fill inside a bake forced by a CPU-only effect', () => {
     const mk = (w: number, h: number): HTMLCanvasElement => {
       const c = document.createElement('canvas');
       c.width = w; c.height = h;
@@ -97,7 +116,8 @@ describe('bake predicates', () => {
     ctx.fillRect(0, 0, 16, 16);
     const stack = [
       { id: 'f', type: 'fill', params: { color: '#ff0000', opacity: 100 } },
-      { id: 's', type: 'inner-shadow', params: { distance: 6, angle: 135, softness: 8, color: '#000000', opacity: 55 } },
+      // audio-spectrum forces the bake (it is CPU-only) and draws nothing with no magnitudes — a visible no-op.
+      { id: 's', type: 'audio-spectrum', params: { magnitudes: [] } },
     ] as Effect[];
     expect(effectsNeedCpuBake(stack)).toBe(true);
     applyEffectChain(ctx, 16, 16, stack, mk);

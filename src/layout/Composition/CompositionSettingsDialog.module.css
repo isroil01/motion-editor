@@ -287,18 +287,6 @@
   line-height: 1.4;
 }
 
-.footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  padding-top: 14px;
-  margin-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  width: 100%;
-  box-sizing: border-box;
-}
-
 /* Responsive Time (M7) */
 .hint {
   margin: 6px 0 10px;

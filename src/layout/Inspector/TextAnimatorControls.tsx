@@ -18,11 +18,13 @@
 import { useState } from 'react';
 import { compToKeyframeTime } from '@core/timeline/TimelineController';
 
+import { Button } from '@components/Button';
 import { Icon } from '@components/Icon';
 import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { ValueField } from '@components/ValueField';
 import { ColorPicker } from '@components/ColorPicker';
 import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 
 import { useSceneRevision } from '@stores/sceneStore';
 import { useActiveWorkspace } from '@stores/projectStore';
@@ -191,12 +193,7 @@ function ParamRow({
   return (
     <div className={styles.paramRow}>
       <span className={styles.rowToggle}>
-        <Checkbox
-          checked={animated}
-          onChange={toggle}
-          title="Toggle Animation"
-          style={{ width: 14, height: 14 }}
-        />
+        <AnimToggle nodeId={nodeId} tracks={[path]} label={label} animated={animated} onToggle={toggle} values={() => [display]} />
       </span>
       <span className={styles.paramLabel}>{label}</span>
       <ValueField
@@ -648,7 +645,7 @@ function ColorRow({
             </button>
           </>
         ) : (
-          <button type="button" className={styles.pick} onClick={() => onSet('#ff3b30')}>
+          <button type="button" className={styles.pick} onClick={() => onSet('var(--color-primary)')}>
             <span>Add colour</span>
           </button>
         )}
@@ -690,31 +687,17 @@ export function TextAnimatorControls({ nodeId }: { nodeId: string }): JSX.Elemen
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, padding: '4px 12px 10px 12px' }}>
-        <button
-          type="button"
+      <div className={styles.autoTypewriterRow}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon="type"
+          fullWidth
           onClick={handleAutoTypewriter}
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            fontSize: '0.75rem',
-            fontWeight: 600,
-            borderRadius: '4px',
-            border: '1px dashed var(--color-accent, #635bff)',
-            background: 'rgba(99,91,255,0.06)',
-            color: 'var(--color-accent, #635bff)',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-          }}
           title="Auto-creates typewriter rig keyframed over 1.5s"
         >
-          <Icon name="type" size="sm" />
-          <span>Auto-Animate Typing</span>
-        </button>
+          Auto-Animate Typing
+        </Button>
       </div>
 
       {animators.length === 0 ? (

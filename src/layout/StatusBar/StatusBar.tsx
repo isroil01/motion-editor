@@ -2,11 +2,9 @@
  * StatusBar — bottom strip for app-wide status indicators.
  *
  * Slots: left, center, right, each taking arbitrary content (chips, text, small
- * buttons). Purely a layout shell; App.tsx fills all three with live state —
- * dirty indicator, layer and selection counts, playhead, zoom.
- *
- * (The previous docstring said the timeline engine "will push" that content in,
- * future tense, long after it had.)
+ * buttons). Purely a layout shell; `EditorStatusBar` fills all three with live
+ * state — save state, layer and selection counts, the comp chip, the job
+ * tray, playhead, zoom — and App.tsx mounts that.
  */
 
 import type { ReactNode } from 'react';

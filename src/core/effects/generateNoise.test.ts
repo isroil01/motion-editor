@@ -18,7 +18,7 @@
 
 import { drawCheckerboard, drawGrid, cellPatternData } from './generatePatterns';
 import { turbulentNoiseData, addGrainData, medianData } from './noiseEffects';
-import { applyCanvas2dEffect, isCanvas2dOnlyEffect } from './canvas2dEffects';
+import { applyCanvas2dEffect, hasCanvas2dImplementation } from './canvas2dEffects';
 import { EFFECT_DEFS, defaultParams, type Effect, type EffectParams, type EffectType } from './effects';
 
 function fx(type: EffectType, params: Record<string, unknown> = {}): Effect {
@@ -354,7 +354,9 @@ describe('all six reach the bake chain', () => {
   ];
 
   it.each(CASES)('%s changes pixels through applyCanvas2dEffect', (type, params) => {
-    expect(isCanvas2dOnlyEffect(type)).toBe(true);
+    // Round ten (2026-09-06) gave checkerboard and grid a shader; the Canvas2D pass is
+    // RETAINED for layers baked for other reasons, which is what this exercises.
+    expect(hasCanvas2dImplementation(type)).toBe(true);
     const ctx = opaqueCanvas(32, 32);
     // A gradient rather than a flat fill: Median over a flat field is correctly
     // a no-op, so a flat subject would make that case pass vacuously.

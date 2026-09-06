@@ -110,6 +110,7 @@ export {
   type RenderableGlass,
   type RenderableColorMatrix,
   type RenderableEffect,
+  type FxVec4,
   type CompositionInfo,
   type SceneLight3D,
   emptyScene,

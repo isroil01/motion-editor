@@ -76,23 +76,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-.footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-5);
-}
+/* The footer is DialogFooter's: "Previewing on the composition" is its note
+   slot, because the whole point of the dialog is that what you see is already
+   applied, and Cancel is what puts it back. */
 
-/* The preview note sits next to the buttons: the whole point of the dialog is
-   that what you see is already applied, and Cancel is what puts it back. */
-.footerNote {
-  margin-right: auto;
-  align-self: center;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-xs);
-}
-
-/* A row of mutually-exclusive choices (the Wiggler's dimension). Not
-   `.footer`: that one right-aligns and reserves the left edge for a note. */
+/* A row of mutually-exclusive choices (the Wiggler's dimension). */
 .segmented {
   display: flex;
   gap: var(--space-2);

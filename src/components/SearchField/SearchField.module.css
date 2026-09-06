@@ -31,6 +31,7 @@
 .root:focus-within {
   border-color: var(--color-primary);
   background: var(--color-surface-0);
+  outline: none;
 }
 
 .disabled {
@@ -67,8 +68,15 @@
   background: transparent;
   border: none;
   outline: none;
+  box-shadow: none;
   color: inherit;
   font: inherit;
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .input::placeholder {

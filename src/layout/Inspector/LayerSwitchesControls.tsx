@@ -11,36 +11,72 @@ import {
   disableLayerMotionBlur,
   setAdjustmentWithFeedback,
 } from '@core/effects/layerSwitchFeedback';
+import { aggregateFlag, applyFlagAll } from '@core/inspector/multiSelection';
+import { useInspectorSelection } from './inspectorSelection';
 import styles from '../Effects/EffectsPanel.module.css';
 
+/**
+ * The three per-layer switches, written across the SELECTION.
+ *
+ * They are booleans on the node rather than animation tracks, so they cannot
+ * go through `MultiPropertyRow`; `aggregateFlag` / `applyFlagAll` give them
+ * the two things that row provides and a bare `Switch` does not — a visible
+ * "these layers disagree" state, and one undo entry per gesture no matter how
+ * many layers it touched.
+ *
+ * When the selection disagrees the switch shows unchecked-but-mixed and the
+ * first click turns the flag ON for everything, which is the answer people
+ * expect from a mixed toggle: you clicked it to make them all match, and "all
+ * on" is the state you were reaching for.
+ */
 export function LayerSwitchesControls({ nodeId }: { nodeId: string }): JSX.Element {
   useSceneRevision((s) => s.rev);
   const mb = useMotionBlurStore();
+  const nodeIds = useInspectorSelection(nodeId);
 
-  const isAdjustment = getNodeAdjustment(nodeId);
-  const motionBlur = getNodeMotionBlur(nodeId);
-  const quality = getNodeQuality(nodeId);
+  const adjustment = aggregateFlag(nodeIds, getNodeAdjustment);
+  const blur = aggregateFlag(nodeIds, getNodeMotionBlur);
+  const draft = aggregateFlag(nodeIds, (id) => getNodeQuality(id) === 'draft');
+  const motionBlur = blur.value;
+
+  /** A mixed switch reads as off, and its next click turns everything on. */
+  const nextOf = (agg: { value: boolean; mixed: boolean }): boolean => (agg.mixed ? true : !agg.value);
+  const suffix = nodeIds.length > 1 ? ` (${nodeIds.length} layers)` : '';
+  const mixedTitle = (label: string, agg: { mixed: boolean }): string | undefined =>
+    (agg.mixed ? `Mixed — the selected layers disagree on ${label}` : undefined);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div className={styles.blendRow}>
-        <span className={styles.blendLabel}>Adjustment Layer</span>
+        <span className={styles.blendLabel} title={mixedTitle('Adjustment Layer', adjustment)}>
+          {`Adjustment Layer${adjustment.mixed ? ' — mixed' : ''}`}
+        </span>
         <Switch
-          checked={isAdjustment}
-          onChange={(e) => setAdjustmentWithFeedback(nodeId, e.currentTarget.checked, setNodeAdjustment)}
-          aria-label="Adjustment layer"
+          checked={!adjustment.mixed && adjustment.value}
+          data-mixed={adjustment.mixed || undefined}
+          onChange={() => {
+            const next = nextOf(adjustment);
+            applyFlagAll(nodeIds, 'Adjustment Layer', (id) => setAdjustmentWithFeedback(id, next, setNodeAdjustment));
+          }}
+          aria-label={`Adjustment layer${suffix}`}
         />
       </div>
 
       <div className={styles.blendRow}>
-        <span className={styles.blendLabel}>Motion Blur</span>
+        <span className={styles.blendLabel} title={mixedTitle('Motion Blur', blur)}>
+          {`Motion Blur${blur.mixed ? ' — mixed' : ''}`}
+        </span>
         <Switch
-          checked={motionBlur}
-          onChange={(e) => {
-            if (e.currentTarget.checked) enableLayerMotionBlurWithFeedback(nodeId, setNodeMotionBlur);
-            else disableLayerMotionBlur(nodeId, setNodeMotionBlur);
+          checked={!blur.mixed && blur.value}
+          data-mixed={blur.mixed || undefined}
+          onChange={() => {
+            const next = nextOf(blur);
+            applyFlagAll(nodeIds, 'Motion Blur', (id) => {
+              if (next) enableLayerMotionBlurWithFeedback(id, setNodeMotionBlur);
+              else disableLayerMotionBlur(id, setNodeMotionBlur);
+            });
           }}
-          aria-label="Motion blur"
+          aria-label={`Motion blur${suffix}`}
         />
       </div>
 
@@ -78,11 +114,20 @@ export function LayerSwitchesControls({ nodeId }: { nodeId: string }): JSX.Eleme
       )}
 
       <div className={styles.blendRow}>
-        <span className={styles.blendLabel} title="Draft: nearest-neighbour sampling for this layer (faster, rougher)">Draft Quality</span>
+        <span
+          className={styles.blendLabel}
+          title={mixedTitle('Draft Quality', draft) ?? 'Draft: nearest-neighbour sampling for this layer (faster, rougher)'}
+        >
+          {`Draft Quality${draft.mixed ? ' — mixed' : ''}`}
+        </span>
         <Switch
-          checked={quality === 'draft'}
-          onChange={(e) => setNodeQuality(nodeId, e.currentTarget.checked ? 'draft' : 'best')}
-          aria-label="Draft quality"
+          checked={!draft.mixed && draft.value}
+          data-mixed={draft.mixed || undefined}
+          onChange={() => {
+            const next = nextOf(draft);
+            applyFlagAll(nodeIds, 'Draft Quality', (id) => setNodeQuality(id, next ? 'draft' : 'best'));
+          }}
+          aria-label={`Draft quality${suffix}`}
         />
       </div>
 

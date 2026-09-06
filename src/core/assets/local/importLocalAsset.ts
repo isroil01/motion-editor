@@ -25,7 +25,10 @@ export interface LocalImportResult {
   metadata?: { width?: number; height?: number; duration?: number };
 }
 
-export async function importLocalAsset(file: File): Promise<LocalImportResult | null> {
+export async function importLocalAsset(
+  file: File,
+  opts?: { /** A pre-minted record id — see `AddAssetOptions.id`. */ id?: string },
+): Promise<LocalImportResult | null> {
   const path = getProjectManager().getState().current?.path ?? null;
   if (!path || !isBundlePath(path)) return null;
 
@@ -33,6 +36,7 @@ export async function importLocalAsset(file: File): Promise<LocalImportResult | 
   const record = await importAssetToBundle(detectBundleFs(), path, bytes, {
     name: file.name,
     mime: file.type || 'application/octet-stream',
+    ...(opts?.id ? { id: opts.id } : {}),
   });
   const metadata = await readMediaMeta(file);
   return { record, src: localBlobRef(record.hash), ...(metadata ? { metadata } : {}) };

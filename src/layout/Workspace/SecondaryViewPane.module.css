@@ -1,0 +1,23 @@
+/*
+ * The view-only / secondary pane's BOX.
+ *
+ * These five properties used to be inline defaults in `SecondaryViewPane.tsx`,
+ * which meant the 4-up caller could only override them with another inline
+ * object — six `'50%'` literals and a `QUAD_DIVIDER` border string built in JS,
+ * where `var(--color-border)` needed a hardcoded fallback because the
+ * `cssTokens` guard cannot see into a template literal. As a class, the quad
+ * rects in `Workspace.module.css` simply override it by cascade order.
+ *
+ * The default rect is the 2-up one: the right half. What stays inline in the
+ * component is only what changes per render — the active-pane outline.
+ */
+.pane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  right: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-pasteboard);
+}

@@ -279,6 +279,11 @@ function readBase(node: SceneNode): {
   letterSpacing?: number; lineHeight?: number; align?: string;
   paragraphSpacing?: number;
   strokeOverFill?: boolean;
+  /** Character panel extras — see `textStyleTransform`. */
+  textTransform?: string; fontVariant?: string; verticalAlign?: string;
+  verticalScale?: number; horizontalScale?: number; baselineShift?: number;
+  /** A text layer's own stroke (string colour + px), as the Character panel writes it. */
+  textStroke?: string; textStrokeWidth?: number;
   src?: string; assetId?: string; color?: string;
 } {
   let x: number | undefined;
@@ -301,6 +306,14 @@ function readBase(node: SceneNode): {
   let align: string | undefined;
   let paragraphSpacing: number | undefined;
   let strokeOverFill: boolean | undefined;
+  let textTransform: string | undefined;
+  let fontVariant: string | undefined;
+  let verticalAlign: string | undefined;
+  let verticalScale: number | undefined;
+  let horizontalScale: number | undefined;
+  let baselineShift: number | undefined;
+  let textStroke: string | undefined;
+  let textStrokeWidth: number | undefined;
   let src: string | undefined;
   let assetId: string | undefined;
   let color: string | undefined;
@@ -335,6 +348,16 @@ function readBase(node: SceneNode): {
     if (typeof p.align === 'string') align = p.align;
     paragraphSpacing = num(p.paragraphSpacing) ?? paragraphSpacing;
     if (typeof p.strokeOverFill === 'boolean') strokeOverFill = p.strokeOverFill;
+    if (typeof p.textTransform === 'string') textTransform = p.textTransform;
+    if (typeof p.fontVariant === 'string') fontVariant = p.fontVariant;
+    if (typeof p.verticalAlign === 'string') verticalAlign = p.verticalAlign;
+    verticalScale = num(p.verticalScale) ?? verticalScale;
+    horizontalScale = num(p.horizontalScale) ?? horizontalScale;
+    baselineShift = num(p.baselineShift) ?? baselineShift;
+    // Text's stroke is a colour STRING on the text component; a shape's is an
+    // object on its own component, which this deliberately ignores.
+    if (typeof p.stroke === 'string') textStroke = p.stroke;
+    if (typeof p.strokeWidth === 'number' && typeof p.content === 'string') textStrokeWidth = p.strokeWidth;
     if (typeof p.src === 'string') src = p.src;
     if (typeof p.assetId === 'string') assetId = p.assetId;
     if (typeof p.color === 'string') color = p.color;
@@ -375,6 +398,14 @@ function readBase(node: SceneNode): {
     align,
     paragraphSpacing,
     strokeOverFill,
+    textTransform,
+    fontVariant,
+    verticalAlign,
+    verticalScale,
+    horizontalScale,
+    baselineShift,
+    textStroke,
+    textStrokeWidth,
     src,
     assetId,
     color,
@@ -2909,6 +2940,18 @@ export function buildSnapshot(
       align: base.align,
       paragraphSpacing: a?.get('paragraphSpacing') ?? base.paragraphSpacing,
       strokeOverFill: base.strokeOverFill,
+      // Character-panel extras. The numeric ones are keyframeable like the
+      // other character props; the case/variant/super-sub switches are not.
+      ...(kind === 'text' ? {
+        textTransform: base.textTransform,
+        fontVariant: base.fontVariant,
+        verticalAlign: base.verticalAlign,
+        verticalScale: a?.get('verticalScale') ?? base.verticalScale,
+        horizontalScale: a?.get('horizontalScale') ?? base.horizontalScale,
+        baselineShift: a?.get('baselineShift') ?? base.baselineShift,
+        textStroke: base.textStroke,
+        textStrokeWidth: a?.get('strokeWidth') ?? base.textStrokeWidth,
+      } : {}),
       // Depth of field applies to 3D layers only. A 2D layer's `depth` is just
       // the focal length, which matches the DOF focus default — so this looked
       // fine until someone set Focus Distance, at which point every 2D title,

@@ -145,8 +145,11 @@ export function openKeyframeVelocityDialog(nodeId: string, prop: string, t: numb
   const reading = readKeyframeVelocity(nodeId, prop, t);
   if (!reading) return false;
   openModal({
+    id: 'keyframe-velocity',
     title: 'Keyframe Velocity',
     size: 'sm',
+    // Floating: the graph it shapes stays live and scrubbable behind it.
+    variant: 'floating',
     render: (close) => (
       <VelocityBody nodeId={nodeId} prop={prop} t={t} reading={reading} close={close} />
     ),

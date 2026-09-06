@@ -412,6 +412,16 @@ export interface RenderLayer {
    *  Fill & Stroke order). Under is the default: an animated stroke then
    *  thickens outward instead of eating into the glyph. */
   strokeOverFill?: boolean;
+  /** Character panel: case, small caps, super/subscript, scale, baseline shift. */
+  textTransform?: string;
+  fontVariant?: string;
+  verticalAlign?: string;
+  verticalScale?: number;
+  horizontalScale?: number;
+  baselineShift?: number;
+  /** The text layer's own stroke — colour and width in px. */
+  textStroke?: string;
+  textStrokeWidth?: number;
   /** Text on a path: the layer's chosen mask, already flattened to a polyline
    *  in layer-local space, plus how to ride it. Resolved in buildSnapshot so a
    *  backend never has to reach back into the scene graph for geometry. */

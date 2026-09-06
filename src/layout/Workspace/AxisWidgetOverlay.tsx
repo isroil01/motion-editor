@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useGuidesStore } from '@stores/guidesStore';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
@@ -17,13 +17,28 @@ import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenComposition, readNodeKind } from '@core/scene/sceneDerive';
 import { is3DEnabled } from '@core/scene/threeD';
 import { activeCameraNode, readSceneCamera } from '@core/scene/camera3d';
+import { toWorldPointAt } from '@core/scene/liveWorld3d';
 import { customViewCamera, isCustomViewId } from '@core/workspace/customViews';
 import { getRemappedTime } from '@core/timeline/TimelineController';
 import { defaultAnimation } from '@motion/animation';
 import { Project3D, type Camera3D, type OrthoView, type Vec3 } from '@motion/scene';
 
-/** Same palette as the 3D gizmo (gizmo3d.ts): Red=X, Green=Y, Blue=Z. */
-const AXIS_COLORS = { x: '#ff3b30', y: '#34c759', z: '#007aff' } as const;
+/**
+ * Red=X, Green=Y, Blue=Z - the AE / Blender convention, through the TOKENS so
+ * the colour-vision-deficiency preset (`[data-cvd]` in `tokens/domain.css`)
+ * can swap the triple for an Okabe-Ito one. The literals these replaced
+ * (`#ff3b30 / #34c759 / #007aff`) put a red-green pair on two of the three
+ * axes, which a deuteranope cannot separate and had no way to change.
+ *
+ * Applied through `style`, not the `stroke`/`fill` ATTRIBUTE: a presentation
+ * attribute takes a CSS value, but browsers vary on resolving `var()` inside
+ * one, and an unresolved paint falls back to black without saying so.
+ */
+const AXIS_COLORS = {
+  x: 'var(--color-axis-x)',
+  y: 'var(--color-axis-y)',
+  z: 'var(--color-axis-z)',
+} as const;
 
 const SIZE = 48;
 const CENTER = SIZE / 2;
@@ -39,7 +54,7 @@ export const AxisWidgetOverlay: React.FC = () => {
   const compRootId = useCompositionStore((s) => s.id);
   const camera3dMode = useGuidesStore((s) => s.camera3dMode);
   const customViews = useGuidesStore((s) => s.customViews);
-  const time = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
 
   // Visible only when the comp actually has 3D content.
   // Comp-scoped: another composition's 3D layers must not make THIS comp's
@@ -65,9 +80,10 @@ export const AxisWidgetOverlay: React.FC = () => {
   } else if (cameraNode) {
     const camNode = cameraNode;
     const camValues = defaultAnimation.evaluateNode(camNode.id, getRemappedTime(camNode.id, time));
+    // Comp-scoped and parent-LIFTED, like the renderer: see `currentViewCamera`.
     camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, (id, p) =>
       id === camNode.id ? camValues.get(p) : undefined,
-    );
+    compRootId, (id, p) => toWorldPointAt(id, time, p));
   } else {
     camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, undefined, compRootId);
   }
@@ -138,10 +154,22 @@ export const AxisWidgetOverlay: React.FC = () => {
           cx={CENTER}
           cy={CENTER}
           r={CENTER - 1}
-          fill="rgba(14, 16, 22, 0.75)"
-          stroke="rgba(255,255,255,0.2)"
+          style={{
+            fill: 'var(--color-overlay-panel-bg)',
+            stroke: 'var(--color-overlay-panel-border)',
+            cursor: 'pointer',
+          }}
           strokeWidth={1}
+          role="button"
+          tabIndex={0}
+          aria-label="Reset to the Active Camera view"
           onClick={handleCenterClick}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleCenterClick();
+            }
+          }}
         >
           <title>Reset to Active Camera View</title>
         </circle>
@@ -160,7 +188,20 @@ export const AxisWidgetOverlay: React.FC = () => {
           return (
             <g
               key={key}
+              // A view-cube face is a BUTTON: it changes the camera. With no
+              // role and no tab stop it was reachable by mouse only, so a
+              // keyboard user could not snap the view at all.
+              role="button"
+              tabIndex={0}
+              aria-label={`Snap the view to the ${key.toUpperCase()} axis (${key === 'x' ? 'Right' : key === 'y' ? 'Top' : 'Front'})`}
+              aria-pressed={isAxisActive}
               onClick={() => handleAxisClick(key)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleAxisClick(key);
+                }
+              }}
               style={{ cursor: 'pointer' }}
             >
               <title>{`Snap view to ${key.toUpperCase()} axis (${key === 'x' ? 'Right' : key === 'y' ? 'Top' : 'Front'})`}</title>
@@ -169,7 +210,7 @@ export const AxisWidgetOverlay: React.FC = () => {
                 y1={CENTER}
                 x2={CENTER + nx}
                 y2={CENTER + ny}
-                stroke={AXIS_COLORS[key]}
+                style={{ stroke: AXIS_COLORS[key] }}
                 strokeWidth={isAxisActive ? 3 : 2}
                 strokeLinecap="round"
               />
@@ -177,12 +218,12 @@ export const AxisWidgetOverlay: React.FC = () => {
                 cx={CENTER + nx}
                 cy={CENTER + ny}
                 r={3}
-                fill={AXIS_COLORS[key]}
+                style={{ fill: AXIS_COLORS[key] }}
               />
               <text
                 x={CENTER + lx}
                 y={CENTER + ly}
-                fill={isAxisActive ? '#ffffff' : AXIS_COLORS[key]}
+                style={{ fill: isAxisActive ? 'var(--color-overlay-text)' : AXIS_COLORS[key] }}
                 fontSize={7.5}
                 fontWeight={700}
                 fontFamily="system-ui, sans-serif"

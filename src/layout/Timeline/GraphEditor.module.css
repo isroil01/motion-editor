@@ -413,3 +413,63 @@
   border-radius: var(--radius-md, 6px);
   box-shadow: var(--shadow-lg);
 }
+
+/* ── Box-select (Shift-drag on empty graph) ──────────────────────
+   Solid rather than dashed, and in the SELECTION colour rather than the
+   primary: it has to be distinguishable from the Alt-drag box-zoom
+   rectangle above at a glance, because the two gestures start identically
+   and only the modifier says which one is happening. */
+.boxSelectRect {
+  fill: color-mix(in srgb, var(--color-selection) 14%, transparent);
+  stroke: var(--color-selection);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* The hover read-out. Never intercepts the pointer — it follows the pointer,
+   so a chip that could be hovered would flicker against its own presence. */
+.hoverTip {
+  pointer-events: none;
+}
+
+.hoverTip text {
+  font-family: var(--font-family-mono);
+  paint-order: stroke;
+  stroke: var(--color-surface-0);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+/* ── The selected key's numbers ──────────────────────────────────
+   A single row under the toolbar, not a panel: it exists for the two or three
+   values a drag cannot state exactly, and anything taller would take height
+   from the curves, which are what the editor is for. */
+.numericStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-1);
+  font-size: var(--font-size-micro, 10px);
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+
+.numericLabel {
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.numericField {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.numericField > span {
+  min-width: 44px;
+}

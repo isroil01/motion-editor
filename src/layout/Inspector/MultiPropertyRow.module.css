@@ -1,0 +1,59 @@
+.row {
+  min-width: 0;
+}
+
+/* The `=` toggle: a glyph, not an icon, because "=" IS the expression sign
+   people already know from the timeline. */
+.exprToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.exprToggle:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+}
+
+.exprOn {
+  color: var(--color-primary);
+}
+
+.exprErr {
+  color: var(--color-danger);
+}
+
+/* An attached expression keeps its controls visible without hover — the row
+   is different and should say so at rest. */
+.rowExprOpen :global([class*='trailing']),
+.row:has(.exprOn) :global([class*='trailing']) {
+  opacity: 1;
+}
+
+.whip {
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+}
+
+.below {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.expr {
+  padding: var(--space-1) 0 var(--space-2);
+}

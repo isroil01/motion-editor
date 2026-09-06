@@ -1,0 +1,114 @@
+/*
+ * The display controls, in the transport row under the stage, between the
+ * scene tools and the zoom field. Sized to the scene tools beside them
+ * (`ViewportTools .headerBtn`: flat, `--control-height-md`) so the run reads
+ * as one cluster of flat toggles next to the bordered transport buttons, not
+ * as a second kind of control.
+ */
+
+.root {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: var(--control-height-md);
+  min-width: var(--control-height-md);
+  padding: 0 var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.control:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+.control:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.control:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+/* A control whose setting is away from its default — colour only, like the
+   auto-keyframe toggle beside it; a filled chip here would read as pressed. */
+.controlActive {
+  color: var(--color-primary);
+}
+
+.controlActive:hover:not(:disabled) {
+  color: var(--color-primary);
+}
+
+/* Small text beside an icon (channel name, resolution, opacity percentage). */
+.text {
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.chevron {
+  opacity: 0.6;
+}
+
+/* ── Overlay-opacity row, inside the Overlays menu ───────────────── */
+.opacityRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  cursor: default;
+}
+
+.opacityLabel {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.opacitySlider {
+  width: 72px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* ── Bookmark rows ───────────────────────────────────────────────── */
+.slotRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.slotKey {
+  flex: 0 0 auto;
+}
+
+.slotName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.slotEmpty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}

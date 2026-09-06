@@ -51,6 +51,53 @@
   to   { opacity: 0; transform: translateY(6px) scale(0.98); }
 }
 
+/* ── Floating (tool-window) variant ─────────────────────────────────
+   No scrim, so the dialog positions itself: `left/top/width` (and `height`
+   when resizable) are set inline from the remembered, clamped geometry.
+   Same elevation as a blocking dialog — it is still the front-most surface
+   until something blocking opens over it (later portals paint later). */
+.dialog.floating {
+  position: fixed;
+  margin: 0;
+  max-width: calc(100vw - var(--space-4));
+  max-height: calc(100vh - var(--space-4));
+  z-index: var(--z-index-modal);
+  /* A parked tool should not shout: a touch less lift than the blocking one. */
+  box-shadow: var(--shadow-xl), 0 0 0 1px var(--color-border-subtle);
+}
+
+.dialog.floating[data-state="open"] {
+  animation: floatingIn var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.dialog.floating[data-state="closed"] {
+  animation: dialogOut var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+@keyframes floatingIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.dragHandle {
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+
+.resizeGrip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: var(--space-5);
+  height: var(--space-5);
+  cursor: nwse-resize;
+  touch-action: none;
+  /* Two short diagonal strokes, the way native windows mark a grip. */
+  background:
+    linear-gradient(135deg, transparent 0 55%, var(--color-border-strong) 55% 62%, transparent 62% 75%, var(--color-border-strong) 75% 82%, transparent 82%);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
 .dialog.sm         { width: 420px; }
 .dialog.md         { width: 540px; }
 .dialog.lg         { width: 860px; }

@@ -79,7 +79,7 @@ export function colorMatchMode(v: number): ColorMatchMode {
 }
 
 /** Hue in 0..1, or 0 for a achromatic pixel. */
-function hueOf(r: number, g: number, b: number): number {
+export function hueOf(r: number, g: number, b: number): number {
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
   const d = mx - mn;
   if (d === 0) return 0;

@@ -52,7 +52,9 @@ import {
   builtinMaterials,
   type NamedMaterial,
 } from '@stores/materialStore';
+import { applyMaterialPreset, captureMaterialPreset } from '@core/inspector/sectionPresets';
 import { FaceMaterialsSection } from './FaceMaterialsSection';
+import { SectionPresetMenu } from './SectionPresetMenu';
 import s from './MaterialSection.module.css';
 
 /** Whether this layer has a material at all — the registry's `appliesTo`. */
@@ -307,6 +309,21 @@ export function MaterialSection({ nodeId }: { nodeId: string }): JSX.Element | n
 
   return (
     <div className={s.stack}>
+      {/*
+       * Presets vs. the library below: a PRESET is the numeric material
+       * surface only (roughness, shading model, shadow modes) and is applied
+       * to every selected layer as one undo entry; a LIBRARY material also
+       * carries a base colour and is a named, project-wide object. The two
+       * share a store shape but not a meaning, so they get separate controls.
+       */}
+      <div className={s.presetRow}>
+        <SectionPresetMenu
+          sectionId="material"
+          label="Material presets"
+          capture={() => captureMaterialPreset(nodeId)}
+          apply={(values) => applyMaterialPreset(targets, values)}
+        />
+      </div>
       <span className={s.groupHeader}>
         Material Library
         <Button

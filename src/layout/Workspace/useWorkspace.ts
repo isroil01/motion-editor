@@ -1,6 +1,5 @@
-import { mergeSelectedPaths, liveMergeSelectedPaths } from '@core/scene/mergePaths';
 import { getNodeLabelColor } from '@core/scene/labelColor';
-import { getRemappedTime, getTimelineController } from '@core/timeline/TimelineController';
+import { getTimelineController } from '@core/timeline/TimelineController';
 /**
  * useWorkspace — the React⇄Workspace-engine seam for the viewport.
  *
@@ -23,14 +22,14 @@ import type { Guide, GuideAxis, WorkspaceOverlay } from '@motion/workspace';
 import { modifiersFrom, drawToolOptions, type PointerInput, type WheelInput } from '@motion/workspace';
 import renderCache from '@core/rendering/renderCache';
 import { viewportFrameCache } from '@core/rendering/frameCache';
+import { applyChannelViewToCanvas, channelNeedsPass } from '@core/rendering/channelView';
 import { mayServeCachedFrame, mayFillFromPausedRender, playbackBlitWorthwhile } from '@core/rendering/previewCacheGate';
 import { useWorkspaceStore } from '@stores/projectStore';
 import workspaceStyles from './Workspace.module.css';
-import { useProjectStore } from '@stores/projectStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { defaultAnimation } from '@motion/animation';
 import { getEventBus } from '@core/events/EventBus';
-import { useGuidesStore } from '@stores/guidesStore';
+import { useGuidesStore, clampOverlayOpacity } from '@stores/guidesStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import { idleCacheSpan, nextSpanFrame } from '@core/rendering/idleCacheSpan';
 import { onPreviewCacheRequest } from '@stores/cacheRequestStore';
@@ -42,10 +41,10 @@ import { useRenderQualityStore } from '@stores/renderQualityStore';
 import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
 import { useRenderQueueStore } from '@stores/renderQueueStore';
 import { useModalStore } from '@stores/modalStore';
-import { useCompositionStore } from '@stores/compositionStore';
+import { useCompositionStore, compKeyFor } from '@stores/compositionStore';
 import { useUIStore, type Tool } from '@stores/uiStore';
 import { useSelectionStore } from '@stores/selectionStore';
-import { is3DEnabled, set3DEnabled, canBe3D, readNode3D } from '@core/scene/threeD';
+import { is3DEnabled, readNode3D } from '@core/scene/threeD';
 import { currentViewProjector } from '@core/workspace/viewProjection';
 
 
@@ -60,30 +59,28 @@ import {
   isPathTangentContinuous,
   positionSamplerFor,
 } from '@core/motion/motionPath';
-import { runAnimEdit } from '@core/animation/animationCommands';
 import { beginViewportGesture, endViewportGesture, gestureAnimEdit } from '@core/workspace/viewportGesture';
 import { parentWorld2DAt } from '@core/scene/layerSpace';
 import { Matrix } from '@motion/scene';
 import { useTextEditStore } from '@stores/textEditStore';
-import { openContextMenu, type ContextMenuItem } from '@stores/contextMenuStore';
-import { svgContextMenuItems } from '@layout/Inspector/svgLayerActions';
-import { bumpScene } from '@stores/sceneStore';
+import { openContextMenu } from '@stores/contextMenuStore';
 import { useOnionSkinStore } from '@stores/onionSkinStore';
 import { createOnionSkinPainter } from '@core/rendering/onionSkinPainter';
 import { memoizedSceneContentHash } from '@core/rendering/sceneContentHash';
-import { readNodeKind } from '@core/scene/sceneDerive';
-import { renameLayer } from '@core/scene/renameLayer';
 import { addPaintStroke, type PaintMode } from '@core/paint/paintStrokes';
-import { getNodeLayerTime, updateNodeLayerTime, type FrameBlend } from '@core/scene/layerTime';
-import { openInterpretFootage } from '@layout/Assets/InterpretFootageModal';
-import { assetIdOf } from '@core/source/sourceInfo';
-import { sourceDisplaySize } from '@core/tracking/trackerSource';
-import { useTrackerStore } from '@stores/trackerStore';
-import { useAssetStore } from '@stores/assetStore';
 import { compToLayerLocal, isPaintableKind, localBrushSize } from '@core/paint/paintCoords';
 import { usePaintStore } from '@stores/paintStore';
-import { useInfoStore } from '@stores/infoStore';
-import { samplePixelRgba } from '@core/workspace/pixelSample';
+import { publishProbe, clearProbe } from './useWorkspaceProbe';
+import {
+  nodeContextMenuItems,
+  canvasContextMenuItems,
+  // Viewport-wide helpers that happen to live in the menu module for now —
+  // see the note on `playheadTime` there.
+  playheadTime,
+  compSize,
+} from './useWorkspaceContextMenu';
+import { useCompareStore, captureLiveFrame, needsLiveFrame } from '@stores/compareStore';
+import { useViewportDisplayStore, viewportHudStats } from '@stores/viewportDisplayStore';
 import {
   cancelSmoothDolly,
   dollyNavBy,
@@ -96,23 +93,9 @@ import {
   type CameraNavMode,
   type NavTarget,
 } from '@core/workspace/cameraNav';
-import {
-  duplicateSelectedLayers,
-  deleteSelectedLayers,
-  toggleSelectedLocked,
-  toggleSelectedSolo,
-  toggleSelectedVisible,
-  groupSelectedLayers,
-  ungroupSelected,
-  precomposeSelected,
-} from '@core/scene/sceneInsert';
-import { rigLogoForAnimation } from '@core/scene/rigLogo';
-import { arrangeNodes } from '@core/scene/parenting';
-import { LABEL_COLORS, readNodeLabelColor, setNodeLabelColor } from '@core/scene/labelColor';
 import { useFaceSelectionStore } from '@stores/faceSelectionStore';
 import { facesOfNode, pickFace } from '@core/scene/facePicking';
 import { compSizeOf } from '@core/composition/compSizes';
-import { customPrompt } from '@components/Modal/Dialogs';
 import { RULER_CSS_PX, inStrip, rulerStrips } from './rulerGeometry';
 
 
@@ -155,6 +138,9 @@ interface GuideDrag {
 
 /** Topmost unlocked guide whose line passes within GUIDE_GRAB_PX of `p` (screen px). */
 function hitGuideAt(controller: WorkspaceController, p: { x: number; y: number }): Guide | null {
+  // A hidden guide is not grabbable either — otherwise an invisible line
+  // still caught drags aimed at the layer behind it.
+  if (!useGuidesStore.getState().guidesVisible) return null;
   for (const g of controller.ws.guides.list()) {
     if (g.locked) continue;
     const s =
@@ -399,6 +385,31 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
     let lastCssSize = '';
     const cacheVisibleClass = workspaceStyles.cacheCanvasVisible ?? 'cacheCanvasVisible';
 
+    /**
+     * Channel view (Red / Green / Blue / Alpha): copy the frame just rendered
+     * onto the 2D blit layer and rewrite its pixels there. See
+     * `core/rendering/channelView.ts` for why this is a pixel pass and not a
+     * CSS filter. A no-op in RGB, which is every frame that is not being
+     * inspected.
+     */
+    const presentChannelView = (): void => {
+      const channel = useGuidesStore.getState().channel;
+      if (!channelNeedsPass(channel)) return;
+      const content = contentCanvasRef?.current;
+      const cache = cacheCanvasRef?.current;
+      if (!content || !cache) return;
+      const mctx = cache.getContext('2d');
+      if (!mctx) return;
+      if (cache.width !== content.width || cache.height !== content.height) {
+        cache.width = content.width;
+        cache.height = content.height;
+      }
+      mctx.clearRect(0, 0, cache.width, cache.height);
+      mctx.drawImage(content, 0, 0);
+      applyChannelViewToCanvas(cache, channel);
+      cache.classList.add(cacheVisibleClass);
+    };
+
     const onionPainter = createOnionSkinPainter({
       content: () => contentCanvasRef?.current ?? null,
       target: () => onionCanvasRef?.current ?? null,
@@ -455,7 +466,12 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
             ...resolveViewCameraInput(compRef.current.width, compRef.current.height, camera3dModeRef.current),
             draft3d: draft3dRef.current,
             useProxies: useProxiesRef.current,
-            ...(ghost ? { transparent: true, backgroundPaint: undefined } : {}),
+            // Alpha view: the comp's own alpha is the picture, so the opaque
+            // background plate must not be composited under the layers — with
+            // it, every pixel is alpha 1 and the matte reads as solid white.
+            ...(ghost || useGuidesStore.getState().channel === 'alpha'
+              ? { transparent: true, backgroundPaint: undefined }
+              : {}),
           },
         ),
         // The only producer of `snapshot.roi`. Read live from the store so the
@@ -484,7 +500,19 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
       // The scopes panel (and anything else that wants the composited
       // frame) taps it HERE, the one place the content canvas is guaranteed
       // freshly drawn — a cache blit leaves it stale.
-      if (!ghost) publishFrame(content, t);
+      if (!ghost) {
+        publishFrame(content, t);
+        // Snapshot compare (F5) reads the WebGL canvas in the same task as the
+        // draw for the same reason; `captureFrom` is a no-op unless armed.
+        if (useCompareStore.getState().pending) {
+          useCompareStore.getState().captureFrom(content, t, controller.getView());
+        }
+        // Difference mode is the one comparison that needs BOTH pictures, so
+        // it needs a live copy per frame. Gated, because it is a full-canvas
+        // `drawImage` — the other three modes let the content canvas itself be
+        // the live half and pay nothing here.
+        if (needsLiveFrame()) captureLiveFrame(content);
+      }
     };
 
     // ── Idle caching (the After Effects idle pump) ─────────────────────
@@ -653,6 +681,10 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
       }
       mctx.clearRect(0, 0, cacheCanvas.width, cacheCanvas.height);
       mctx.drawImage(content, 0, 0);
+      {
+        const viewChannel = useGuidesStore.getState().channel;
+        if (channelNeedsPass(viewChannel)) applyChannelViewToCanvas(cacheCanvas, viewChannel);
+      }
       cacheCanvas.classList.add(cacheVisibleClass);
 
       const seqAtStart = renderSeq;
@@ -797,7 +829,16 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
       // like After Effects. CSS size IS included: it changes framing.
       const invalidationKey = [
         contentKey, clipSignature(compRef.current.id), focusKeyRef.current,
-        compRef.current.id, compRef.current.width, compRef.current.height, fps,
+        // The WHOLE comp key, not just id/size/fps. Background colour, gradient
+        // paint and Transparent were absent, so toggling Transparent (or the
+        // colour) kept serving the cached opaque frames — from RAM and, after
+        // a clear, promoted straight back from the disk tier — and the
+        // composition looked unchanged until something unrelated invalidated
+        // the cache. "Transparent does nothing" was that.
+        compRef.current.id, compKeyFor(compRef.current), fps,
+        // Alpha view renders without the background plate (renderFrameAt), so
+        // its frames must never be blitted back into the RGB view or vice versa.
+        useGuidesStore.getState().channel === 'alpha' ? 'A' : 'C',
         camera3dModeRef.current, draft3dRef.current ? 1 : 0,
         lastCssSize,
         view.scale, view.offsetX, view.offsetY,
@@ -863,6 +904,10 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
           if (ctx) {
             ctx.clearRect(0, 0, cacheCanvas.width, cacheCanvas.height);
             ctx.drawImage(hit, 0, 0);
+            // Cached frames are stored as rendered (RGBA); the channel view
+            // is applied to the copy on screen, never to the cache itself.
+            const viewChannel = useGuidesStore.getState().channel;
+            if (channelNeedsPass(viewChannel)) applyChannelViewToCanvas(cacheCanvas, viewChannel);
             cacheCanvas.classList.add(cacheVisibleClass);
             // Playback bookkeeping only: this cursor drives the catch-up loop,
             // which does not run while paused.
@@ -876,6 +921,7 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
             // are already cached.
             b.syncPlaybackVideo?.(frame / fps, runEnd / fps);
             renderCache.mark(timeRef.current);
+            viewportHudStats.report(0, true);
             paintChrome();
             return;
           }
@@ -889,6 +935,8 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
       // snapshot construction. This local alias keeps the onion painter's
       // (t, ghost) callback signature.
       const renderAt = (t: number, ghost = false): void => renderFrameAt(t, ghost);
+      /** HUD sample for this real render — the wall time of the whole tick. */
+      const hudStart = performance.now();
 
       // ── Onion skins ────────────────────────────────────────────────
       //
@@ -971,6 +1019,8 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
       }
 
       renderCache.mark(timeRef.current);
+      presentChannelView();
+      viewportHudStats.report(performance.now() - hudStart, false);
       paintChrome();
       // Idle pump: paused and settled → start extending the green bar; any
       // state where frames stream (playback) keeps it cancelled.
@@ -1182,18 +1232,28 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
     };
   }, [contentCanvasRef, overlayCanvasRef, stageRef, attachTick]);
 
+  // Publish the content canvas so surfaces OUTSIDE the viewport can find it
+  // without `document.querySelector('canvas')` — which returns whichever
+  // canvas is first in the DOM (a scope, a secondary pane) rather than the
+  // composited frame. Cleared on unmount so a stale detached canvas is never
+  // handed out.
+  useEffect(() => {
+    getWorkspaceController().setContentCanvas(contentCanvasRef.current);
+    return () => getWorkspaceController().setContentCanvas(null);
+  }, [contentCanvasRef, attachTick]);
+
   // ── Channel Filter Effect ──────────────────────────────────────────
   const channel = useGuidesStore((s) => s.channel);
   useEffect(() => {
-    const canvas = contentCanvasRef.current;
-    if (!canvas) return;
-    ensureSvgChannelFilters();
-    if (channel === 'red') canvas.style.filter = 'url(#filter-channel-red)';
-    else if (channel === 'green') canvas.style.filter = 'url(#filter-channel-green)';
-    else if (channel === 'blue') canvas.style.filter = 'url(#filter-channel-blue)';
-    else if (channel === 'alpha') canvas.style.filter = 'url(#filter-channel-alpha)';
-    else canvas.style.filter = 'none';
-  }, [channel, contentCanvasRef]);
+    // The view itself is a pixel pass on the blit layer (`presentChannelView`
+    // in the render effect — see core/rendering/channelView.ts for why it is
+    // not a CSS filter). This effect only handles the mode CHANGE: hide the
+    // blit layer so the frame drawn under the previous mode is not on screen
+    // until the render effect (which lists `channel` in its deps) draws the
+    // current frame again. Alpha-view frames are keyed apart in the frame
+    // cache (see `invalidationKey`), so nothing needs clearing here.
+    cacheCanvasRef?.current?.classList.remove(workspaceStyles.cacheCanvasVisible ?? 'cacheCanvasVisible');
+  }, [channel, cacheCanvasRef]);
 
   // ── Re-render on scene / playhead / guide changes ──────────────────
   //
@@ -1716,20 +1776,16 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
           return;
         }
       }
-      // Info readout (AE Info panel): comp-space position + sampled pixel under
-      // the cursor. The PIXEL sample is hover-only: `samplePixelRgba` costs a
-      // forced layout (getBoundingClientRect) plus a canvas readback, and
-      // paying that on every pointermove of a drag taxes exactly the gesture
-      // that most needs the budget. Position stays live either way.
+      // Info readout (AE's Info panel): comp-space position + the sampled
+      // pixel under the cursor. `useWorkspaceProbe` documents why the pixel
+      // half is hover-only.
       {
         const p = local(e);
-        const world = controller.ws.screenToWorld(p);
-        const content = contentCanvasRef.current;
-        useInfoStore.getState().set({
-          x: Math.round(world.x),
-          y: Math.round(world.y),
-          rgba: e.buttons === 0 && content ? samplePixelRgba(content, p) : null,
-          present: true,
+        publishProbe({
+          screen: p,
+          world: controller.ws.screenToWorld(p),
+          content: contentCanvasRef.current,
+          buttons: e.buttons,
         });
       }
       // Active Brush paint: append the sample and repaint the wet-stroke preview.
@@ -1991,7 +2047,7 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
 
     // Info readout: clear the pixel/position when the cursor leaves the canvas.
     const onLeave = (): void => {
-      useInfoStore.getState().clear();
+      clearProbe();
       if (mpHover) {
         mpHover = null;
         controller.requestRender();
@@ -2038,305 +2094,37 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
   return { ready, renderError };
 }
 
-// ── Canvas context menus ─────────────────────────────────────────────
-
-/**
- * Right-click menu for a canvas node — the same actions as the scene-tree menu
- * (DemoPanels.openNodeMenu), minus Rename: the tree's inline rename is local
- * ScenePanel state and window.prompt is unavailable in Electron.
- */
-/** The playhead, in raw comp time. */
-function playheadTime(): number {
-  const s = useProjectStore.getState();
-  return s.tabs[s.activeTabId ?? '']?.time ?? 0;
-}
-
-/** The active composition's pixel size — the space projections resolve in. */
-function compSize(): { w: number; h: number } {
-  const s = useProjectStore.getState();
-  const comp = s.comps[s.tabs[s.activeTabId ?? '']?.compositionId ?? 'comp_root'];
-  return { w: comp?.width ?? 1920, h: comp?.height ?? 1080 };
-}
-
-/**
- * The value a property has right now (sampled keyframes → component prop →
- * type default) — what an added keyframe must capture so nothing jumps.
- */
-function currentPropValue(id: string, prop: string): number {
-  const t = (() => {
-    const s = useProjectStore.getState();
-    return s.tabs[s.activeTabId ?? '']?.time ?? 0;
-  })();
-  const layerT = getRemappedTime(id, t);
-  const sampled = defaultAnimation.sample(id, prop, layerT);
-  if (sampled !== undefined) return sampled;
-  const node = defaultSceneGraph.getNode(id);
-  if (node) {
-    for (const c of node.components) {
-      const v = (c.props as Record<string, unknown>)[prop];
-      if (typeof v === 'number') return v;
-    }
-    if (prop === 'x') return node.transform.position.x;
-    if (prop === 'y') return node.transform.position.y;
-  }
-  const DEFAULTS: Record<string, number> = { scaleX: 1, scaleY: 1, opacity: 100 };
-  return DEFAULTS[prop] ?? 0;
-}
-
-/** Keyframe `props` at the playhead, capturing their current values. */
-function addKeyframesAtPlayhead(id: string, label: string, props: readonly string[]): void {
-  const s = useProjectStore.getState();
-  const t = s.tabs[s.activeTabId ?? '']?.time ?? 0;
-  const layerT = getRemappedTime(id, t);
-  runAnimEdit(`Add ${label} keyframe`, () => {
-    for (const p of props) {
-      defaultAnimation.setKeyframe(id, p, layerT, currentPropValue(id, p));
-    }
-  });
-}
-
-function labelColorCanvasMenuItems(targetId: string): ContextMenuItem[] {
-  const sel = useSelectionStore.getState().ids;
-  const ids: string[] = sel.includes(targetId) ? [...sel] : [targetId];
-  const node = defaultSceneGraph.getNode(targetId);
-  const current = node ? readNodeLabelColor(node) : undefined;
-  return [
-    {
-      id: 'label-none',
-      label: 'None (Default)',
-      icon: current === undefined ? 'check' : undefined,
-      onSelect: () => setNodeLabelColor(ids, undefined),
-    },
-    { id: 'label-sep', separator: true },
-    ...LABEL_COLORS.map((c): ContextMenuItem => ({
-      id: `label-${c.id}`,
-      label: c.label,
-      icon: current === c.color ? 'check' : undefined,
-      onSelect: () => setNodeLabelColor(ids, c.color),
-    })),
-  ];
-}
-
-/**
- * The Video submenu — the footage verbs, gathered where the footage IS.
+/*
+ * The canvas context menus moved to `useWorkspaceContextMenu.ts`.
  *
- * Every one of these already existed, spread across the Effects panel's Time
- * controls, the Inspector's Track Motion section and the Assets panel's
- * right-click. Users reported reaching for them on the LAYER and finding
- * nothing; a right-click on the clip is where an editor's muscle memory goes.
- * The submenu routes to the same single implementations — nothing here is a
- * second copy of a behaviour.
+ * They were ~290 lines of pure top-level builders — node menu, footage
+ * submenu, empty-canvas menu, and the four helpers they share — with no
+ * dependency on this hook's refs, backend or render loop. That made them the
+ * one block that could leave without threading state, which is why they were
+ * the first to go.
  */
-function videoContextMenuItems(id: string): ContextMenuItem {
-  const time = getNodeLayerTime(id);
-  const playhead = (() => {
-    const ws = useWorkspaceStore.getState();
-    return (ws.activeTabId ? ws.tabs[ws.activeTabId]?.time : 0) ?? 0;
-  })();
-  const speed = (label: string, stretch: number): ContextMenuItem => ({
-    id: `spd-${stretch}`,
-    label,
-    icon: time.stretch === stretch ? 'check' : undefined,
-    onSelect: () => updateNodeLayerTime(id, { stretch }),
-  });
-  const blend = (label: string, mode: FrameBlend): ContextMenuItem => ({
-    id: `fb-${mode}`,
-    label,
-    icon: time.frameBlend === mode ? 'check' : undefined,
-    onSelect: () => updateNodeLayerTime(id, { frameBlend: mode }),
-  });
-  return {
-    id: 'video',
-    label: 'Video',
-    children: [
-      // Speed is the USER's word; stretch is the model's (200% stretch = half
-      // speed). The labels speak speed so nobody does the reciprocal in their
-      // head mid-edit.
-      { id: 'speed', label: 'Speed', children: [
-        speed('25% (4× slower)', 400),
-        speed('50% (2× slower)', 200),
-        speed('100% (normal)', 100),
-        speed('200% (2× faster)', 50),
-        speed('400% (4× faster)', 25),
-      ] },
-      { id: 'reverse', label: time.reverse ? 'Un-reverse' : 'Reverse', onSelect: () => updateNodeLayerTime(id, { reverse: !time.reverse }) },
-      {
-        id: 'freeze',
-        label: time.freeze ? 'Un-freeze Frame' : 'Freeze Frame at Playhead',
-        onSelect: () => updateNodeLayerTime(id, time.freeze
-          ? { freeze: false }
-          : { freeze: true, freezeTime: playhead }),
-      },
-      { id: 'fb', label: 'Frame Blending', children: [
-        blend('Off', 'none'),
-        blend('Frame Mix', 'mix'),
-        blend('Pixel Motion (smooth slow-mo)', 'pixelMotion'),
-      ] },
-      { id: 'sep-v1', separator: true },
-      {
-        id: 'stab',
-        label: 'Stabilize (smooth)…',
-        onSelect: () => {
-          const src = sourceDisplaySize(id);
-          useTrackerStore.getState().setMode('smooth', src?.width ?? 0, src?.height ?? 0);
-          useUIStore.getState().notify({
-            level: 'info',
-            message: 'Smooth Stabilize armed — open Inspector ▸ Track Motion and press Track.',
-            durationMs: 4000,
-          });
-        },
-      },
-      {
-        id: 'track',
-        label: 'Track Motion…',
-        onSelect: () => {
-          const src = sourceDisplaySize(id);
-          useTrackerStore.getState().setMode('follow', src?.width ?? 0, src?.height ?? 0);
-          useUIStore.getState().notify({
-            level: 'info',
-            message: 'Tracker armed — drag the point in the viewport, then Track in Inspector ▸ Track Motion.',
-            durationMs: 4000,
-          });
-        },
-      },
-      { id: 'sep-v2', separator: true },
-      {
-        id: 'interpret',
-        label: 'Interpret Footage…',
-        onSelect: () => {
-          const assetId = assetIdOf(defaultSceneGraph.getNode(id)!);
-          const asset = assetId ? useAssetStore.getState().assets.find((a) => a.id === assetId) : undefined;
-          if (asset) openInterpretFootage(asset);
-          else useUIStore.getState().notify({ level: 'info', message: 'This layer has no importable source to interpret.', durationMs: 2600 });
-        },
-      },
-    ],
-  };
-}
 
-function nodeContextMenuItems(id: string): ContextMenuItem[] {
-  const node = defaultSceneGraph.getNode(id);
-  const hidden = node?.visible === false;
-  const locked = (node as { locked?: boolean } | undefined)?.locked === true;
-  const solo = (node as { solo?: boolean } | undefined)?.solo === true;
-  const isGroup = node ? readNodeKind(node) === 'group' : false;
-  const isVideo = node ? readNodeKind(node) === 'video' : false;
-  const renameNode = (): void => {
-    const n = defaultSceneGraph.getNode(id);
-    if (!n) return;
-    void (async () => {
-      const newName = await customPrompt('Rename Layer', 'Give this layer a new name.', n.name, {
-        confirmLabel: 'Rename',
-      });
-      if (!newName?.trim()) return;
-      // Re-read: the dialog is async now, so the node could have been deleted
-      // while it was open. The old synchronous prompt could not have this gap.
-      if (!defaultSceneGraph.getNode(id)) return;
-      const result = renameLayer(id, newName);
-      if (!result.ok) return;
-      if (result.repaired.length > 0) {
-        const count = result.repaired.length;
-        useUIStore.getState().notify({
-          level: 'info',
-          message: `${count} expression${count === 1 ? '' : 's'} updated to follow the new name.`,
-          durationMs: 4000,
-        });
-      }
-      if (result.captured.length > 0 || result.nameAlreadyInUse) {
-        useUIStore.getState().notify({
-          level: 'warning',
-          message: `Another layer already uses “${newName.trim()}”; review expressions that reference that name.`,
-          durationMs: 8000,
-        });
-      }
-    })();
-  };
-  return [
-    { id: 'rename', label: 'Rename…', onSelect: renameNode },
-    { id: 'duplicate', label: 'Duplicate', onSelect: () => duplicateSelectedLayers() },
-    // One call for the whole selection — see `reorderSiblings` for what looping
-    // over it did to a multi-selection. Same helper the Layer menu and the
-    // Scene panel's context menu use.
-    { id: 'arrange', label: 'Arrange', children: [
-      { id: 'arr-front', label: 'Bring to Front', onSelect: () => { arrangeNodes(useSelectionStore.getState().ids, 'front'); } },
-      { id: 'arr-forward', label: 'Bring Forward', onSelect: () => { arrangeNodes(useSelectionStore.getState().ids, 'forward'); } },
-      { id: 'arr-backward', label: 'Send Backward', onSelect: () => { arrangeNodes(useSelectionStore.getState().ids, 'backward'); } },
-      { id: 'arr-back', label: 'Send to Back', onSelect: () => { arrangeNodes(useSelectionStore.getState().ids, 'back'); } },
-    ] },
-    { id: 'sep0', separator: true },
-    { id: 'kf', label: 'Add Keyframe', children: [
-      { id: 'kf-pos', label: 'Position', onSelect: () => addKeyframesAtPlayhead(id, 'Position', ['x', 'y']) },
-      { id: 'kf-scale', label: 'Scale', onSelect: () => addKeyframesAtPlayhead(id, 'Scale', ['scaleX', 'scaleY']) },
-      { id: 'kf-rot', label: 'Rotation', onSelect: () => addKeyframesAtPlayhead(id, 'Rotation', ['rotation']) },
-      { id: 'kf-op', label: 'Opacity', onSelect: () => addKeyframesAtPlayhead(id, 'Opacity', ['opacity']) },
-      { id: 'kf-all', label: 'All Transform', onSelect: () => addKeyframesAtPlayhead(id, 'Transform', ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity']) },
-    ] },
-    // Footage verbs on the footage itself — see videoContextMenuItems.
-    ...(isVideo ? [videoContextMenuItems(id), { id: 'sep-vid', separator: true } as ContextMenuItem] : []),
-    { id: 'sep1', separator: true },
-    { id: 'toggle', label: hidden ? 'Show' : 'Hide', onSelect: toggleSelectedVisible },
-    { id: 'lock', label: locked ? 'Unlock' : 'Lock', onSelect: () => toggleSelectedLocked() },
-    { id: 'solo', label: solo ? 'Unsolo' : 'Solo', onSelect: () => toggleSelectedSolo() },
-    {
-      id: 'toggle-3d',
-      label: node && is3DEnabled(node) ? 'Disable 3D Layer' : 'Enable 3D Layer',
-      onSelect: () => {
-        const ids = useSelectionStore.getState().ids;
-        for (const nid of (ids.includes(id) ? ids : [id])) {
-          const n = defaultSceneGraph.getNode(nid);
-          if (n && canBe3D(n)) set3DEnabled(nid, !is3DEnabled(n));
-        }
-        bumpScene();
-      },
-    },
-    { id: 'labelColor', label: 'Label Color', children: labelColorCanvasMenuItems(id) },
-    { id: 'sep2', separator: true },
-    { id: 'group', label: 'Group Selection', onSelect: () => groupSelectedLayers() },
-    ...(isGroup ? [{ id: 'ungroup', label: 'Ungroup', onSelect: () => ungroupSelected() }] : []),
-    { id: 'precompose', label: 'Pre-compose…', onSelect: () => precomposeSelected() },
-    { id: 'rig-logo', label: 'Rig Logo for Animation', onSelect: () => { void rigLogoForAnimation(); } },
-    ...svgContextMenuItems(id),
-    ...(useSelectionStore.getState().ids.length >= 2
-      ? [
-          { id: 'sep_merge', separator: true },
-          {
-            id: 'merge-paths',
-            label: 'Merge Paths',
-            children: [
-              { id: 'merge-live-union', label: 'Live Union (Add)', onSelect: () => liveMergeSelectedPaths('union') },
-              { id: 'merge-live-subtract', label: 'Live Subtract', onSelect: () => liveMergeSelectedPaths('subtract') },
-              { id: 'merge-live-intersect', label: 'Live Intersect', onSelect: () => liveMergeSelectedPaths('intersect') },
-              { id: 'merge-live-exclude', label: 'Live Exclude (XOR)', onSelect: () => liveMergeSelectedPaths('exclude') },
-              { id: 'merge-sep', label: '—', disabled: true },
-              { id: 'merge-union', label: 'Bake Union', onSelect: () => mergeSelectedPaths('union') },
-              { id: 'merge-subtract', label: 'Bake Subtract', onSelect: () => mergeSelectedPaths('subtract') },
-              { id: 'merge-intersect', label: 'Bake Intersect', onSelect: () => mergeSelectedPaths('intersect') },
-              { id: 'merge-exclude', label: 'Bake Exclude', onSelect: () => mergeSelectedPaths('exclude') },
-            ],
-          },
-        ]
-      : []),
-    { id: 'sep3', separator: true },
-    { id: 'delete', label: 'Delete', danger: true, onSelect: () => deleteSelectedLayers() },
-  ];
-}
-
-/** Right-click menu for empty canvas — view/selection basics. */
-function canvasContextMenuItems(controller: WorkspaceController): ContextMenuItem[] {
-  const guides = useGuidesStore.getState();
-  const hasSelection = useSelectionStore.getState().ids.length > 0;
-  return [
-    { id: 'select-all', label: 'Select All', onSelect: () => controller.ws.selectAll() },
-    { id: 'deselect', label: 'Deselect', disabled: !hasSelection, onSelect: () => controller.ws.clearSelection() },
-    { id: 'sep1', separator: true },
-    { id: 'fit', label: 'Fit Comp in View', onSelect: () => controller.fitComposition() },
-    { id: 'sep2', separator: true },
-    { id: 'grid', label: guides.grid ? 'Hide Grid' : 'Show Grid', onSelect: () => guides.toggleGrid() },
-    { id: 'rulers', label: guides.rulers ? 'Hide Rulers' : 'Show Rulers', onSelect: () => guides.toggleRulers() },
-  ];
-}
 
 // ── Overlay painter ──────────────────────────────────────────────────
+/**
+ * Overlay opacity (View Options / the header strip's slider) folded into a
+ * painter's own alpha.
+ *
+ * The reference chrome — guides and the safe-area cage — is drawn over the
+ * COMPOSITION, and how loud it should be depends on the footage under it: a
+ * dashed white cage that reads perfectly over a dark plate is unusable over a
+ * white one. `guidesStore.overlayOpacity` is that dial, and it MULTIPLIES the
+ * alpha each painter already chose rather than replacing it, so the relative
+ * weighting between (say) the action-safe box and its label survives.
+ *
+ * Interactive handles are deliberately NOT faded by it: a grip you are about
+ * to drag has to stay solid, or the dial becomes a way to make the viewport
+ * unusable.
+ */
+function refAlpha(base: number): number {
+  return base * clampOverlayOpacity(useGuidesStore.getState().overlayOpacity);
+}
+
 function paintOverlay(
   canvas: HTMLCanvasElement,
   overlay: WorkspaceOverlay,
@@ -2371,6 +2159,13 @@ function paintOverlay(
     paintSafeArea(ctx, controller);
   }
 
+  // Display mode. Drawn FIRST so the selection outline, handles and every
+  // other piece of chrome stay on top of it.
+  const displayMode = useViewportDisplayStore.getState().displayMode;
+  if (displayMode !== 'shaded' && controller) {
+    paintDisplayMode(ctx, controller, displayMode);
+  }
+
   // Wet-stroke preview: the Brush's in-flight samples (screen space), drawn as
   // round-capped ink at brush width so what you drag IS what commits on release.
   if (paintStroke && paintStroke.length > 0) {
@@ -2400,10 +2195,11 @@ function paintOverlay(
     ctx.restore();
   }
 
-  // Persistent ruler guides (screen-space, from the engine's overlay).
-  if (overlay.guides.length) {
+  // Persistent ruler guides (screen-space, from the engine's overlay). Hidden
+  // wholesale by View ▸ Show Guides; lock is per guide and lives in the engine.
+  if (overlay.guides.length && guidesState.guidesVisible) {
     ctx.save();
-    ctx.globalAlpha = GUIDE_ALPHA;
+    ctx.globalAlpha = refAlpha(GUIDE_ALPHA);
     ctx.strokeStyle = guideColor();
     ctx.lineWidth = 1;
     for (const g of overlay.guides) {
@@ -2424,7 +2220,7 @@ function paintOverlay(
   // pointer is back over the ruler — releasing there cancels).
   if (guideDrag && !guideDrag.guideId && !guideDrag.overRuler) {
     ctx.save();
-    ctx.globalAlpha = GUIDE_ALPHA;
+    ctx.globalAlpha = refAlpha(GUIDE_ALPHA);
     ctx.strokeStyle = guideColor();
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
@@ -3317,31 +3113,69 @@ function strokeRect(ctx: CanvasRenderingContext2D, r: { x: number; y: number; wi
   ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.width, r.height);
 }
 
-function ensureSvgChannelFilters(): void {
-  if (typeof document === 'undefined' || document.getElementById('motion-editor-channel-filters')) return;
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.id = 'motion-editor-channel-filters';
-  svg.style.position = 'absolute';
-  svg.style.width = '0';
-  svg.style.height = '0';
-  svg.style.overflow = 'hidden';
-  svg.innerHTML = `
-    <defs>
-      <filter id="filter-channel-red">
-        <feColorMatrix type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 1 0" />
-      </filter>
-      <filter id="filter-channel-green">
-        <feColorMatrix type="matrix" values="0 1 0 0 0  0 1 0 0 0  0 1 0 0 0  0 0 0 1 0" />
-      </filter>
-      <filter id="filter-channel-blue">
-        <feColorMatrix type="matrix" values="0 0 1 0 0  0 0 1 0 0  0 0 1 0 0  0 0 0 1 0" />
-      </filter>
-      <filter id="filter-channel-alpha">
-        <feColorMatrix type="matrix" values="0 0 0 1 0  0 0 0 1 0  0 0 0 1 0  0 0 0 1 0" />
-      </filter>
-    </defs>
-  `;
-  document.body.appendChild(svg);
+/**
+ * Wireframe / bounding-box DISPLAY MODES.
+ *
+ * ## Why the overlay draws this and the renderer does not
+ *
+ * A true GPU wireframe means a `line-list` pipeline, and a triangle index
+ * buffer cannot be reused for one: reinterpreting `[a,b,c]` triangles as
+ * `[a,b],[c,…]` line pairs draws a zigzag, not edges. It would need its own
+ * index buffer, its own shader in both backends (`shaderBackendParity`), and a
+ * new uniform struct (`uniformPackerSize` PACKERS row). That is a renderer
+ * feature, not a small change — so the modes are drawn here, over a hidden
+ * content canvas (`Workspace.module.css` → `.canvasHidden`), which gives the
+ * same READING of the scene at overlay cost.
+ *
+ * What that trades away: per-triangle mesh edges. You get every layer's
+ * oriented box and, in wireframe, its diagonals — enough to see depth,
+ * stacking, off-screen layers and a rotated layer's true footprint, which is
+ * what the mode is for on a dense 3D comp.
+ *
+ * ## Geometry
+ *
+ * `worldCorners` is the oriented box the selection outline already uses, so a
+ * rotated layer draws rotated and a parented one draws where its parent puts
+ * it. Falls back to the AABB when an adapter has not supplied corners.
+ */
+function paintDisplayMode(
+  ctx: CanvasRenderingContext2D,
+  controller: WorkspaceController,
+  mode: 'wireframe' | 'bounds',
+): void {
+  const C = themeGuides();
+  ctx.save();
+  ctx.strokeStyle = C.ACCENT;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = refAlpha(mode === 'wireframe' ? 0.9 : 0.65);
+  for (const node of controller.sceneNodes()) {
+    if (!node) continue;
+    const b = node.worldBounds;
+    const corners =
+      node.worldCorners ??
+      ([
+        { x: b.x, y: b.y },
+        { x: b.x + b.width, y: b.y },
+        { x: b.x + b.width, y: b.y + b.height },
+        { x: b.x, y: b.y + b.height },
+      ] as const);
+    const p = corners.map((c) => controller.ws.worldToScreen({ x: c.x, y: c.y }));
+    if (p.length < 4 || p.some((q) => !Number.isFinite(q.x) || !Number.isFinite(q.y))) continue;
+    ctx.beginPath();
+    ctx.moveTo(p[0]!.x, p[0]!.y);
+    for (let i = 1; i < p.length; i++) ctx.lineTo(p[i]!.x, p[i]!.y);
+    ctx.closePath();
+    if (mode === 'wireframe') {
+      // The two diagonals: the cheapest thing that turns a rectangle into a
+      // readable SURFACE, and what tells two overlapping layers apart.
+      ctx.moveTo(p[0]!.x, p[0]!.y);
+      ctx.lineTo(p[2]!.x, p[2]!.y);
+      ctx.moveTo(p[1]!.x, p[1]!.y);
+      ctx.lineTo(p[3]!.x, p[3]!.y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function paintSafeArea(ctx: CanvasRenderingContext2D, controller: WorkspaceController): void {
@@ -3369,7 +3203,7 @@ function paintSafeArea(ctx: CanvasRenderingContext2D, controller: WorkspaceContr
     const asY = p0.y + h * 0.05;
     const asW = w * 0.9;
     const asH = h * 0.9;
-    ctx.globalAlpha = 0.55;
+    ctx.globalAlpha = refAlpha(0.55);
     ctx.setLineDash([4, 4]);
     ctx.strokeRect(asX + 0.5, asY + 0.5, asW, asH);
 
@@ -3378,7 +3212,7 @@ function paintSafeArea(ctx: CanvasRenderingContext2D, controller: WorkspaceContr
     const tsY = p0.y + h * 0.1;
     const tsW = w * 0.8;
     const tsH = h * 0.8;
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = refAlpha(0.45);
     ctx.setLineDash([2, 2]);
     ctx.strokeRect(tsX + 0.5, tsY + 0.5, tsW, tsH);
 
@@ -3386,7 +3220,7 @@ function paintSafeArea(ctx: CanvasRenderingContext2D, controller: WorkspaceContr
     const cx = p0.x + w / 2;
     const cy = p0.y + h / 2;
     ctx.setLineDash([]);
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = refAlpha(0.7);
     ctx.beginPath();
     ctx.moveTo(cx - 10, cy + 0.5); ctx.lineTo(cx + 10, cy + 0.5);
     ctx.moveTo(cx + 0.5, cy - 10); ctx.lineTo(cx + 0.5, cy + 10);
@@ -3394,7 +3228,7 @@ function paintSafeArea(ctx: CanvasRenderingContext2D, controller: WorkspaceContr
 
     // Labels. Tracked uppercase at 9px is the app's chrome-label convention,
     // and the tracking is what keeps it legible over busy footage.
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = refAlpha(0.85);
     ctx.font = '600 9px ui-sans-serif, system-ui, sans-serif';
     ctx.letterSpacing = '0.06em';
     ctx.textAlign = 'left';

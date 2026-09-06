@@ -9,13 +9,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DIR = __dirname;
-const DIALOG = readFileSync(join(DIR, 'ExportDialog.tsx'), 'utf8');
+// The form was extracted into ExportForm.tsx (shared with the docked panel);
+// the dialog file keeps the modal + footer. The claims below are about the
+// dialog as the user meets it, so both files are read as one.
+const DIALOG = [
+  readFileSync(join(DIR, 'ExportDialog.tsx'), 'utf8'),
+  readFileSync(join(DIR, 'ExportForm.tsx'), 'utf8'),
+].join('\n');
 const MANAGER = readFileSync(join(__dirname, '..', '..', 'core', 'export', 'exportManager.ts'), 'utf8');
 
 describe('Export composition dialog', () => {
   it('opens at lg so preview and settings sit side by side', () => {
     expect(DIALOG).toMatch(/size: 'lg'/);
-    expect(DIALOG).toMatch(/className=\{styles\.layout\}/);
+    expect(DIALOG).toContain('styles.layout');
     expect(DIALOG).toMatch(/className=\{styles\.previewCol\}/);
     expect(DIALOG).toMatch(/className=\{styles\.settingsCol\}/);
   });
@@ -34,8 +40,8 @@ describe('Export composition dialog', () => {
     expect(MANAGER).toMatch(/opts\.useWorkArea === false/);
   });
 
-  it('pins the filename and Export action in a footer', () => {
-    expect(DIALOG).toMatch(/styles\.footer/);
+  it('pins the filename and Export action in a DialogFooter', () => {
+    expect(DIALOG).toMatch(/<DialogFooter/);
     expect(DIALOG).toMatch(/styles\.fileName/);
     expect(DIALOG).toMatch(/: 'Export'/);
   });

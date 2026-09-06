@@ -94,8 +94,13 @@
   /* Layout-specific (composed) */
   --space-panel-padding:    var(--space-6);
   --space-panel-gap:        var(--space-2);
-  --space-toolbar-height:   40px;
-  --space-statusbar-height: 24px;
+  /* ALIASES of the `--bar-height-*` scale above, kept for the call sites that
+     still spell the old names. They used to carry their own numbers (40 / 24)
+     that disagreed with the bars actually drawn (36 / 22), so a sheet that
+     reserved `--space-toolbar-height` under a `--bar-height-tool` bar was 4px
+     off. One scale, two spellings — prefer `--bar-height-*` in new code. */
+  --space-toolbar-height:   var(--bar-height-tool);
+  --space-statusbar-height: var(--bar-height-status);
   --space-titlebar-height:  32px;
   --space-timeline-height:  260px;
   --space-sidebar-width:    280px;
@@ -121,7 +126,6 @@
     --bar-height-menu: 28px;
     --bar-height-tool: 32px;
     --bar-height-panel: 28px;
-    --space-toolbar-height: 34px;
     --space-sidebar-width: 260px;
     --space-inspector-width: 280px;
   }

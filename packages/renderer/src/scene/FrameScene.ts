@@ -65,6 +65,9 @@ export interface RenderableColorMatrix {
   offset: readonly number[];
 }
 
+/** One packed uniform slot. */
+export type FxVec4 = readonly [number, number, number, number];
+
 export type RenderableEffect = 
   | {
       type: 'blur';
@@ -266,6 +269,160 @@ export type RenderableEffect =
     }
   | { type: 'magnify'; cx: number; cy: number; radius: number; scale: number; square: boolean; feather: number; lw: number; lh: number }
   | { type: 'mosaic'; cols: number; rows: number; sharp: boolean; lw: number; lh: number }
+  /**
+   * Round seven, the footage set. The two box blurs map onto the separable
+   * Gaussian pass with `radiusPx` already converted to its sigma (r/sqrt 3);
+   * `dims` 0 both, 1 horizontal only, 2 vertical only.
+   */
+  | { type: 'gaussian-blur'; radiusPx: number; dims: 0 | 1 | 2 }
+  | { type: 'fast-box-blur'; radiusPx: number; dims: 0 | 1 | 2 }
+  | { type: 'radial-blur'; cx: number; cy: number; amount: number; zoom: boolean; steps: number; lw: number; lh: number }
+  /** `m` is the inverse homography, row-major, destination px -> unit square. */
+  | { type: 'corner-pin'; m: readonly number[]; lw: number; lh: number }
+  | { type: 'transform'; px: number; py: number; scale: number; rot: number; opacity: number; lw: number; lh: number }
+  /**
+   * Round eight, the keying set. Colours are display sRGB 0..1; the matte
+   * passes carry the layer size so the separable alpha morphology can step in
+   * layer pixels. `border`: 0 ignore off-layer taps, 1 transparent, 2 clamp.
+   */
+  | {
+      type: 'keylight';
+      kr: number; kg: number; kb: number; balance: number;
+      gain: number; clipBlack: number; clipWhite: number; despill: number;
+      /** Channel indices (0 r, 1 g, 2 b) and the screen colour's own screen amount. */
+      p: number; a: number; b: number; denom: number;
+      /** Matte refinement, in layer px: erode (>0) / dilate (<0), then box-soften. */
+      chokePx: number; softPx: number; lw: number; lh: number;
+    }
+  | { type: 'linear-color-key'; kr: number; kg: number; kb: number; mode: number; tol: number; soft: number; keep: boolean; keyHue: number; keyLum: number }
+  | { type: 'luma-key'; keyType: number; cut: number; tol: number; soft: number }
+  | { type: 'color-key'; kr: number; kg: number; kb: number; tol: number; soft: number }
+  | { type: 'color-range'; ky: number; ku: number; kv: number; mode: number; lo: number; hi: number; wl: number }
+  | { type: 'extract'; channel: number; black: number; white: number; blackSoft: number; whiteSoft: number; invert: boolean }
+  | { type: 'spill-suppressor'; keyHue: number; strength: number; preserveLuma: boolean }
+  | { type: 'simple-choker'; radius: number; erode: boolean; lw: number; lh: number }
+  | { type: 'matte-choker'; spread: number; choke: number; softness: number; iterations: number; lw: number; lh: number }
+  | { type: 'wave-warp'; dx: number; dy: number; k: number; phase: number; height: number; lw: number; lh: number }
+  /** Round nine: per-pixel colour, channel and transition set. Colours 0..1 display sRGB. */
+  | { type: 'directional-blur'; dx: number; dy: number; length: number; steps: number; lw: number; lh: number }
+  | { type: 'linear-wipe'; gx: number; gy: number; pos: number; soft: number; full: boolean; lw: number; lh: number }
+  | { type: 'shift-channels'; a: number; r: number; g: number; b: number }
+  | { type: 'alpha-levels'; inBlack: number; span: number; invGamma: number; outBlack: number; outWhite: number }
+  | { type: 'solid-composite'; cr: number; cg: number; cb: number; so: number; co: number; mode: number }
+  | { type: 'channel-combiner'; mode: number }
+  | { type: 'remove-color-matting'; br: number; bg: number; bb: number; floor: number; strength: number }
+  | {
+      type: 'change-color';
+      th: number; ts: number; tl: number; hT: number; sT: number; lT: number; soft: number;
+      hueShift: number; satScale: number; lightScale: number; invert: boolean;
+    }
+  | {
+      type: 'change-to-color';
+      fh: number; fs: number; fl: number; hT: number; sT: number; lT: number; soft: number;
+      preserve: boolean; dh: number; ds: number; dl: number;
+    }
+  | { type: 'leave-color'; th: number; tol: number; soft: number; strength: number }
+  | { type: 'toner'; stops: readonly number[]; k: number }
+  | { type: 'venetian-blinds'; cos: number; sin: number; pitch: number; half: number; soft: number; full: boolean; lw: number; lh: number }
+  | { type: 'radial-wipe'; cx: number; cy: number; start: number; swept: number; dir: number; soft: number; lw: number; lh: number }
+  | {
+      type: 'iris-wipe';
+      cx: number; cy: number; outer: number; inner: number; points: number; rot: number;
+      feath: number; useInner: boolean; invert: boolean; lw: number; lh: number;
+    }
+  | { type: 'line-sweep'; nx: number; ny: number; n: number; stag: number; feath: number; t: number; invert: boolean; lw: number; lh: number }
+  /** Round ten: separable neighbourhood passes and drawn generators. */
+  | { type: 'channel-blur'; r: number; g: number; b: number; a: number; dims: 0 | 1 | 2; repeatEdge: boolean; lw: number; lh: number }
+  | { type: 'minimax'; op: number; radius: number; mask: number; dir: 0 | 1 | 2; lw: number; lh: number }
+  /** `sigmaPx` is the blur for the reference copy, already converted from the kernel's box radius. */
+  | { type: 'unsharp-mask'; amount: number; threshold: number; sigmaPx: number }
+  | { type: 'shadow-highlight'; shadow: number; highlight: number; invWidth: number; sigmaPx: number }
+  | { type: 'checkerboard'; sizeW: number; sizeH: number; startX: number; startY: number; colA: readonly [number, number, number]; colB: readonly [number, number, number]; opacity: number; lw: number; lh: number }
+  | { type: 'grid'; pitchX: number; pitchY: number; offX: number; offY: number; thickness: number; snap: number; opacity: number; color: readonly [number, number, number]; lw: number; lh: number }
+  | { type: 'four-color-gradient'; tl: readonly [number, number, number]; tr: readonly [number, number, number]; bl: readonly [number, number, number]; br: readonly [number, number, number]; blend: number; lw: number; lh: number }
+  | { type: 'circle'; cx: number; cy: number; radius: number; feather: number; thickness: number; opacity: number; invert: boolean; composite: number; color: readonly [number, number, number]; lw: number; lh: number }
+  | { type: 'ellipse'; cx: number; cy: number; rx: number; ry: number; rot: number; thickness: number; softness: number; opacity: number; composite: number; color: readonly [number, number, number]; lw: number; lh: number }
+  /** Round eleven: advanced distort / transition / stylize set. Fields are the shader's own slots — fxRoundEleven.ts documents each. */
+  | { type: 'polar-coordinates'; t: number; conv: 0 | 1; lw: number; lh: number }
+  | { type: 'optics-compensation'; k: number; reverse: boolean; cx: number; cy: number; norm: number; lw: number; lh: number }
+  | { type: 'warp'; style: number; bend: number; h: number; v: number; vert: boolean; lw: number; lh: number }
+  | { type: 'page-turn'; nx: number; ny: number; foldAt: number; rad: number; backA: number; shade: number; lw: number; lh: number }
+  | { type: 'split'; nx: number; ny: number; cx: number; cy: number; half: number; lw: number; lh: number }
+  | { type: 'slant'; slant: number; vert: boolean; anchor: number; lw: number; lh: number }
+  | { type: 'smear'; fx: number; fy: number; vx: number; vy: number; radius: number; el: number; lw: number; lh: number }
+  | { type: 'rolling-shutter'; sweep: number; wobble: number; flip: boolean; vertical: boolean; lw: number; lh: number }
+  /** `sigmaPx` 0 = no softening; the shadow map is the projected alpha blurred by the Gaussian pass. */
+  | { type: 'radial-shadow'; lx: number; ly: number; proj: number; color: readonly [number, number, number]; op: number; sigmaPx: number; shadowOnly: boolean; lw: number; lh: number }
+  | { type: 'flo-motion'; k1x: number; k1y: number; k1a: number; k2x: number; k2y: number; k2a: number; twoSigma2: number; reachOverSigma: number; lw: number; lh: number }
+  | { type: 'lens'; cx: number; cy: number; ballR: number; pull: number; lw: number; lh: number }
+  | { type: 'griddler'; tile: number; sx: number; sy: number; cosR: number; sinR: number; lw: number; lh: number }
+  | { type: 'ball-action'; g: number; R: number; jit: number; seed: number; lw: number; lh: number }
+  | { type: 'drizzle'; n: number; spread: number; bandW: number; freq: number; evolution: number; seed: number; amp: number; lw: number; lh: number }
+  | { type: 'jaws'; ux: number; uy: number; sep: number; tw: number; th: number; lw: number; lh: number }
+  | { type: 'pixel-polly'; t: number; cell: number; fx: number; fy: number; maxFly: number; grav: number; spin: number; seed: number; fade: number; cols: number; lw: number; lh: number }
+  | { type: 'twister'; t: number; axisY: number; twist: number; lw: number; lh: number }
+  | { type: 'card-dance'; rows: number; cols: number; amt: number; rot: number; phase: number; maxOff: number; lw: number; lh: number }
+  | { type: 'unmult'; thresh: number; boost: number }
+  | { type: 'cc-composite'; mix: number; mode: number; rgbOnly: boolean }
+  | { type: 'cc-scatterize'; amt: number; twist: number; windX: number; windY: number; seed: number; lw: number; lh: number }
+  | { type: 'radial-fast-blur'; cx: number; cy: number; amt: number; mode: number; lw: number; lh: number }
+  | { type: 'cross-blur'; rx: number; ry: number; repeatEdge: boolean; lw: number; lh: number }
+  | { type: 'scale-wipe'; cx: number; cy: number; ux: number; uy: number; wipeEdge: number; stretch: number; maxDist: number; lw: number; lh: number }
+  /** Field effects: `sigmaPx` blurs the copy whose luma gradient drives the pass (0 = read the layer itself). */
+  | { type: 'plastic'; bump: number; gain: number; l: readonly [number, number, number]; specGain: number; sigmaPx: number; lw: number; lh: number }
+  | { type: 'glass'; dispK: number; hgt: number; lx: number; ly: number; gain: number; shine: number; sigmaPx: number; lw: number; lh: number }
+  | { type: 'texturize'; pattern: number; gain: number; lx: number; ly: number; s: number; lw: number; lh: number }
+  | { type: 'threads'; th: number; period: number; dk: number; lw: number; lh: number }
+  | { type: 'hex-tile'; R: number; bd: number; lw: number; lh: number }
+  | { type: 'vector-blur'; amount: number; K: number; cosR: number; sinR: number; step: number; sigmaPx: number; lw: number; lh: number }
+  /**
+   * Rounds twelve + thirteen: the renderable carries its shader's packed vec4
+   * slots verbatim (`p`), documented per shader in fxRoundTwelve.ts and
+   * fxRoundThirteen.ts. The two-texture members add `sigmaPx` for the blurred
+   * reference copy (0 = the layer itself).
+   */
+  | { type: 'turbulent-displace'; p: readonly FxVec4[] }
+  | { type: 'curl-noise'; p: readonly FxVec4[] }
+  | { type: 'roughen-edges'; p: readonly FxVec4[] }
+  | { type: 'scatter'; p: readonly FxVec4[] }
+  | { type: 'colorama'; p: readonly FxVec4[] }
+  | { type: 'selective-color'; p: readonly FxVec4[] }
+  | { type: 'turbulent-noise'; p: readonly FxVec4[] }
+  | { type: 'add-grain'; p: readonly FxVec4[] }
+  | { type: 'median'; p: readonly FxVec4[] }
+  | { type: 'dust-scratches'; p: readonly FxVec4[] }
+  | { type: 'block-dissolve'; p: readonly FxVec4[] }
+  | { type: 'gradient-wipe'; p: readonly FxVec4[] }
+  | { type: 'card-wipe'; p: readonly FxVec4[] }
+  | { type: 'strobe-light'; p: readonly FxVec4[] }
+  | { type: 'burn-film'; p: readonly FxVec4[] }
+  | { type: 'light-wipe'; p: readonly FxVec4[] }
+  | { type: 'grid-wipe'; p: readonly FxVec4[] }
+  | { type: 'noise-alpha'; p: readonly FxVec4[] }
+  | { type: 'brush-strokes'; p: readonly FxVec4[] }
+  | { type: 'bilateral-blur'; p: readonly FxVec4[] }
+  | { type: 'smart-blur'; p: readonly FxVec4[] }
+  | { type: 'camera-lens-blur'; p: readonly FxVec4[] }
+  | { type: 'mesh-warp'; p: readonly FxVec4[] }
+  | { type: 'liquify'; p: readonly FxVec4[] }
+  | { type: 'bezier-warp'; p: readonly FxVec4[] }
+  | { type: 'cell-pattern'; p: readonly FxVec4[] }
+  | { type: 'radio-waves'; p: readonly FxVec4[] }
+  | { type: 'light-burst'; p: readonly FxVec4[] }
+  | { type: 'write-on'; p: readonly FxVec4[] }
+  | { type: 'star-burst'; p: readonly FxVec4[] }
+  | { type: 'snowfall'; p: readonly FxVec4[] }
+  | { type: 'rainfall'; p: readonly FxVec4[] }
+  | { type: 'cartoon'; p: readonly FxVec4[]; sigmaPx: number }
+  | { type: 'inner-shadow'; p: readonly FxVec4[]; sigmaPx: number }
+  | { type: 'inner-glow'; p: readonly FxVec4[]; sigmaPx: number }
+  | { type: 'satin'; p: readonly FxVec4[]; sigmaPx: number }
+  | { type: 'bevel'; p: readonly FxVec4[]; sigmaPx: number }
+  /** Round fourteen: histogram colour autos. `p` = the fx-auto-table slots (fxRoundFourteen.ts) — the reduction runs in CompositionPass. */
+  | { type: 'equalize'; p: readonly FxVec4[]; lw: number; lh: number }
+  | { type: 'auto-levels'; p: readonly FxVec4[]; lw: number; lh: number }
+  | { type: 'auto-contrast'; p: readonly FxVec4[]; lw: number; lh: number }
+  | { type: 'auto-color'; p: readonly FxVec4[]; lw: number; lh: number }
   | { type: 'find-edges'; invert: boolean; blend: number; lw: number; lh: number }
   | { type: 'emboss'; dx: number; dy: number; k: number; keep: number; lw: number; lh: number }
   | { type: 'color-emboss'; ox: number; oy: number; k: number; blend: number; lw: number; lh: number }

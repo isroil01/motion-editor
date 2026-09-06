@@ -49,6 +49,9 @@ import { splitKind } from '@core/plugins/layerKindSchema';
 
 import { AppearanceSection } from './AppearanceSection';
 import { AudioControls } from './AudioControls';
+import { EffectsSection } from './EffectsSection';
+import { PinnedSection } from './PinnedSection';
+import { hasPinnedSection } from '@core/inspector/pinnedProps';
 import { AudioDriverSection, hasAudioDriverSection } from './AudioDriverSection';
 import { CameraSection } from './CameraSection';
 import { CompositingSection } from './CompositingSection';
@@ -86,16 +89,27 @@ type PerNode<T> = T | ((nodeId: string) => T);
  * layer it is (and how it composites), and what moves it.
  *
  * A tab only appears when the selected layer has at least one section in it
- * (`inspectorCategoriesFor`), and the search box reads across all four, so
+ * (`inspectorCategoriesFor`), and the search box reads across all of them, so
  * splitting does not bring back the "which tab owns this property" guessing
  * that sank the old Transform / Style / Settings split.
+ *
+ * Two tabs joined the original four (2026-09-04):
+ *
+ *   • `pinned` — the layer's own shortlist (`__pinnedProps`, plus what is
+ *     promoted as an Essential Property). Its one section applies only while
+ *     the list is non-empty, so the tab is absent until something is pinned.
+ *   • `effects` — the applied-effect stack, which AE keeps in a separate
+ *     Effect Controls panel for no reason better than history. The dock panel
+ *     of that name still exists for anyone who wants a second, pinned surface.
  */
-export type InspectorCategory = 'transform' | 'style' | 'layer' | 'animation';
+export type InspectorCategory = 'pinned' | 'transform' | 'style' | 'layer' | 'effects' | 'animation';
 
 export const INSPECTOR_CATEGORIES: ReadonlyArray<{ id: InspectorCategory; label: string }> = [
+  { id: 'pinned', label: 'Pinned' },
   { id: 'transform', label: 'Transform' },
   { id: 'style', label: 'Style' },
   { id: 'layer', label: 'Layer' },
+  { id: 'effects', label: 'Effects' },
   { id: 'animation', label: 'Animation' },
 ];
 
@@ -160,6 +174,19 @@ const isKind = (want: string) => (nodeId: string): boolean => kindOf(nodeId) ===
  * THE ORDER. Editing this array is editing the inspector.
  */
 export const INSPECTOR_SECTIONS: readonly InspectorSectionDef[] = [
+  // ── 0. The layer's own shortlist ───────────────────────────────
+  // Present only while the layer has pins or promoted Essential Properties, so
+  // the Pinned tab appears exactly when it would list something.
+  {
+    id: 'pinned',
+    title: 'Pinned',
+    icon: 'push-pin',
+    category: 'pinned',
+    defaultOpen: true,
+    keywords: 'pinned essential favourite favorite shortlist',
+    appliesTo: hasPinnedSection,
+    Component: PinnedSection,
+  },
   // ── 1. Where it is ─────────────────────────────────────────────
   {
     id: 'transform',
@@ -399,6 +426,20 @@ export const INSPECTOR_SECTIONS: readonly InspectorSectionDef[] = [
     Component: CompositingSection,
   },
 
+  // ── 4. The effect stack ────────────────────────────────────────
+  // Every layer that renders can carry effects; cameras and lights cannot, and
+  // audio has its own effect list inside Audio Settings.
+  {
+    id: 'effects',
+    title: 'Effects',
+    icon: 'sparkles',
+    category: 'effects',
+    defaultOpen: true,
+    keywords: 'effect fx stack blur glow filter plugin preset',
+    appliesTo: (id) => !isAbstract(id),
+    Component: EffectsSection,
+  },
+
   // ── 5. Layer Styles ────────────────────────────────────────────
   {
     id: 'layerStyles',
@@ -477,4 +518,20 @@ export function inspectorSectionsFor(nodeId: string, category: InspectorCategory
 export function inspectorCategoriesFor(nodeId: string): InspectorCategory[] {
   const present = new Set(inspectorSectionsFor(nodeId).map((s) => s.category));
   return INSPECTOR_CATEGORIES.map((c) => c.id).filter((id) => present.has(id));
+}
+
+/**
+ * How many of `nodeIds` a section applies to.
+ *
+ * With several layers selected the panel draws the PRIMARY layer's sections
+ * and edits all of them; a section only some of the selection has is still
+ * shown (the primary has it) and badged "2 of 3" so the reach of an edit is
+ * visible before it is made.
+ */
+export function sectionCoverage(def: InspectorSectionDef, nodeIds: ReadonlyArray<string>): number {
+  let n = 0;
+  for (const id of nodeIds) {
+    if (defaultSceneGraph.getNode(id) && def.appliesTo(id)) n += 1;
+  }
+  return n;
 }

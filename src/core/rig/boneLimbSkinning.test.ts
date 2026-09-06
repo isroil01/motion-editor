@@ -346,6 +346,11 @@ describe('a bone rig can reach the alpha-outline mesh', () => {
   it('the outline mesh is actually a different, finer mesh than the grid', () => {
     const grid = buildRestMesh(S, S, 0, { pins: [], meshDensity: 26, meshExpansion: 0, meshMode: 'grid' }, undefined, cov);
     const outline = buildRestMesh(S, S, 0, { pins: [], meshDensity: 26, meshExpansion: 0, meshMode: 'silhouette' }, undefined, cov);
-    expect(outline.vertices.length).not.toBe(grid.vertices.length);
+    // Vertex COUNTS can coincide (they did, at 892 each, once the outline
+    // mesher stopped dropping its boundary triangles), so compare what the
+    // meshers actually produce: the layout tag and the vertex positions.
+    expect(grid.layout).toBe('grid');
+    expect(outline.layout).toBe('outline');
+    expect(Array.from(outline.vertices)).not.toEqual(Array.from(grid.vertices));
   });
 });

@@ -20,19 +20,21 @@
 .subPanel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1, 4px);
-  padding-left: var(--space-3, 8px);
-  border-left: 2px solid var(--color-border-subtle, rgba(255, 255, 255, 0.1));
-  margin-top: var(--space-1, 4px);
+  gap: var(--space-2, 6px);
+  padding: var(--space-3, 8px);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-2, 6px);
 }
 
 .groupHeader {
-  font-size: var(--font-size-micro);
-  font-weight: 600;
-  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin: var(--space-1, 4px) 0 2px;
+  letter-spacing: var(--letter-spacing-uppercase);
+  margin: 0 0 var(--space-1);
 }
 
 /* Row WITHOUT ParentControl's border-bottom — a stack of ten of those reads
@@ -40,8 +42,9 @@
 .row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2, 6px);
-  min-height: var(--control-height-sm, 22px);
+  min-height: var(--control-height-row, 24px);
 }
 
 .label {
@@ -57,19 +60,26 @@
    and it keeps the styled shape rather than reverting to a naked OS control.
    MaterialSection carries the same rule for the ones that moved. */
 .select {
-  width: 90px;
-  height: var(--control-height-xs, 20px);
+  min-width: 110px;
+  height: var(--control-height-sm, 24px);
   font-size: var(--font-size-xs);
-  color: var(--color-text-primary, #ddd);
-  background: var(--color-surface-1, rgba(255, 255, 255, 0.06));
-  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.12));
-  border-radius: var(--radius-sm, 3px);
-  padding: 0 var(--space-1, 4px);
+  color: var(--color-text-primary);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-field-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2, 6px);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
+
 .select:hover {
-  border-color: var(--color-border, rgba(255, 255, 255, 0.2));
+  border-color: var(--color-border-strong);
 }
+
 .select:focus-visible {
-  outline: 2px solid var(--color-accent, #4a8cff);
+  outline: 1px solid var(--color-focus-ring);
   outline-offset: 1px;
 }
+

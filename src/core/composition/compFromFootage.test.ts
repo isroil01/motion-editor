@@ -123,10 +123,14 @@ describe('the control is reachable', () => {
     expect(ui).toMatch(/New Comp from Footage/);
   });
 
-  it('the metadata footer renders from the same panel', () => {
+  it('the metadata drawer renders from the same panel', () => {
+    // The footer became a drawer (`AssetDrawer.tsx`) when the bin gained a
+    // grid view; the panel still hosts it.
     const ui = readSource('layout/Assets/AssetsPanel.tsx');
-    expect(ui).toMatch(/assetMetaFooter/);
-    // fps only when probed — the honesty rule, pinned as prose in the source.
-    expect(ui).toMatch(/m\.fps && m\.fps > 0/);
+    expect(ui).toMatch(/AssetDrawer/);
+    const drawer = readSource('layout/Assets/AssetDrawer.tsx');
+    // fps only when probed — the honesty rule, pinned in the formatter that
+    // every fps readout goes through.
+    expect(drawer).toMatch(/if \(!fps \|\| fps <= 0\) return null/);
   });
 });

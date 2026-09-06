@@ -1,5 +1,5 @@
 /**
- * The edit modes, mounted inside the real `<Timeline>`.
+ * The edit modes, mounted inside the real timeline PANEL.
  *
  * The unit tests around this feature all pass with the wiring cut: the store
  * works, the geometry works, the cut search works, the button row works — and
@@ -15,7 +15,7 @@
  */
 
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { Timeline } from './Timeline';
+import { BottomTimeline } from '@layout/BottomTimeline/BottomTimeline';
 import type { TimelineModel } from './TimelineModel';
 import { useTimelineEditModeStore } from './timelineEditMode';
 
@@ -49,15 +49,21 @@ beforeEach(() => {
   useTimelineEditModeStore.getState().reset();
 });
 
+/**
+ * The <Timeline> root — the element the cursor rules read `data-edit-mode`
+ * off. It sits inside the panel now that the tool row is the panel's.
+ */
 function panel(): HTMLElement {
-  const { container } = render(<Timeline model={MODEL} />);
-  const root = container.firstElementChild;
+  const { container } = render(<BottomTimeline model={MODEL} />);
+  const root = container.querySelector('[data-edit-mode]');
   if (!(root instanceof HTMLElement)) throw new Error('Timeline rendered no root element');
   return root;
 }
 
-it('mounts the edit-tool row inside the timeline', () => {
+it('mounts the edit tools in the panel toolbar, above the timeline', () => {
   panel();
+  // ONE row: the panel's toolbar. Not a second row inside <Timeline>.
+  expect(screen.getAllByRole('toolbar', { name: 'Timeline tools' })).toHaveLength(1);
   expect(screen.getByRole('radiogroup', { name: 'Timeline edit tool' })).toBeInTheDocument();
   expect(screen.getAllByRole('radio')).toHaveLength(5);
 });

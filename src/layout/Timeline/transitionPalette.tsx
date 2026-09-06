@@ -24,8 +24,13 @@
  * — cannot be mistaken for a transition.
  */
 
+import { Icon } from '@components/Icon';
+import { Dropdown, type DropdownItem } from '@components/Dropdown';
+import { getCommandSystem } from '@core/commands/CommandSystem';
+import { asCommandId } from '@app-types/common';
 import { TRANSITION_KINDS, TRANSITION_LABEL, TRANSITION_SHORT } from '@core/timeline/transitionStore';
 import type { TransitionKind } from '@core/timeline/transitionStore';
+import { TRANSITION_COMMAND_PREFIX } from './transitionCommands';
 import styles from './transitionPalette.module.css';
 
 /** The drag payload's MIME type — private, so nothing else can be mistaken for it. */
@@ -51,10 +56,7 @@ export function isTransitionDrag(dataTransfer: DataTransfer | null): boolean {
 
 export function TransitionPalette(): JSX.Element {
   return (
-    <div className={styles.palette} aria-label="Transitions">
-      <span className={styles.paletteLabel} aria-hidden>
-        Transitions
-      </span>
+    <div className={styles.palette} role="group" aria-label="Transitions">
       {TRANSITION_KINDS.map((kind) => (
         <button
           key={kind}
@@ -77,6 +79,50 @@ export function TransitionPalette(): JSX.Element {
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The shed menu's rows — also what the toolbar's last-resort `⋯` lists under
+ * a "Transitions" submenu when even the one-button form has to go.
+ */
+export function transitionsMenuItems(): DropdownItem[] {
+  return [
+    ...TRANSITION_KINDS.map<DropdownItem>((kind) => ({
+      type: 'item',
+      id: `tl-transition-${kind}`,
+      label: `Add ${TRANSITION_LABEL[kind]} at nearest cut`,
+      onSelect: () => { void getCommandSystem().execute(asCommandId(`${TRANSITION_COMMAND_PREFIX}add.${kind}`)); },
+    })),
+    { type: 'separator' },
+    { type: 'label', label: 'Widen the panel to drag a chip onto a specific cut' },
+  ];
+}
+
+/**
+ * The palette's shed form: one "Transitions" dropdown whose rows apply a
+ * transition at the cut nearest the playhead — the `timeline.transition.add.*`
+ * commands, the same ones the palette and the context menu reach. A menu
+ * cannot be dragged, so the row says how to get the chips back.
+ */
+export function TransitionsMenu(): JSX.Element {
+  const items = transitionsMenuItems();
+  return (
+    <Dropdown
+      placement="bottom-start"
+      trigger={
+        <button
+          type="button"
+          className={styles.chip}
+          aria-label="Transitions"
+          title="Transitions — apply one at the cut nearest the playhead"
+        >
+          Transitions
+          <Icon name="chevron-down" size="sm" className={styles.chevron} />
+        </button>
+      }
+      items={items}
+    />
   );
 }
 

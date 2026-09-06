@@ -16,12 +16,13 @@ import { useMemo } from 'react';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useGuidesStore } from '@stores/guidesStore';
 import { useCompositionStore } from '@stores/compositionStore';
-import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenComposition, readNodeKind } from '@core/scene/sceneDerive';
 import { is3DEnabled } from '@core/scene/threeD';
 import { activeCameraNode, readSceneCamera } from '@core/scene/camera3d';
+import { toWorldPointAt } from '@core/scene/liveWorld3d';
 import { customViewCamera, isCustomViewId } from '@core/workspace/customViews';
 import { collectSceneGizmos } from '@core/workspace/sceneGizmoData';
 import { getRemappedTime } from '@core/timeline/TimelineController';
@@ -69,7 +70,7 @@ export function useSceneRefGeometry(mode: Camera3dMode): SceneRefGeometry {
   // Scoped like the renderer's, so the overlay never draws a different camera
   // than the one the frame was rendered through.
   const compRootId = useCompositionStore((s) => s.id);
-  const time = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
   const sceneRev = useSceneRevisionFrame();
 
   // Draft 3D turns shadows / DOF / motion blur OFF and the spatial aids ON —
@@ -93,9 +94,10 @@ export function useSceneRefGeometry(mode: Camera3dMode): SceneRefGeometry {
     if (cameraNode) {
       const camNode = cameraNode;
       const camValues = defaultAnimation.evaluateNode(camNode.id, getRemappedTime(camNode.id, time));
+      // Comp-scoped and parent-LIFTED, like the renderer: see `currentViewCamera`.
       camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, (id, p) =>
         id === camNode.id ? camValues.get(p) : undefined,
-      );
+      compRootId, (id, p) => toWorldPointAt(id, time, p));
     } else {
       camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, undefined, compRootId);
     }

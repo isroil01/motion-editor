@@ -1,21 +1,33 @@
 .pop {
   z-index: var(--z-index-tooltip);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
   max-width: 260px;
-  padding: 4px var(--space-3);
-  border-radius: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
   background: var(--color-surface-raised);
   color: var(--color-text-primary);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   line-height: var(--line-height-normal);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-popover);
+  border: var(--border-width-control) solid var(--color-border-strong);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   user-select: none;
   transform-origin: var(--radix-tooltip-content-transform-origin);
   animation: tooltipIn var(--motion-duration-fast) var(--motion-ease-emphasized);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shortcut {
+  flex: none;
+  opacity: var(--opacity-muted);
 }
 
 .arrow {

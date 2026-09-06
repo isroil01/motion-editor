@@ -186,6 +186,8 @@ export function useViewportRenderer(
             draft3d: draft3dRef.current,
             useProxies: useProxiesRef.current,
             ...resolveViewCameraInput(compRef.current.width, compRef.current.height, camera3dModeRef.current),
+            // Alpha view needs the comp's real alpha, not the background plate's.
+            ...(channelRef.current === 'alpha' ? { transparent: true, backgroundPaint: undefined } : {}),
           },
         ),
         // View-only: the channel never reaches export, which always writes colour.

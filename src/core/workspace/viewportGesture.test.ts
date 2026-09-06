@@ -16,6 +16,7 @@ import { defaultAnimation } from '@motion/animation';
 import { CommandSystem, setCommandSystem, getCommandSystem } from '@core/commands/CommandSystem';
 import { getEventBus } from '@core/events/EventBus';
 import { useSceneRevision } from '@stores/sceneStore';
+import { useUIStore } from '@stores/uiStore';
 
 describe('viewportGesture', () => {
   beforeEach(() => {
@@ -44,6 +45,21 @@ describe('viewportGesture', () => {
     // One undo restores the pre-drag world — no 49 intermediate steps.
     top.undo();
     expect(defaultAnimation.sample('g1', 'x', 0)).toBeUndefined();
+  });
+
+  it('raises the UI drag flag for the whole gesture, nested or not', () => {
+    // The render loop reads this flag (via renderQualityStore.interacting) to
+    // stop serving the RAM preview mid-drag. The 3D gizmo and the device
+    // handles never set it themselves, so the cached pre-drag frame was
+    // blitted over their live renders.
+    expect(useUIStore.getState().isDragging).toBe(false);
+    beginViewportGesture();
+    expect(useUIStore.getState().isDragging).toBe(true);
+    beginViewportGesture(); // a stray second pointer
+    endViewportGesture();
+    expect(useUIStore.getState().isDragging).toBe(true);
+    endViewportGesture();
+    expect(useUIStore.getState().isDragging).toBe(false);
   });
 
   it('defers the structural bump to gesture end, once, while revs still tick', () => {

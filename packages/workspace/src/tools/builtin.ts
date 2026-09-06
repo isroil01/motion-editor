@@ -1071,15 +1071,17 @@ abstract class CreateMaskShapeTool extends CreateShapeTool {
 export class MaskRectangleTool extends CreateMaskShapeTool {
   readonly id = 'mask-rect';
   readonly label = 'Rectangle Mask';
+  /** Shift+<shape key>: the mask twin of the rectangle. Host chord `Shift+R`. */
   readonly kind = 'Rectangle';
-  readonly shortcut = '';
+  readonly shortcut = 'shift+r';
 }
 
 export class MaskEllipseTool extends CreateMaskShapeTool {
   readonly id = 'mask-ellipse';
   readonly label = 'Ellipse Mask';
+  /** Host chord `Shift+E`. */
   readonly kind = 'Ellipse';
-  readonly shortcut = '';
+  readonly shortcut = 'shift+e';
 }
 
 // ── Pen (AE-style bezier path builder) ──────────────────────────
@@ -1258,7 +1260,8 @@ export class PenTool implements Tool {
 export class MaskPenTool extends PenTool {
   override readonly id = 'mask-pen';
   override readonly label = 'Pen Mask';
-  override readonly shortcut = '';
+  /** Shift+<pen key>: the mask twin of the pen. Host chord `Shift+G`. */
+  override readonly shortcut = 'shift+g';
   protected override readonly maskMode = true;
 }
 
@@ -1452,7 +1455,8 @@ export function ribbonOutline(samples: readonly BrushSample[], size: number, tap
 export class BrushTool implements Tool {
   readonly id = 'brush';
   readonly label = 'Brush';
-  readonly shortcut = '';
+  /** AE's paint brush key. Host chord `B`. */
+  readonly shortcut = 'b';
   readonly cursor = 'brush' as const;
 
   private pts: BrushSample[] = [];
@@ -1768,8 +1772,9 @@ abstract class CreatePolyTool implements Tool {
 export class PolygonTool extends CreatePolyTool {
   readonly id = 'polygon';
   readonly label = 'Polygon';
+  /** Host chord `Shift+P` (`P` alone reveals Position). */
   readonly kind = 'Polygon';
-  readonly shortcut = '';
+  readonly shortcut = 'shift+p';
   protected makePoints(cx: number, cy: number, rx: number, ry: number): BezierPoint[] {
     const sides = Math.max(3, Math.min(12, Math.round(drawToolOptions.polygonSides)));
     const pts: BezierPoint[] = [];
@@ -1784,8 +1789,9 @@ export class PolygonTool extends CreatePolyTool {
 export class StarTool extends CreatePolyTool {
   readonly id = 'star';
   readonly label = 'Star';
+  /** Host chord `Shift+S` (`S` alone reveals Scale). */
   readonly kind = 'Star';
-  readonly shortcut = '';
+  readonly shortcut = 'shift+s';
   protected makePoints(cx: number, cy: number, rx: number, ry: number): BezierPoint[] {
     const points = Math.max(3, Math.min(12, Math.round(drawToolOptions.starPoints)));
     const inner = Math.max(0.1, Math.min(0.9, drawToolOptions.starInnerRatio));
@@ -1804,7 +1810,8 @@ export class StarTool extends CreatePolyTool {
 export class CurvatureTool implements Tool {
   readonly id = 'curvature';
   readonly label = 'Curvature Pen';
-  readonly shortcut = '';
+  /** Shift+<pen key>… taken by the mask pen, so the next pen-family key. Host chord `Shift+N`. */
+  readonly shortcut = 'shift+n';
   readonly cursor = 'pen' as const;
 
   private pts: Vec2[] = [];
@@ -2191,6 +2198,26 @@ export class DirectSelectionTool implements Tool {
   }
 }
 
+// ── Roto Brush ─────────────────────────────────────────────────────
+/**
+ * Roto Brush — the engine half is deliberately inert. The strokes are painted
+ * by the host's overlay (which owns the segmenter and the mask write), so the
+ * engine's job is only to be the active tool: a crosshair, a label, a key,
+ * and NOT the selection tool — a press on the canvas must not start a marquee
+ * under a brush stroke.
+ */
+export class RotoTool implements Tool {
+  readonly id = 'roto';
+  readonly label = 'Roto Brush';
+  /** Host chord `Alt+W`. */
+  readonly shortcut = 'alt+w';
+  readonly cursor = 'crosshair' as const;
+
+  onPointerDown(_e: ToolPointerEvent, _ctx: ToolContext): void {
+    /* the host overlay claims the press before it reaches the engine */
+  }
+}
+
 /** All built-in tools, ready to register with a ToolManager. */
 export function createBuiltinTools(): Tool[] {
   return [
@@ -2215,6 +2242,7 @@ export function createBuiltinTools(): Tool[] {
     new BrushTool(),
     new CurvatureTool(),
     new TextTool(),
+    new RotoTool(),
   ];
 }
 

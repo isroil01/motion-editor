@@ -25,11 +25,11 @@
 }
 
 .groupLabel {
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-uppercase);
   text-transform: uppercase;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 /* Six align buttons in one row, two distribute buttons in another — the same
@@ -94,7 +94,7 @@
 }
 
 .segment {
-  height: var(--control-height-xs);
+  height: var(--control-height-sm);
   padding: 0 var(--space-3);
   border: none;
   border-radius: var(--radius-sm);

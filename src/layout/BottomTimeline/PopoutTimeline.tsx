@@ -13,6 +13,7 @@ import { deriveTimelineTracks } from '@layout/Timeline/deriveTimelineTracks';
 import type { TimelineModel, TimelineTrack } from '@layout/Timeline';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useProjectStore } from '@stores/projectStore';
+import { getTime as getPlayheadTime } from '@stores/playbackClockStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import { getEventBus } from '@core/events/EventBus';
@@ -106,12 +107,12 @@ export function PopoutTimeline(): JSX.Element {
   }, [markerRev]);
 
   const model = useMemo<TimelineModel>(() => {
-    const s = useProjectStore.getState();
     return {
       duration: compDuration,
       frameRate: compFps,
       startFrame: compStartFrame,
-      currentTime: s.activeTabId ? (s.tabs[s.activeTabId]?.time ?? 0) : 0,
+      // A snapshot; the live playhead reaches <Timeline> as `playheadTime`.
+      currentTime: getPlayheadTime(),
       pixelsPerSecond: pps,
       markers,
       tracks: focusTracks,

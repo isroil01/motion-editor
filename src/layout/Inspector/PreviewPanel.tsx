@@ -1,44 +1,93 @@
-import { useState } from 'react';
+/**
+ * Preview panel — AE's Preview panel: a transport plus the playback settings.
+ *
+ * Every control here DRIVES something (2026-09-05). Loop, Range, Resolution
+ * and Mute used to be React state that nothing read, so the panel changed
+ * its own labels and nothing else — "the preview options don't work".
+ *
+ *   • Loop      → the timeline controller's per-comp loop flag (the same one
+ *                 the transport bar's Loop Playback toggles).
+ *   • Range     → the WORK AREA, which is what playback loops within: Entire
+ *                 Comp clears it, From Current Time sets it from the playhead
+ *                 to the end, Work Area leaves whatever the user marked.
+ *   • Skip      → the step buttons advance (skip + 1) frames.
+ *   • Resolution→ `renderQualityStore` — Auto keeps adaptive quality on at
+ *                 Full; a fixed choice turns adaptive off at that divisor.
+ *   • Mute      → the audio engine's master gain.
+ *
+ * Ping-pong is not offered: the controller has no bounce mode, and a menu
+ * entry that silently behaves as "loop" is worse than none.
+ */
+
+import { useEffect, useState } from 'react';
 import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime, setTime as setPlayheadTime } from '@stores/playbackClockStore';
 import { useCompositionStore } from '@stores/compositionStore';
+import { useRenderQualityStore, type PreviewResolution } from '@stores/renderQualityStore';
 import { getTimelineController } from '@core/timeline/TimelineController';
+import { audioEngine } from '@core/audio/AudioEngine';
 import { Icon } from '@components/Icon';
 import { Switch } from '@components/Switch';
 import { cn } from '@utils/cn';
 import styles from './PreviewPanel.module.css';
 
-function formatTimecode(seconds: number, fps: number): string {
-  const total = Math.max(0, Math.round(seconds * fps));
-  const f = total % Math.max(1, Math.round(fps));
-  const s = Math.floor(total / Math.max(1, Math.round(fps)));
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${pad(Math.floor(s / 60))}:${pad(s % 60)}:${pad(f)}`;
-}
+type PlayRange = 'work-area' | 'entire-comp' | 'current-forward';
+type ResolutionChoice = 'auto' | PreviewResolution;
 
-/**
- * Preview — the transport and the RAM-preview settings, as one flat column.
- *
- * Readout, transport row, settings rows. It used to wrap each of those in its
- * own bordered card and give the play button a filled block; a panel this small
- * needs one rule between its groups, not three boxes.
- */
 export function PreviewPanel(): JSX.Element {
   const activeTabId = useProjectStore((s) => s.activeTabId);
   const playing = useProjectStore((s) => (activeTabId ? s.tabs[activeTabId]?.playing ?? false : false));
-  const time = useProjectStore((s) => (activeTabId ? s.tabs[activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
   const setPlaying = useProjectStore((s) => s.actions.setPlaying);
-  const setTime = useProjectStore((s) => s.actions.setTime);
+  // Seeks write the transient clock; the project store is mirrored by policy.
+  const setTime = (t: number, frame: number): void => {
+    if (activeTabId) setPlayheadTime(activeTabId, t, frame);
+  };
 
   const fps = useCompositionStore((s) => s.fps);
   const duration = useCompositionStore((s) => s.durationSeconds);
   const compWidth = useCompositionStore((s) => s.width);
   const compHeight = useCompositionStore((s) => s.height);
 
-  const [loopMode, setLoopMode] = useState<'loop' | 'ping-pong' | 'once'>('loop');
-  const [range, setRange] = useState<'work-area' | 'entire-comp' | 'current-forward'>('work-area');
+  // Loop is the controller's per-comp flag; re-read when the comp changes and
+  // whenever this panel re-renders after the transport bar flipped it.
+  const [looping, setLoopingState] = useState(() => getTimelineController().isLooping());
+  useEffect(() => { setLoopingState(getTimelineController().isLooping()); }, [activeTabId]);
+  const setLooping = (on: boolean): void => {
+    getTimelineController().setLooping(on);
+    setLoopingState(on);
+  };
+
+  const [range, setRangeState] = useState<PlayRange>(() => (getTimelineController().getWorkArea() ? 'work-area' : 'entire-comp'));
+  const setRange = (next: PlayRange): void => {
+    const tc = getTimelineController();
+    if (next === 'entire-comp') tc.clearWorkArea();
+    else if (next === 'current-forward') tc.setWorkArea(time, duration);
+    // 'work-area' keeps whatever in/out the user marked (B / N on the timeline).
+    setRangeState(next);
+  };
+
   const [skip, setSkip] = useState<number>(0);
-  const [resolution, setResolution] = useState<'auto' | 'full' | 'half' | 'third' | 'quarter'>('auto');
-  const [muteAudio, setMuteAudio] = useState(false);
+
+  const resolution = useRenderQualityStore((s) => s.resolution);
+  const adaptive = useRenderQualityStore((s) => s.adaptive);
+  const resolutionChoice: ResolutionChoice = adaptive ? 'auto' : resolution;
+  const setResolutionChoice = (next: ResolutionChoice): void => {
+    const rq = useRenderQualityStore.getState();
+    if (next === 'auto') {
+      rq.setAdaptive(true);
+      rq.setResolution(1);
+    } else {
+      rq.setAdaptive(false);
+      rq.setResolution(next);
+    }
+  };
+
+  const [muteAudio, setMuteAudioState] = useState(() => audioEngine.isMasterMuted());
+  const setMuteAudio = (muted: boolean): void => {
+    audioEngine.setMasterMuted(muted);
+    setMuteAudioState(muted);
+  };
 
   const handleFirstFrame = () => {
     setTime(0, 0);
@@ -68,7 +117,7 @@ export function PreviewPanel(): JSX.Element {
     setTime(duration, Math.round(duration * (fps || 30)));
   };
 
-  const loopLabel = loopMode === 'loop' ? 'Continuous loop' : loopMode === 'ping-pong' ? 'Ping-pong' : 'Play once';
+  const loopLabel = looping ? 'Loop playback' : 'Play once';
 
   return (
     <div className={styles.root}>
@@ -105,14 +154,13 @@ export function PreviewPanel(): JSX.Element {
         <span className={styles.transportGap} />
         <button
           type="button"
-          className={cn(styles.transportBtn, loopMode !== 'once' && styles.transportOn)}
+          className={cn(styles.transportBtn, looping && styles.transportOn)}
           title={`Loop: ${loopLabel}`}
           aria-label={`Loop mode: ${loopLabel}`}
-          onClick={() => {
-            setLoopMode(loopMode === 'loop' ? 'ping-pong' : loopMode === 'ping-pong' ? 'once' : 'loop');
-          }}
+          aria-pressed={looping}
+          onClick={() => setLooping(!looping)}
         >
-          <Icon name={loopMode === 'loop' ? 'loop' : loopMode === 'ping-pong' ? 'refresh' : 'play'} size="sm" />
+          <Icon name={looping ? 'loop' : 'play'} size="sm" />
         </button>
       </div>
 
@@ -121,20 +169,11 @@ export function PreviewPanel(): JSX.Element {
         <span className={styles.groupLabel}>Playback</span>
 
         <label className={styles.row}>
-          <span className={styles.label}>Shortcut</span>
-          <select className={styles.select} defaultValue="space">
-            <option value="space">Spacebar</option>
-            <option value="num0">Numpad 0</option>
-            <option value="shiftSpace">Shift + Spacebar</option>
-          </select>
-        </label>
-
-        <label className={styles.row}>
           <span className={styles.label}>Range</span>
           <select
             className={styles.select}
             value={range}
-            onChange={(e) => setRange(e.target.value as typeof range)}
+            onChange={(e) => setRange(e.target.value as PlayRange)}
           >
             <option value="work-area">Work Area</option>
             <option value="entire-comp">Entire Comp</option>
@@ -150,9 +189,9 @@ export function PreviewPanel(): JSX.Element {
             onChange={(e) => setSkip(Number(e.target.value))}
           >
             <option value={0}>0 — every frame</option>
-            <option value={1}>1 — 2× speed</option>
-            <option value={2}>2 — 3× speed</option>
-            <option value={5}>5 — fast draft</option>
+            <option value={1}>1 — step 2 frames</option>
+            <option value={2}>2 — step 3 frames</option>
+            <option value={5}>5 — step 6 frames</option>
           </select>
         </label>
 
@@ -160,14 +199,17 @@ export function PreviewPanel(): JSX.Element {
           <span className={styles.label}>Resolution</span>
           <select
             className={styles.select}
-            value={resolution}
-            onChange={(e) => setResolution(e.target.value as typeof resolution)}
+            value={String(resolutionChoice)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setResolutionChoice(v === 'auto' ? 'auto' : (Number(v) as PreviewResolution));
+            }}
           >
-            <option value="auto">Auto</option>
-            <option value="full">Full (100%)</option>
-            <option value="half">Half (50%)</option>
-            <option value="third">Third (33%)</option>
-            <option value="quarter">Quarter (25%)</option>
+            <option value="auto">Auto (adaptive)</option>
+            <option value="1">Full (100%)</option>
+            <option value="2">Half (50%)</option>
+            <option value="3">Third (33%)</option>
+            <option value="4">Quarter (25%)</option>
           </select>
         </label>
 
@@ -183,3 +225,16 @@ export function PreviewPanel(): JSX.Element {
     </div>
   );
 }
+
+function formatTimecode(t: number, fps: number): string {
+  const totalFrames = Math.round(t * fps);
+  const frames = totalFrames % fps;
+  const totalSeconds = Math.floor(totalFrames / fps);
+  const s = totalSeconds % 60;
+  const m = Math.floor(totalSeconds / 60) % 60;
+  const h = Math.floor(totalSeconds / 3600);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(frames)}`;
+}
+
+export default PreviewPanel;

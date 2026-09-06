@@ -1,0 +1,93 @@
+/*
+ * The comparison layer. Sits directly over the content canvas and below the
+ * interactive overlays, so a wipe covers the picture but never the gizmo you
+ * are dragging.
+ */
+.root {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/*
+ * The wipe divider. The only thing in this layer that takes the pointer —
+ * a wide invisible grab area with a hairline drawn down its middle, so it is
+ * easy to hit without being a thick bar across the frame.
+ */
+.divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  margin-left: -8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--color-overlay-text);
+  box-shadow: var(--color-overlay-panel-shadow);
+}
+
+.divider:focus-visible {
+  outline: 1px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.dividerGrip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--color-overlay-panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-overlay-panel-bg);
+  box-shadow: var(--color-overlay-panel-shadow);
+}
+
+/* ── "You are looking at a snapshot" chip ─────────────────────────── */
+.chip {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 70%;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-overlay-panel-border);
+  border-radius: var(--radius-full);
+  background: var(--color-overlay-panel-bg);
+  box-shadow: var(--color-overlay-panel-shadow);
+  color: var(--color-overlay-text);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipSide {
+  opacity: 0.7;
+}

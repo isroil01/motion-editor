@@ -8,7 +8,9 @@ import { RenderPass, type RenderPassContext } from '../RenderPass';
 import { beginViewportPass, beginSizedPass, emitSolid, emitTextured, emitSilhouette, emitMaskedTextured, emitLutTextured, emitMatteCombine, emitBlendCombine, modelFromRect, mvpFor, writeAttachment, emitLayerTexture, screenMvp, targetSampleUv, mvp3dFor, emitSolid3D, emitTextured3D, emitMaskedTextured3D, emitMesh3D, emitShadowCaster, emitSsao, emitSsaoBlur } from './passUtils';
 import { addTransformedBox, boxIsEmpty, emptyBox, shadowCameraFor, shadowMapSizeOf, type ShadowCamera, type WorldBox } from './shadowMap';
 import { ssaoBufferSize, ssaoCameraFor, ssaoFarFor, ssaoIntensityOf, ssaoRadiusOf, SSAO_SAMPLES } from './ssao';
-import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL } from '../../shaders/Material';
+import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL } from '../../shaders/Material';
+import { roundElevenSinglePass } from './roundElevenFx';
+import { roundTwelveSinglePass, roundTwelveFieldPass } from './roundTwelveFx';
 import { packBlur, packBokeh, packCocBlur, packDofGather, packGlass, packGradientRamp, packFractalNoise, packDisplacementMap, packCompoundBlur, packApplyColorLut, packSetMatte, packMotionTile, packFill, packStroke, packSharpen, packNoise, packBeam, packLightSweep, packLensFlare, packLightRays, packBend, packPerspective, packSpotlight, packArithmetic, packVignetteFx, packBlackAndWhite, packTritone, packPhotoFilter, packThreshold, packVibrance, packFxBlock, packPluginEffect } from '../../pipeline/uniforms';
 import { ENV_SPEC_LEVELS } from '../../pipeline/uniforms';
 import { Mat4 } from '../../core/math/Mat4';
@@ -126,6 +128,14 @@ export const PLUGIN_SCALED_TARGETS = [
  * allocate mid-frame.
  */
 export const PLUGIN_ORIGIN = 'plugin-origin';
+
+/**
+ * Round fourteen: the two 256×1 scratch targets the histogram colour autos
+ * (Equalize, Auto Levels / Contrast / Color) reduce into — the layer's byte
+ * histogram, then the lookup table built from it. Fixed size, declared always.
+ */
+export const FX_HIST_TARGET = 'fx-hist';
+export const FX_LUT_TARGET = 'fx-lut';
 
 /**
  * The ping-pong pair for a pass scale, or null at full scale.
@@ -415,7 +425,7 @@ interface ListState {
 export class CompositionPass extends RenderPass {
   readonly name = 'composition';
   override get writes() {
-    return [EffectPass.activeColorTarget, LAYER_TARGET, BLUR_TARGET1, BLUR_TARGET2, BLUR_TARGET3, MATTE_TARGET, DOF_TARGET, ...PRECOMP_TARGETS];
+    return [EffectPass.activeColorTarget, LAYER_TARGET, BLUR_TARGET1, BLUR_TARGET2, BLUR_TARGET3, MATTE_TARGET, DOF_TARGET, FX_HIST_TARGET, FX_LUT_TARGET, ...PRECOMP_TARGETS];
   }
   override readonly after = ['background'];
 
@@ -553,6 +563,7 @@ export class CompositionPass extends RenderPass {
         && (effect.spreadPx ?? 0) <= 0
         && Math.abs(effect.offsetX) < 0.01 && Math.abs(effect.offsetY) < 0.01) continue;
       if (effect.type === 'sharpen' && Math.abs(effect.amount) < 0.0001) continue;
+      if ((effect.type === 'gaussian-blur' || effect.type === 'fast-box-blur') && effect.radiusPx <= 0) continue;
       if (effect.type === 'noise' && Math.abs(effect.amount) < 0.0001) continue;
       // Spotlight with ambient≈1 and no intensity boost is a no-op multiply —
       // skip the full-viewport pass (and avoid wiping an adjustment-layer scene
@@ -817,6 +828,356 @@ export class CompositionPass extends RenderPass {
         encC.end();
         const outTex = texOf(f1);
         if (outTex) { curTex = outTex; curName = f1; }
+        continue;
+      }
+
+      // Gaussian / Fast Box Blur: the separable Gaussian pass, per axis. Sigma
+      // arrives converted (r/sqrt 3, see snapshotToFrameScene); `dims` picks the
+      // passes. Two targets: H writes f1, V reads it and writes f0; a single
+      // axis reads the chain's current texture and writes f0 directly.
+      if (effect.type === 'gaussian-blur' || effect.type === 'fast-box-blur') {
+        let src: TextureHandle = curTex;
+        let outName: string | null = null;
+        if (effect.dims !== 2) {
+          const hCmds = new CommandBuffer();
+          hCmds.add({
+            batchKey: 'blur|normal', material: BLUR_MATERIAL, blend: 'normal',
+            uniforms: packBlur(mvp, targetUv, 1.0 / viewport.pixelSize.width, 0, effect.radiusPx * kx),
+            texture: src, sampler: clampSampler(),
+          });
+          const encH = beginViewportPass(ctx, 'fxBlurH', writeAttachment(ctx, f1, Color.transparent()));
+          services.quad.execute(encH, hCmds);
+          encH.end();
+          const hTex = texOf(f1);
+          if (hTex) { src = hTex; outName = f1; }
+        }
+        if (effect.dims !== 1) {
+          const vCmds = new CommandBuffer();
+          vCmds.add({
+            batchKey: 'blur|normal', material: BLUR_MATERIAL, blend: 'normal',
+            uniforms: packBlur(mvp, targetUv, 0, 1.0 / viewport.pixelSize.height, effect.radiusPx * ky),
+            texture: src, sampler: clampSampler(),
+          });
+          const encV = beginViewportPass(ctx, 'fxBlurV', writeAttachment(ctx, f0, Color.transparent()));
+          services.quad.execute(encV, vCmds);
+          encV.end();
+          const vTex = texOf(f0);
+          if (vTex) { src = vTex; outName = f0; }
+        }
+        if (outName) { curTex = src; curName = outName; }
+        continue;
+      }
+
+      /*
+        Matte morphology chains: Keylight's choke + softness, Simple Choker and
+        Matte Choker are runs of separable ALPHA passes. Each pass reads the
+        chain's current texture and writes the free target that is not its
+        source, so a run of any length ping-pongs between f0 and f1.
+      */
+      if (effect.type === 'keylight' || effect.type === 'simple-choker' || effect.type === 'matte-choker') {
+        let src: TextureHandle = curTex;
+        let srcName = curName;
+        const pass = (material: MaterialDescriptor, batchKey: string, p0: [number, number, number, number], p1: [number, number, number, number], label: string): void => {
+          const dest = srcName === f0 ? f1 : f0;
+          const pc = new CommandBuffer();
+          pc.add({
+            batchKey, material, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [p0, p1], fxBox),
+            texture: src, sampler: clampSampler(),
+          });
+          const enc = beginViewportPass(ctx, label, writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(enc, pc);
+          enc.end();
+          const t = texOf(dest);
+          if (t) { src = t; srcName = dest; }
+        };
+        const morph = (radius: number, erode: boolean, border: number, lw: number, lh: number): void => {
+          const r = Math.min(50, Math.round(radius));
+          if (r <= 0) return;
+          pass(ALPHA_MORPH_MATERIAL, 'alpha-morph', [1, 0, r, erode ? 1 : 0], [lw, lh, border, 0], 'alpha-morph-h');
+          pass(ALPHA_MORPH_MATERIAL, 'alpha-morph', [0, 1, r, erode ? 1 : 0], [lw, lh, border, 0], 'alpha-morph-v');
+        };
+        const box = (radius: number, lw: number, lh: number): void => {
+          const r = Math.min(50, Math.round(radius));
+          if (r <= 0) return;
+          pass(ALPHA_BOX_MATERIAL, 'alpha-box', [1, 0, r, 0], [lw, lh, 2, 0], 'alpha-box-h');
+          pass(ALPHA_BOX_MATERIAL, 'alpha-box', [0, 1, r, 0], [lw, lh, 2, 0], 'alpha-box-v');
+        };
+        if (effect.type === 'keylight') {
+          const dest = srcName === f0 ? f1 : f0;
+          const kc = new CommandBuffer();
+          kc.add({
+            batchKey: 'keylight', material: KEYLIGHT_MATERIAL, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [
+              [effect.kr, effect.kg, effect.kb, effect.balance],
+              [effect.gain, effect.clipBlack, effect.clipWhite, effect.despill],
+              [effect.p, effect.a, effect.b, effect.denom],
+            ], fxBox),
+            texture: src, sampler: clampSampler(),
+          });
+          const enc = beginViewportPass(ctx, 'keylight', writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(enc, kc);
+          enc.end();
+          const t = texOf(dest);
+          if (t) { src = t; srcName = dest; }
+          // AE order: shrink/grow the matte, then feather it. Off-layer taps
+          // are ignored (border 0), as `chokeAlpha` skips them.
+          if (effect.chokePx !== 0) morph(Math.abs(effect.chokePx), effect.chokePx > 0, 0, effect.lw, effect.lh);
+          if (effect.softPx > 0) box(effect.softPx, effect.lw, effect.lh);
+        } else if (effect.type === 'simple-choker') {
+          // Outside the layer is transparent (border 1) so a full-frame matte
+          // still chokes at its edge — `simpleChokerData`'s own rule.
+          morph(effect.radius, effect.erode, 1, effect.lw, effect.lh);
+        } else {
+          // `matteChokerData`: per iteration dilate (spread), soften, erode
+          // (choke), all clamped at the border so a subject touching the frame
+          // is not cropped.
+          for (let i = 0; i < effect.iterations; i++) {
+            if (effect.spread > 0) morph(effect.spread, false, 2, effect.lw, effect.lh);
+            if (effect.softness > 0) box(effect.softness, effect.lw, effect.lh);
+            if (effect.choke > 0) morph(effect.choke, true, 2, effect.lw, effect.lh);
+          }
+        }
+        if (srcName !== curName) { curTex = src; curName = srcName; }
+        continue;
+      }
+
+      /*
+        Round ten multi-pass effects. Channel Blur and Minimax are runs of
+        separable passes over the layer (same ping-pong as the matte
+        morphology above). Unsharp Mask and Shadow/Highlight blur a COPY with
+        the Gaussian pass and then combine it with the untouched current
+        texture in a two-texture pass: blurred lands in f0 via f1, and the
+        combine writes f1 while reading cur + f0 — three distinct targets.
+      */
+      if (effect.type === 'channel-blur' || effect.type === 'minimax' || effect.type === 'cross-blur') {
+        let src: TextureHandle = curTex;
+        let srcName = curName;
+        const run = (material: MaterialDescriptor, batchKey: string, p0: [number, number, number, number], p1: [number, number, number, number], p2: [number, number, number, number] | null, label: string): void => {
+          const dest = srcName === f0 ? f1 : f0;
+          const pc = new CommandBuffer();
+          pc.add({
+            batchKey, material, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, p2 ? [p0, p1, p2] : [p0, p1], fxBox),
+            texture: src, sampler: clampSampler(),
+          });
+          const enc = beginViewportPass(ctx, label, writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(enc, pc);
+          enc.end();
+          const t = texOf(dest);
+          if (t) { src = t; srcName = dest; }
+        };
+        if (effect.type === 'channel-blur') {
+          const radii: [number, number, number, number] = [Math.min(128, effect.r), Math.min(128, effect.g), Math.min(128, effect.b), Math.min(128, effect.a)];
+          const rep = effect.repeatEdge ? 1 : 0;
+          if (effect.dims !== 2) run(CHANNEL_BOX_MATERIAL, 'channel-box', [1, 0, radii[0], radii[1]], [radii[2], radii[3], rep, 0], [effect.lw, effect.lh, 0, 0], 'channel-box-h');
+          if (effect.dims !== 1) run(CHANNEL_BOX_MATERIAL, 'channel-box', [0, 1, radii[0], radii[1]], [radii[2], radii[3], rep, 0], [effect.lw, effect.lh, 0, 0], 'channel-box-v');
+        } else if (effect.type === 'cross-blur') {
+          // Round eleven: `crossBlurData` is a straight box average of every
+          // channel — the channel-box pass with all four radii equal.
+          const rep = effect.repeatEdge ? 1 : 0;
+          const rx = Math.min(128, effect.rx); const ry = Math.min(128, effect.ry);
+          if (rx > 0) run(CHANNEL_BOX_MATERIAL, 'channel-box', [1, 0, rx, rx], [rx, rx, rep, 0], [effect.lw, effect.lh, 0, 0], 'cross-box-h');
+          if (ry > 0) run(CHANNEL_BOX_MATERIAL, 'channel-box', [0, 1, ry, ry], [ry, ry, rep, 0], [effect.lw, effect.lh, 0, 0], 'cross-box-v');
+        } else {
+          const r = Math.min(100, effect.radius);
+          const sep = (takeMax: boolean): void => {
+            if (effect.dir !== 2) run(MINMAX_MATERIAL, 'minmax', [1, 0, r, takeMax ? 1 : 0], [effect.lw, effect.lh, effect.mask, 0], null, 'minmax-h');
+            if (effect.dir !== 1) run(MINMAX_MATERIAL, 'minmax', [0, 1, r, takeMax ? 1 : 0], [effect.lw, effect.lh, effect.mask, 0], null, 'minmax-v');
+          };
+          // 0 maximum · 1 minimum · 2 max-then-min (close) · 3 min-then-max (open).
+          if (effect.op === 0) sep(true);
+          else if (effect.op === 1) sep(false);
+          else if (effect.op === 2) { sep(true); sep(false); }
+          else { sep(false); sep(true); }
+        }
+        if (srcName !== curName) { curTex = src; curName = srcName; }
+        continue;
+      }
+      if (effect.type === 'unsharp-mask' || effect.type === 'shadow-highlight') {
+        // Gaussian reference copy: H into f1, V into f0.
+        const hC = new CommandBuffer();
+        hC.add({
+          batchKey: 'blur|normal', material: BLUR_MATERIAL, blend: 'normal',
+          uniforms: packBlur(mvp, targetUv, 1.0 / viewport.pixelSize.width, 0, effect.sigmaPx * kx),
+          texture: curTex, sampler: clampSampler(),
+        });
+        const encH = beginViewportPass(ctx, 'refBlurH', writeAttachment(ctx, f1, Color.transparent()));
+        services.quad.execute(encH, hC);
+        encH.end();
+        const hTex = texOf(f1);
+        let blurred: TextureHandle | null = null;
+        if (hTex) {
+          const vC = new CommandBuffer();
+          vC.add({
+            batchKey: 'blur|normal', material: BLUR_MATERIAL, blend: 'normal',
+            uniforms: packBlur(mvp, targetUv, 0, 1.0 / viewport.pixelSize.height, effect.sigmaPx * ky),
+            texture: hTex, sampler: clampSampler(),
+          });
+          const encV = beginViewportPass(ctx, 'refBlurV', writeAttachment(ctx, f0, Color.transparent()));
+          services.quad.execute(encV, vC);
+          encV.end();
+          blurred = texOf(f0);
+        }
+        if (blurred) {
+          const cC = new CommandBuffer();
+          const uniforms = effect.type === 'unsharp-mask'
+            ? packFxBlock(mvp, targetUv, [[effect.amount, effect.threshold, 0, 0]], fxBox)
+            : packFxBlock(mvp, targetUv, [[effect.shadow, effect.highlight, effect.invWidth, 0]], fxBox);
+          cC.add({
+            batchKey: effect.type, material: effect.type === 'unsharp-mask' ? UNSHARP_MASK_MATERIAL : SHADOW_HIGHLIGHT_MATERIAL, blend: 'normal',
+            uniforms, texture: curTex, sampler: clampSampler(), maskTexture: blurred,
+          });
+          const encC = beginViewportPass(ctx, effect.type, writeAttachment(ctx, f1, Color.transparent()));
+          services.quad.execute(encC, cC);
+          encC.end();
+          const out = texOf(f1);
+          if (out) { curTex = out; curName = f1; }
+        }
+        continue;
+      }
+
+      /*
+        Round eleven field effects + Radial Shadow. Each needs the layer AND a
+        second texture at once: a Gaussian-blurred copy of the layer (the
+        kernels' `lumaField`) or, for Radial Shadow, the layer's alpha projected
+        away from the light and then blurred. The reference lands in f0 (via f1
+        for the blur's H pass), and the two-texture combine reads cur + f0 and
+        writes f1. With sigma 0 the reference IS the layer and the combine
+        reads cur twice, writing f0.
+      */
+      // Gaussian reference copy for the two-texture effects: H into `tmp`, V into `dest`.
+      const gaussian = (src: TextureHandle, sigma: number, tmp: string, dest: string): TextureHandle | null => {
+        const hC = new CommandBuffer();
+        hC.add({
+          batchKey: 'blur|normal', material: BLUR_MATERIAL, blend: 'normal',
+          uniforms: packBlur(mvp, targetUv, 1.0 / viewport.pixelSize.width, 0, sigma * kx),
+          texture: src, sampler: clampSampler(),
+        });
+        const encH = beginViewportPass(ctx, 'fieldBlurH', writeAttachment(ctx, tmp, Color.transparent()));
+        services.quad.execute(encH, hC);
+        encH.end();
+        const hTex = texOf(tmp);
+        if (!hTex) return null;
+        const vC = new CommandBuffer();
+        vC.add({
+          batchKey: 'blur|normal', material: BLUR_MATERIAL, blend: 'normal',
+          uniforms: packBlur(mvp, targetUv, 0, 1.0 / viewport.pixelSize.height, sigma * ky),
+          texture: hTex, sampler: clampSampler(),
+        });
+        const encV = beginViewportPass(ctx, 'fieldBlurV', writeAttachment(ctx, dest, Color.transparent()));
+        services.quad.execute(encV, vC);
+        encV.end();
+        return texOf(dest);
+      };
+      /*
+        Rounds twelve + thirteen two-texture effects (Cartoon, the interior
+        layer styles): the layer plus a Gaussian copy in binding 3, same
+        target dance as the round-eleven field effects below.
+      */
+      /*
+        Round fourteen: histogram colour autos. Three passes — reduce the
+        layer into a 256×1 histogram, turn that into a 256×1 table, then look
+        every pixel up in it. The two small targets are the pass's own, so
+        the chain's ping-pong pool is untouched until the apply pass writes f0.
+      */
+      if (effect.type === 'equalize' || effect.type === 'auto-levels' || effect.type === 'auto-contrast' || effect.type === 'auto-color') {
+        const hC = new CommandBuffer();
+        hC.add({
+          batchKey: 'fx-histogram', material: FX_HISTOGRAM_FX_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [[effect.lw, effect.lh, 44, 0]], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+        const encH = beginSizedPass(ctx, 'fx-histogram', writeAttachment(ctx, FX_HIST_TARGET, Color.transparent()), 256, 1);
+        services.quad.execute(encH, hC);
+        encH.end();
+        const hist = texOf(FX_HIST_TARGET);
+        if (!hist) continue;
+        const tC = new CommandBuffer();
+        tC.add({
+          batchKey: 'fx-auto-table', material: FX_AUTO_TABLE_FX_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, effect.p.map((v) => [v[0], v[1], v[2], v[3]] as [number, number, number, number]), fxBox),
+          texture: hist, sampler: clampSampler(),
+        });
+        const encT = beginSizedPass(ctx, 'fx-auto-table', writeAttachment(ctx, FX_LUT_TARGET, Color.transparent()), 256, 1);
+        services.quad.execute(encT, tC);
+        encT.end();
+        const lut = texOf(FX_LUT_TARGET);
+        if (!lut) continue;
+        const aC = new CommandBuffer();
+        aC.add({
+          batchKey: 'fx-auto-apply', material: FX_AUTO_APPLY_FX_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [[0, 0, 0, 0]], fxBox),
+          texture: curTex, sampler: clampSampler(), maskTexture: lut,
+        });
+        const encA = beginViewportPass(ctx, effect.type, writeAttachment(ctx, f0, Color.transparent()));
+        services.quad.execute(encA, aC);
+        encA.end();
+        const out = texOf(f0);
+        if (out) { curTex = out; curName = f0; }
+        continue;
+      }
+      const field = roundTwelveFieldPass(effect);
+      if (field) {
+        let ref: TextureHandle | null = curTex;
+        let refName = curName;
+        if (field.sigmaPx > 0) { ref = gaussian(curTex, field.sigmaPx, f1, f0); refName = f0; }
+        if (ref) {
+          const dest = refName === f1 ? f0 : f1;
+          const cC = new CommandBuffer();
+          cC.add({
+            batchKey: effect.type, material: field.material, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, field.params, fxBox), texture: curTex, sampler: clampSampler(), maskTexture: ref,
+          });
+          const encC = beginViewportPass(ctx, effect.type, writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(encC, cC);
+          encC.end();
+          const out = texOf(dest);
+          if (out) { curTex = out; curName = dest; }
+        }
+        continue;
+      }
+      if (effect.type === 'plastic' || effect.type === 'glass' || effect.type === 'vector-blur' || effect.type === 'radial-shadow') {
+        let ref: TextureHandle | null = curTex;
+        let refName = curName;
+        if (effect.type === 'radial-shadow') {
+          const pC = new CommandBuffer();
+          pC.add({
+            batchKey: 'radial-shadow-project', material: RADIAL_SHADOW_PROJECT_FX_MATERIAL, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [[effect.lw, effect.lh, effect.lx, effect.ly], [effect.proj, 0, 0, 0]], fxBox),
+            texture: curTex, sampler: clampSampler(),
+          });
+          const encP = beginViewportPass(ctx, 'radial-shadow-project', writeAttachment(ctx, f0, Color.transparent()));
+          services.quad.execute(encP, pC);
+          encP.end();
+          ref = texOf(f0); refName = f0;
+          if (ref && effect.sigmaPx > 0) ref = gaussian(ref, effect.sigmaPx, f1, f0);
+        } else if (effect.sigmaPx > 0) {
+          ref = gaussian(curTex, effect.sigmaPx, f1, f0); refName = f0;
+        }
+        if (ref) {
+          const dest = refName === f1 ? f0 : f1;
+          const params: [number, number, number, number][] = effect.type === 'plastic'
+            ? [[effect.lw, effect.lh, effect.bump, effect.gain], [effect.l[0], effect.l[1], effect.l[2], effect.specGain]]
+            : effect.type === 'glass'
+              ? [[effect.lw, effect.lh, effect.dispK, effect.hgt], [effect.lx, effect.ly, effect.gain, effect.shine]]
+              : effect.type === 'vector-blur'
+                ? [[effect.lw, effect.lh, effect.amount, effect.K], [effect.cosR, effect.sinR, effect.step, 0]]
+                : [[effect.color[0], effect.color[1], effect.color[2], effect.op], [effect.shadowOnly ? 1 : 0, 0, 0, 0]];
+          const material = effect.type === 'plastic' ? PLASTIC_FX_MATERIAL
+            : effect.type === 'glass' ? GLASS_FX_MATERIAL
+              : effect.type === 'vector-blur' ? VECTOR_BLUR_FX_MATERIAL : RADIAL_SHADOW_FX_MATERIAL;
+          const cC = new CommandBuffer();
+          cC.add({
+            batchKey: effect.type, material, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, params, fxBox), texture: curTex, sampler: clampSampler(), maskTexture: ref,
+          });
+          const encC = beginViewportPass(ctx, effect.type, writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(encC, cC);
+          encC.end();
+          const out = texOf(dest);
+          if (out) { curTex = out; curName = dest; }
+        }
         continue;
       }
 
@@ -1119,6 +1480,296 @@ export class CompositionPass extends RenderPass {
             [effect.cols, effect.rows, effect.sharp ? 1 : 0, 0],
             [effect.lw, effect.lh, 0, 0],
           ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'radial-blur') {
+        cmds.add({
+          batchKey: 'radial-blur', material: RADIAL_BLUR_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cx, effect.cy, effect.amount, effect.zoom ? 1 : 0],
+            [effect.lw, effect.lh, effect.steps, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'corner-pin') {
+        const m = effect.m;
+        cmds.add({
+          batchKey: 'corner-pin', material: CORNER_PIN_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [m[0] ?? 0, m[1] ?? 0, m[2] ?? 0, m[3] ?? 0],
+            [m[4] ?? 0, m[5] ?? 0, m[6] ?? 0, m[7] ?? 0],
+            [m[8] ?? 0, effect.lw, effect.lh, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'transform') {
+        cmds.add({
+          batchKey: 'transform-fx', material: TRANSFORM_FX_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.px, effect.py, effect.scale, effect.rot],
+            [effect.opacity, effect.lw, effect.lh, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'linear-color-key') {
+        cmds.add({
+          batchKey: 'linear-color-key', material: LINEAR_COLOR_KEY_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.kr, effect.kg, effect.kb, effect.mode],
+            [effect.tol, effect.soft, effect.keep ? 1 : 0, effect.keyHue],
+            [effect.keyLum, 0, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'luma-key') {
+        cmds.add({
+          batchKey: 'luma-key', material: LUMA_KEY_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [[effect.keyType, effect.cut, effect.tol, effect.soft]], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'color-key') {
+        cmds.add({
+          batchKey: 'color-key', material: COLOR_KEY_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.kr, effect.kg, effect.kb, effect.tol],
+            [effect.soft, 0, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'color-range') {
+        cmds.add({
+          batchKey: 'color-range', material: COLOR_RANGE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.ky, effect.ku, effect.kv, effect.mode],
+            [effect.lo, effect.hi, effect.wl, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'extract') {
+        cmds.add({
+          batchKey: 'extract', material: EXTRACT_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.channel, effect.black, effect.white, effect.blackSoft],
+            [effect.whiteSoft, effect.invert ? 1 : 0, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'spill-suppressor') {
+        cmds.add({
+          batchKey: 'spill-suppressor', material: SPILL_SUPPRESSOR_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [[effect.keyHue, effect.strength, effect.preserveLuma ? 1 : 0, 0]], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'wave-warp') {
+        cmds.add({
+          batchKey: 'wave-warp', material: WAVE_WARP_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.dx, effect.dy, effect.k, effect.phase],
+            [effect.height, effect.lw, effect.lh, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'directional-blur') {
+        cmds.add({
+          batchKey: 'directional-blur', material: DIRECTIONAL_BLUR_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.dx, effect.dy, effect.length, effect.steps],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'linear-wipe') {
+        cmds.add({
+          batchKey: 'linear-wipe', material: LINEAR_WIPE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.gx, effect.gy, effect.pos, effect.soft],
+            [effect.lw, effect.lh, effect.full ? 1 : 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'shift-channels') {
+        cmds.add({
+          batchKey: 'shift-channels', material: SHIFT_CHANNELS_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.a, effect.r, effect.g, effect.b],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'alpha-levels') {
+        cmds.add({
+          batchKey: 'alpha-levels', material: ALPHA_LEVELS_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.inBlack, effect.span, effect.invGamma, effect.outBlack],
+            [effect.outWhite, 0, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'solid-composite') {
+        cmds.add({
+          batchKey: 'solid-composite', material: SOLID_COMPOSITE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cr, effect.cg, effect.cb, effect.so],
+            [effect.co, effect.mode, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'channel-combiner') {
+        cmds.add({
+          batchKey: 'channel-combiner', material: CHANNEL_COMBINER_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.mode, 0, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'remove-color-matting') {
+        cmds.add({
+          batchKey: 'remove-color-matting', material: REMOVE_COLOR_MATTING_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.br, effect.bg, effect.bb, effect.floor],
+            [effect.strength, 0, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'change-color') {
+        cmds.add({
+          batchKey: 'change-color', material: CHANGE_COLOR_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.th, effect.ts, effect.tl, effect.hT],
+            [effect.sT, effect.lT, effect.soft, effect.hueShift],
+            [effect.satScale, effect.lightScale, effect.invert ? 1 : 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'change-to-color') {
+        cmds.add({
+          batchKey: 'change-to-color', material: CHANGE_TO_COLOR_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.fh, effect.fs, effect.fl, effect.hT],
+            [effect.sT, effect.lT, effect.soft, effect.preserve ? 1 : 0],
+            [effect.dh, effect.ds, effect.dl, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'leave-color') {
+        cmds.add({
+          batchKey: 'leave-color', material: LEAVE_COLOR_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.th, effect.tol, effect.soft, effect.strength],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'toner') {
+        cmds.add({
+          batchKey: 'toner', material: TONER_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.stops[0] ?? 0, effect.stops[1] ?? 0, effect.stops[2] ?? 0, effect.k],
+            [effect.stops[3] ?? 0, effect.stops[4] ?? 0, effect.stops[5] ?? 0, 0],
+            [effect.stops[6] ?? 0, effect.stops[7] ?? 0, effect.stops[8] ?? 0, 0],
+            [effect.stops[9] ?? 0, effect.stops[10] ?? 0, effect.stops[11] ?? 0, 0],
+            [effect.stops[12] ?? 1, effect.stops[13] ?? 1, effect.stops[14] ?? 1, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'venetian-blinds') {
+        cmds.add({
+          batchKey: 'venetian-blinds', material: VENETIAN_BLINDS_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cos, effect.sin, effect.pitch, effect.half],
+            [effect.soft, effect.lw, effect.lh, effect.full ? 1 : 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'radial-wipe') {
+        cmds.add({
+          batchKey: 'radial-wipe', material: RADIAL_WIPE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cx, effect.cy, effect.start, effect.swept],
+            [effect.dir, effect.soft, effect.lw, effect.lh],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'iris-wipe') {
+        cmds.add({
+          batchKey: 'iris-wipe', material: IRIS_WIPE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cx, effect.cy, effect.outer, effect.inner],
+            [effect.points, effect.rot, effect.feath, effect.useInner ? 1 : 0],
+            [effect.invert ? 1 : 0, effect.lw, effect.lh, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'line-sweep') {
+        cmds.add({
+          batchKey: 'line-sweep', material: LINE_SWEEP_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.nx, effect.ny, effect.n, effect.stag],
+            [effect.feath, effect.t, effect.invert ? 1 : 0, 0],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'checkerboard') {
+        cmds.add({
+          batchKey: 'checkerboard', material: CHECKERBOARD_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.sizeW, effect.sizeH, effect.startX, effect.startY],
+            [effect.colA[0], effect.colA[1], effect.colA[2], effect.opacity],
+            [effect.colB[0], effect.colB[1], effect.colB[2], 0],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'grid') {
+        cmds.add({
+          batchKey: 'grid', material: GRID_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.pitchX, effect.pitchY, effect.offX, effect.offY],
+            [effect.thickness, effect.snap, effect.opacity, 0],
+            [effect.color[0], effect.color[1], effect.color[2], 0],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'four-color-gradient') {
+        cmds.add({
+          batchKey: 'four-color-gradient', material: FOUR_COLOR_GRADIENT_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.tl[0], effect.tl[1], effect.tl[2], effect.blend],
+            [effect.tr[0], effect.tr[1], effect.tr[2], 0],
+            [effect.bl[0], effect.bl[1], effect.bl[2], 0],
+            [effect.br[0], effect.br[1], effect.br[2], 0],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'circle') {
+        cmds.add({
+          batchKey: 'circle', material: CIRCLE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cx, effect.cy, effect.radius, effect.feather],
+            [effect.thickness, effect.opacity, effect.invert ? 1 : 0, effect.composite],
+            [effect.color[0], effect.color[1], effect.color[2], 0],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (effect.type === 'ellipse') {
+        cmds.add({
+          batchKey: 'ellipse', material: ELLIPSE_MATERIAL, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, [
+            [effect.cx, effect.cy, effect.rx, effect.ry],
+            [effect.rot, effect.thickness, effect.softness, effect.opacity],
+            [effect.color[0], effect.color[1], effect.color[2], effect.composite],
+            [effect.lw, effect.lh, 0, 0],
+          ], fxBox),
+          texture: curTex, sampler: clampSampler(),
+        });
+      } else if (roundElevenSinglePass(effect) || roundTwelveSinglePass(effect)) {
+        // Rounds eleven + twelve single-pass effects — the tables in roundElevenFx.ts / roundTwelveFx.ts.
+        const draw = (roundElevenSinglePass(effect) ?? roundTwelveSinglePass(effect))!;
+        cmds.add({
+          batchKey: effect.type, material: draw.material, blend: 'normal',
+          uniforms: packFxBlock(mvp, targetUv, draw.params, fxBox),
           texture: curTex, sampler: clampSampler(),
         });
       } else if (effect.type === 'find-edges') {

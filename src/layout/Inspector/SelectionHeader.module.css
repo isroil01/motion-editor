@@ -1,0 +1,135 @@
+/*
+ * The selection strip. Sits on the panel ground (the dock header above is
+ * already the dark band) and stays put while the sections scroll beneath.
+ */
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--bar-height-panel);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-panel);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  flex: none;
+}
+
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.nameInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control-height-xs);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.kind {
+  flex: none;
+  max-width: 40%;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-uppercase);
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swatchBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.swatchBtn:hover {
+  background: var(--color-hover);
+}
+
+.colorItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.switches {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.switch:hover {
+  color: var(--color-text-primary);
+  background: var(--color-hover);
+}
+
+.switchOn {
+  color: var(--color-primary);
+}
+
+/* Mixed: lit but hollow — "some of them". */
+.switchMixed {
+  color: var(--color-primary);
+  opacity: 0.55;
+}
+
+.switch:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}

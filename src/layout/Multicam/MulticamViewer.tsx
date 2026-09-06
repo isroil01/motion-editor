@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@utils/cn';
 import { openModal } from '@stores/modalStore';
-import { useWorkspaceStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useAssetStore } from '@stores/assetStore';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useUIStore } from '@stores/uiStore';
@@ -88,7 +88,7 @@ function liveAngleAt(views: ReadonlyArray<AngleView>, t: number): number | null 
 /** Exported so the empty state can be asserted without opening a modal. */
 export function MulticamViewerBody(): JSX.Element {
   const sceneRev = useSceneRevision((s) => s.rev);
-  const time = useWorkspaceStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState<string | null>(null);
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());

@@ -95,22 +95,28 @@ async function importCaptions(): Promise<void> {
 async function generateCaptions(): Promise<void> {
   const { startSec, endSec } = captionRange();
   // The user is about to wait on a network round trip over a file that grows
-  // with the range, so say what is happening before it starts rather than
-  // leaving the app looking frozen.
-  notify(`Transcribing ${(endSec - startSec).toFixed(1)}s of audio…`, 'info', 3000);
+  // with the range. A JOB rather than a timed toast: the old 3-second notice
+  // vanished while the transcription ran on, and the app looked frozen for
+  // exactly the stretch the notice existed to cover. The job's toast stays
+  // (indeterminate — the service reports no progress) until the result lands,
+  // and the status-bar tray shows it meanwhile.
+  const ui = useUIStore.getState();
+  ui.startJob({ id: 'transcribe', label: `Transcribing ${(endSec - startSec).toFixed(1)}s of audio…` });
 
   try {
     const cues = await transcribeComposition({ startSec, endSec, rootId: activeCompRootId() });
     const existing = captionNodes().length;
     if (existing > 0) removeCaptionLayers();
     const result = insertCaptionLayers(cues);
-    notify(`Generated ${result.nodeIds.length} caption layer(s)`);
+    useUIStore.getState().finishJob('transcribe', {
+      status: 'done',
+      message: `Generated ${result.nodeIds.length} caption layer(s)`,
+    });
   } catch (err) {
-    notify(
-      err instanceof TranscribeError ? err.message : `Transcription failed: ${String(err)}`,
-      'error',
-      8000,
-    );
+    useUIStore.getState().finishJob('transcribe', {
+      status: 'failed',
+      message: err instanceof TranscribeError ? err.message : `Transcription failed: ${String(err)}`,
+    });
   }
 }
 

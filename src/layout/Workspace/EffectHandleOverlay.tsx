@@ -204,7 +204,7 @@ export function EffectHandleOverlay(): JSX.Element | null {
       <polygon
         points={handles.filter((h) => h.spec.kind === 'vertex')
           .map((h) => { const s = toScreen(h.rest); return `${s.x},${s.y}`; }).join(' ')}
-        fill="none" stroke="rgba(255,255,255,0.25)" strokeDasharray="4 4" strokeWidth={1}
+        fill="none" stroke="var(--color-overlay-stroke-soft)" strokeDasharray="4 4" strokeWidth={1}
       />
       {screen.map(({ h, s }) => {
         const r = h.spec.kind === 'vertex' ? VERTEX_R : TANGENT_R;
@@ -221,11 +221,11 @@ export function EffectHandleOverlay(): JSX.Element | null {
             {/* A dark ring UNDER the fill, so the handle stays legible on
                 white artwork as well as black — a single-colour dot vanishes
                 against half the content people warp. */}
-            <circle cx={s.x} cy={s.y} r={r + 1.5} fill="rgba(0,0,0,0.55)" />
+            <circle cx={s.x} cy={s.y} r={r + 1.5} fill="var(--color-overlay-handle-halo)" />
             <circle
               cx={s.x} cy={s.y} r={r}
-              fill={on ? '#ffd166' : '#ffffff'}
-              stroke="#101014" strokeWidth={1}
+              fill={on ? 'var(--color-overlay-light)' : 'var(--color-overlay-text)'}
+              stroke="var(--color-overlay-stroke-dark)" strokeWidth={1}
             />
           </g>
         );

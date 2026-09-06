@@ -13,14 +13,21 @@
 
 import { type ReactElement, type ReactNode, useState } from 'react';
 import { Popover } from '@components/Popover';
-import { Menu, MenuItem, MenuSeparator, MenuLabel, MenuCheckbox, type MenuSelectModifiers } from '@components/Menu';
+import { Menu, MenuItem, MenuSeparator, MenuLabel, MenuCheckbox, MenuCustomRow, type MenuSelectModifiers } from '@components/Menu';
 import type { IconName } from '@components/Icon';
 
 export type DropdownItem =
   | { type: 'item'; id: string; label: ReactNode; icon?: IconName; shortcut?: string; disabled?: boolean; danger?: boolean; onSelect?: (modifiers: MenuSelectModifiers) => void; submenu?: DropdownItem[] }
   | { type: 'separator' }
   | { type: 'label'; label: ReactNode }
-  | { type: 'checkbox'; id: string; label: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean };
+  | { type: 'checkbox'; id: string; label: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }
+  /**
+   * A row that is not a command: a slider, a swatch strip, a readout. The
+   * node is rendered as-is inside the menu's padding, so it should size
+   * itself like a row (`--control-height-row`) and carry its own label.
+   * Not focusable by the menu's arrow keys unless the node itself is.
+   */
+  | { type: 'custom'; id: string; render: ReactNode };
 
 export interface DropdownProps {
   trigger: ReactElement;
@@ -58,6 +65,7 @@ export function Dropdown({ trigger, items, placement = 'bottom-start', offset, c
         {items.map((item, idx) => {
           if (item.type === 'separator') return <MenuSeparator key={`sep_${idx}`} />;
           if (item.type === 'label') return <MenuLabel key={`label_${idx}`}>{item.label}</MenuLabel>;
+          if (item.type === 'custom') return <MenuCustomRow key={item.id} id={item.id}>{item.render}</MenuCustomRow>;
           if (item.type === 'checkbox') {
             return (
               <MenuCheckbox
@@ -76,6 +84,7 @@ export function Dropdown({ trigger, items, placement = 'bottom-start', offset, c
                 {item.submenu.map((sub, subIdx) => {
                   if (sub.type === 'separator') return <MenuSeparator key={`sep_${item.id}_${subIdx}`} />;
                   if (sub.type === 'label') return <MenuLabel key={`label_${item.id}_${subIdx}`}>{sub.label}</MenuLabel>;
+                  if (sub.type === 'custom') return <MenuCustomRow key={sub.id} id={sub.id}>{sub.render}</MenuCustomRow>;
                   if (sub.type === 'checkbox') {
                     return (
                       <MenuCheckbox key={sub.id} id={sub.id} label={sub.label} checked={sub.checked} onChange={sub.onChange} disabled={sub.disabled} />

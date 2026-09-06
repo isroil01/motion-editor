@@ -52,16 +52,23 @@ export interface SceneGeometryOverlayProps {
  * frustums and cones are the "what this device reaches" colour, bounds are
  * neutral, POI lines are dashed because they describe a relationship rather
  * than a thing.
+ *
+ * The four hues are `--color-overlay-*` tokens (tokens/domain.css), so "the
+ * light colour" is one definition rather than the five copies of `#ffd166`
+ * this table used to hold — and a token the CVD preset can reach.
  */
+const LIGHT_STROKE = 'var(--color-overlay-light)';
+const POI_STROKE = 'var(--color-overlay-poi)';
+
 const SEGMENT_STYLE: Record<GizmoSegmentKind, { stroke: string; width: number; dash?: string; opacity: number }> = {
-  body: { stroke: '#ffd166', width: 1.4, opacity: 0.95 },
-  frustum: { stroke: '#7cc4ff', width: 1.1, opacity: 0.75 },
-  cone: { stroke: '#ffd166', width: 1.1, opacity: 0.65 },
-  feather: { stroke: '#ffd166', width: 1, dash: '4 4', opacity: 0.32 },
-  radius: { stroke: '#ffd166', width: 1, dash: '3 4', opacity: 0.38 },
-  direction: { stroke: '#ffd166', width: 1.1, opacity: 0.6 },
-  poi: { stroke: '#ff9ecb', width: 1, dash: '5 4', opacity: 0.8 },
-  bounds: { stroke: '#8ea0b5', width: 1, opacity: 0.5 },
+  body: { stroke: LIGHT_STROKE, width: 1.4, opacity: 0.95 },
+  frustum: { stroke: 'var(--color-overlay-camera)', width: 1.1, opacity: 0.75 },
+  cone: { stroke: LIGHT_STROKE, width: 1.1, opacity: 0.65 },
+  feather: { stroke: LIGHT_STROKE, width: 1, dash: '4 4', opacity: 0.32 },
+  radius: { stroke: LIGHT_STROKE, width: 1, dash: '3 4', opacity: 0.38 },
+  direction: { stroke: LIGHT_STROKE, width: 1.1, opacity: 0.6 },
+  poi: { stroke: POI_STROKE, width: 1, dash: '5 4', opacity: 0.8 },
+  bounds: { stroke: 'var(--color-overlay-bounds)', width: 1, opacity: 0.5 },
 };
 
 export const SceneGeometryOverlay: React.FC<SceneGeometryOverlayProps> = ({
@@ -113,7 +120,7 @@ export const SceneGeometryOverlay: React.FC<SceneGeometryOverlayProps> = ({
               y1={line.start.y}
               x2={line.end.x}
               y2={line.end.y}
-              stroke="rgba(255, 255, 255, 0.9)"
+              stroke="var(--color-overlay-stroke)"
               strokeOpacity={line.alpha}
               strokeWidth={line.alpha > 0.2 ? 1.5 : 1}
               strokeDasharray={line.alpha <= 0.2 ? '3 3' : undefined}
@@ -146,7 +153,7 @@ export const SceneGeometryOverlay: React.FC<SceneGeometryOverlayProps> = ({
         className="comp-frame-3d"
         points={corners.map((p) => `${p.x},${p.y}`).join(' ')}
         fill="none"
-        stroke="rgba(255, 255, 255, 0.55)"
+        stroke="var(--color-overlay-stroke-soft)"
         strokeWidth={1}
         strokeDasharray="6 4"
       />
@@ -204,14 +211,14 @@ export const SceneGeometryOverlay: React.FC<SceneGeometryOverlayProps> = ({
           const hot = hoveredDeviceHandle?.nodeId === h.nodeId && hoveredDeviceHandle?.kind === h.kind;
           // POI keeps the pink of its crosshair, position the amber of the
           // chassis, so a dot always reads as part of the wireframe it belongs to.
-          const stroke = h.kind === 'poi' ? '#ff9ecb' : '#ffd166';
+          const stroke = h.kind === 'poi' ? POI_STROKE : LIGHT_STROKE;
           return (
             <circle
               key={`${h.nodeId}_${h.kind}`}
               cx={p.x}
               cy={p.y}
               r={hot ? 7 : 5}
-              fill={hot ? stroke : 'rgba(0,0,0,0.35)'}
+              fill={hot ? stroke : 'var(--color-overlay-handle-idle)'}
               fillOpacity={hot ? 0.9 : 0.6}
               stroke={stroke}
               strokeWidth={1.5}

@@ -16,7 +16,7 @@ import type { Command } from '@core/commands/Command';
 import { getCommandSystem } from '@core/commands/CommandSystem';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { readNodeKind } from '@core/scene/sceneDerive';
-import { defaultAnimation } from '@motion/animation';
+import { defaultAnimation, upsertDataKeyframe } from '@motion/animation';
 import { captureAnimEdit, type AnimEditCommand } from '@core/animation/animationCommands';
 import { bumpScene } from '@stores/sceneStore';
 import type { ID } from '@core/types';
@@ -97,7 +97,7 @@ function applyAndRecord(
  * arm — a limb is its own strip of triangles, so the harmonic weights fall off
  * along the limb instead of across the empty rectangle between limb and torso.
  * On the coverage-culled grid the same drag moved the torso 4.1px per 40px of
- * hand travel; on the outline mesh, 1.4px.
+ * hand travel; on the outline mesh, 3.2px.
  *
  * Everything else keeps the grid. A vector layer's `'silhouette'` route is the
  * ear-clipped path outline, which is a different (older) code path, and text /
@@ -115,8 +115,30 @@ function defaultMeshMode(nodeId: ID): PuppetRig['meshMode'] {
   return kind === 'image' || kind === 'svg' ? 'silhouette' : 'grid';
 }
 
-/** Add a pin to the layer's rig (creating the rig if absent). One undo step. */
-export function addPuppetPin(nodeId: ID, pin: PuppetPin): void {
+/**
+ * Where a NEW pin should be at the moment it is placed, when that differs from
+ * its rest anchor.
+ *
+ * A pin placed on an already-deformed character has two positions: the rest
+ * anchor (`pin.x/y`, mapped back through the deformation) and the point the
+ * user actually clicked, in deformed space. Without a keyframe the pin's live
+ * position is its anchor, so the artwork under the click would jump to the
+ * anchor's rest location. Writing the clicked point as a position keyframe at
+ * the placement time keeps the picture exactly as it was when the pin landed —
+ * which is what After Effects does when a pin is added mid-animation.
+ */
+export interface PinPlacementLive {
+  /** Keyframe time on the layer's own axis (see `compToKeyframeTime`). */
+  t: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Add a pin to the layer's rig (creating the rig if absent). One undo step —
+ * the placement keyframe, when one is needed, is nested in the same step.
+ */
+export function addPuppetPin(nodeId: ID, pin: PuppetPin, live?: PinPlacementLive): void {
   const rig = currentRig(nodeId);
   // A pinless rig that never chose a mesh mode gets the same default on the
   // first pin. Existing rigs with pins keep whatever meshMode they already have
@@ -132,7 +154,24 @@ export function addPuppetPin(nodeId: ID, pin: PuppetPin): void {
       if (after.meshDensity === undefined) after.meshDensity = 22;
     }
   }
-  applyAndRecord(nodeId, after, `Add Puppet Pin ${pin.name}`);
+  let trackEdit: AnimEditCommand | null = null;
+  if (live && (live.x !== pin.x || live.y !== pin.y)) {
+    const prop = pinPropPath(pin.id, 'position');
+    trackEdit = captureAnimEdit(`Place Puppet Pin ${pin.name}`, () => {
+      const track = defaultAnimation.getDataTrack(nodeId, prop) ?? {
+        nodeId,
+        prop,
+        kind: 'points' as const,
+        keyframes: [],
+      };
+      const keyframes = upsertDataKeyframe(track.keyframes, {
+        t: live.t,
+        value: [{ x: live.x, y: live.y }],
+      });
+      defaultAnimation.setDataTrack(nodeId, prop, { ...track, keyframes } as never);
+    });
+  }
+  applyAndRecord(nodeId, after, `Add Puppet Pin ${pin.name}`, trackEdit);
 }
 
 /**

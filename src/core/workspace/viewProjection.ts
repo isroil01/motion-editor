@@ -15,6 +15,7 @@
 
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { activeCameraNode, readSceneCamera } from '@core/scene/camera3d';
+import { toWorldPointAt } from '@core/scene/liveWorld3d';
 import { getRemappedTime } from '@core/timeline/TimelineController';
 import { defaultAnimation } from '@motion/animation';
 import { Project3D } from '@motion/scene';
@@ -117,10 +118,16 @@ export function currentViewCamera(
   const camNode = cameraNode;
   const camTime = getRemappedTime(camNode.id, time);
   const camValues = defaultAnimation.evaluateNode(camNode.id, camTime);
+  // With the parent LIFT the renderer applies (`buildSnapshot` passes the same
+  // `toWorldPointAt`). Without it a camera parented to a null — the standard
+  // orbit rig — projected the chrome from the camera's LOCAL position while the
+  // pixels came from its world one: every gizmo and hit-test drifted by the
+  // null's offset, landing at the comp corner for a null at the comp centre.
   return readSceneCamera(
     defaultSceneGraph, width, height,
     (id, p) => (id === camNode.id ? camValues.get(p) : undefined),
     rootId,
+    (id, p) => toWorldPointAt(id, time, p),
   );
 }
 

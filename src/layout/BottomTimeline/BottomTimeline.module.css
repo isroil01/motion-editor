@@ -291,55 +291,79 @@
 
 
 
-/* ── Timeline Unified Sub-Header (Search Left + Comp Tabs Right) ── */
+/* ── The toolbar row ─────────────────────────────────────────────── */
 /**
- * The row holding the scrub timecode, the filter field and the time navigator.
+ * ONE row between the comp tabs and the tracks, in TWO columns that are the
+ * two columns beneath it — see the comment in BottomTimeline.tsx.
+ *
+ *   `.toolsCol`      the buttons, exactly the track-header column's width
+ *   `.navigatorCol`  the time navigator, exactly over the lanes
  *
  * Same ground as the panel, and one dark rule under it — the boundary between
- * the panel's chrome (tabs, timecode, filter, navigator) and the track list
- * itself. It used to sit on `--color-panel-header` with a hairline, a colour
- * change and a border immediately above the ruler's own rule: two separators a
- * pixel apart, reading as a thick gap rather than a division.
+ * the panel's chrome and the track list itself.
+ *
+ * It cannot wrap: `nowrap` and `overflow: hidden`. The hidden overflow is the
+ * ROW's edge only — the left column has none, so a control that runs past the
+ * header width shows up as a real deficit for `useTransportDemote` to read
+ * and shed (chips, then tools, then everything into one `⋯`) rather than
+ * being silently cut off. No padding on the row: the left column carries its
+ * own, so its outer width IS the header width and the seam lines up with the
+ * header/lanes seam to the pixel.
  */
 .subHeaderRow {
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 0;
   height: 32px;
   /* 2px of clearance above the rule. The timecode's descender and the filter
      field's border were landing on it, which read as the row overflowing its
      own boundary rather than sitting inside one. */
-  padding-bottom: 2px;
+  padding: 0 0 2px;
   box-sizing: border-box;
   background: var(--color-panel);
   border-bottom: 2px solid var(--color-timeline-ruler-border);
   flex: none;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /**
- * The left column, sized to the track-header width by an inline style so it
- * ends on the same pixel the column legend does.
+ * The left column. Its `width` is inline — the header width, from the same
+ * resolver `<Timeline>` uses — and `border-box`, so the 8px of padding either
+ * side sit INSIDE that width. `flex: none`: the row must not squeeze it, or
+ * the seam would drift from the header column's edge below.
  *
- * `min-width` matters: the header column can be dragged to 220px, and below
- * about 260 the timecode, the filter field and the eight toggles stop being a
- * row and start overlapping each other. Past that the column holds its size
- * and clips — the controls stay usable at the width they need, which is the
- * same bargain the track-header columns make when they scroll.
+ * `overflow: visible` on purpose (the default). The measured ladder needs to
+ * see a real overflow to shed, and clipping a live control is exactly the
+ * failure the ladder exists to prevent. The filter is the one flexible member
+ * and gives up its width first; everything else is `flex: none`.
  */
-.searchBarCol {
+.toolsCol {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  height: 100%;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
   flex: none;
-  min-width: 260px;
   box-sizing: border-box;
-  /* The top of the vertical rule that divides the track headers from the
-     lanes. `.headerCol` in Timeline.module.css draws the rest of it — same
-     width, same colour, or the line steps sideways halfway down the panel. */
-  border-right: 2px solid var(--color-timeline-ruler-border);
-  overflow: hidden;
+  height: 100%;
+  padding: 0 8px;
+  min-width: 0;
+}
+
+/* Between the timecode, the tools and the chips. */
+.toolbarDivider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border-subtle);
+  flex: none;
+}
+
+/* The View menu's chevron, a step quieter than the word beside it. */
+.triggerChevron {
+  opacity: 0.6;
 }
 
 .timecodeBlock {
@@ -390,19 +414,41 @@
 .timelineSwitchesGroup {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 2px;
-  flex-shrink: 0;
+  flex: none;
 }
 
-/* The time navigator's column — everything right of the track-header split,
-   which is exactly the lanes' width. Named for what it holds: the comp tabs and
-   the render queue that used to share it moved up to `.headerTabs`. */
+/**
+ * The right column — the time navigator alone.
+ *
+ * Two forms. UNPINNED (this rule alone) it is a flex member taking what is
+ * left of the row: the fallback while there are no lanes to align to (the
+ * graph editor is open, or nothing is mounted yet). PINNED (`.navigatorColPinned`,
+ * with an inline `left` and `width`) it is placed absolutely over the lanes'
+ * measured span — from the ruler's time origin to the visible clips' right
+ * edge — so the bar's scale is the ruler's own: a click at an x seeks the
+ * frame the ruler shows at that x, and the window sits over the clips it
+ * stands for. Absolute rather than a flex sibling so a one-frame overflow of
+ * the left column, before the ladder sheds, cannot push it sideways.
+ */
 .navigatorCol {
   display: flex;
   align-items: center;
   height: 100%;
   padding: 0 8px;
-  flex: 1 1 auto;
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+
+.navigatorColPinned {
+  position: absolute;
+  top: 0;
+  /* Above the row's 2px bottom padding, level with the left column. */
+  bottom: 2px;
+  height: auto;
+  padding: 0;
+  flex: none;
   min-width: 0;
 }
 
@@ -437,30 +483,83 @@
   flex-shrink: 0;
 }
 
-/* Grows from the left edge with the playhead. Anchored, not positioned: a
-   `width` alone cannot drift out of alignment with time the way a `left` +
-   `width` pair could. */
-.timeNavigatorFill {
+/**
+ * The window over the comp — the stretch the lanes are currently showing.
+ *
+ * Drag its body to pan, either end to zoom. It is deliberately translucent
+ * rather than solid: the playhead line sits under it, and at high zoom the
+ * window is narrow enough that a solid fill would hide the one mark telling
+ * you where in the comp that narrow window is.
+ */
+.timeNavigatorWindow {
   position: absolute;
-  left: 0;
   top: 0;
   bottom: 0;
-  background: var(--color-primary);
+  min-width: 6px;
+  background: color-mix(in srgb, var(--color-primary) 38%, transparent);
+  border: 1px solid var(--color-primary);
   border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 2px;
+  cursor: grab;
+  box-sizing: border-box;
 }
 
-/* The leading edge, on the inside of the fill — it is where the fill ENDS that
-   is the current frame, so the marker belongs there and nowhere else. */
+.timeNavigatorWindow:active {
+  cursor: grabbing;
+}
+
+/* The two resize ends. Wider than they look — the visible rule is 1px of
+   border, and 8px of grab area is the difference between a handle you can hit
+   and one you chase. `navigatorHit` uses the same 6px either side. */
+.timeNavGrip {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 12px;
+  cursor: ew-resize;
+}
+
+.timeNavGrip[data-edge='start'] {
+  left: -6px;
+}
+
+.timeNavGrip[data-edge='end'] {
+  right: -6px;
+}
+
+/* The current frame, under the window. */
 .timeNavPlayhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
   width: 2px;
-  height: 100%;
-  background: var(--color-primary-foreground);
-  opacity: 0.9;
-  flex: none;
+  margin-left: -1px;
+  background: var(--color-text-primary);
+  opacity: 0.75;
+}
+
+/**
+ * The go-to-time field — the readout, in place, once you click it.
+ *
+ * Sized and coloured exactly like `.timecodeMain` so the swap does not move
+ * anything: what changes on click is that the number became typable, and a
+ * field that jumped a pixel or changed weight would read as a different
+ * control appearing rather than the same one opening.
+ */
+.timecodeInput {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+  color: var(--color-primary);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-xs);
+  padding: 0 2px;
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+  line-height: 1.1;
+  outline: none;
 }
 
 .tabDivider {
@@ -499,14 +598,27 @@
  * regardless of order.
  */
 .searchContainer.searchContainer {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 180px;
+  /* The floor is low: the filter is the column's ONE flexible member and
+     gives up its width before any button leaves the row, and at the header's
+     narrowest (260px) the icon plus a few characters is what fits beside the
+     timecode, Graph Editor and the `⋯`. */
+  min-width: 64px;
+  max-width: 320px;
   height: var(--control-height-sm);
   padding: 0 var(--space-2);
   font-size: var(--font-size-xs);
   background: var(--color-timeline-well);
   border-color: var(--color-border);
   border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.searchContainer.searchContainer:focus-within {
+  border-color: var(--color-primary);
+  background: var(--color-surface-0);
+  outline: none;
+  box-shadow: none;
 }
 
 /* ── Transport controls ────────────────────────────────────────────── */

@@ -57,6 +57,10 @@ export interface ImportedAsset {
      *  the opaque footage that makes up most of a project. */
     hasAlpha?: boolean;
     audioChannels?: number;
+    /** The probed stream codec (`h264`, `prores`, `aac`…) and container
+     *  (`mov,mp4,m4a…`). Desktop ffprobe only; shown in the metadata drawer. */
+    codec?: string;
+    container?: string;
   };
   /**
    * Per-FILE reinterpretation (frame rate conform, pixel aspect, alpha, loop).
@@ -82,6 +86,24 @@ export interface ImportedAsset {
    * can see is not a quality warning). See `@core/assets/proxy`.
    */
   analysisProxy?: ProxyRecord;
+  /**
+   * The user's ORGANISATION of the library — free-text tags and one colour
+   * label (a `LABEL_COLORS` id). Persisted client-side like the folder map,
+   * and collected into the bundle registry on save so they travel with the
+   * project (`bundleAssetCollect`). Absent for most records.
+   */
+  tags?: string[];
+  label?: string;
+  /** When this asset entered the library (ms since epoch). Drives the Date
+   *  column; absent for records written before it existed. */
+  importedAt?: number;
+  /**
+   * Where the bytes came from on THIS machine, when known — the media
+   * browser's import or a desktop file drop. Lets "Reveal in Explorer" open
+   * the original rather than the bundle's content-addressed copy. Never
+   * authoritative: the file can move or vanish, and every reader must cope.
+   */
+  path?: string;
 }
 
 /** Longest edge (px) of a generated panel thumbnail — comfortably sharp for the
@@ -216,6 +238,14 @@ export function isLibraryAsset(asset: { source?: AssetSource }): boolean {
 
 interface AddAssetOptions {
   source?: AssetSource;
+  /**
+   * A pre-minted id. The media browser needs the id BEFORE the import
+   * finishes so a drag payload can name the asset it is about to become.
+   * Honoured by every storage path (the bundle registry accepts `meta.id`).
+   */
+  id?: string;
+  /** The on-disk origin, when the caller knows it. See `ImportedAsset.path`. */
+  path?: string;
 }
 
 interface AssetStoreActions {
@@ -252,6 +282,10 @@ interface AssetStoreActions {
   setProxy: (assetId: string, proxy: ProxyRecord | null) => void;
   /** The analysis stand-in's record. Same contract as `setProxy`. */
   setAnalysisProxy: (assetId: string, proxy: ProxyRecord | null) => void;
+  /** Replace an asset's tag list. Already-normalised (see `parseTags`). */
+  setTags: (assetId: string, tags: readonly string[]) => void;
+  /** Set (or with null, clear) the colour label on every id at once. */
+  setLabel: (assetIds: readonly string[], label: string | null) => void;
   /** Replace the local list with the signed-in user's cloud assets. */
   loadFromCloud: () => Promise<void>;
   /** Initialize local assets hydrated from IndexedDB. */
@@ -285,6 +319,56 @@ const PROXY_KEY = 'motion-editor.assetProxies.v1';
  *  one above, so a store written by a build that predates this tier reads
  *  back unchanged instead of failing its shape check. */
 const ANALYSIS_PROXY_KEY = 'motion-editor.assetAnalysisProxies.v1';
+/**
+ * Tags, colour label, import date and origin path — one map, because they
+ * are written together (every add stamps a date; a tag edit rewrites the
+ * row) and read together (`applyAssignments`). Same reasoning as the folder
+ * map: facts ABOUT an asset that neither IndexedDB nor the cloud record
+ * carries. The bundle registry gets tags and label too, on save, so a
+ * project opened on another machine keeps its organisation.
+ */
+const ORGANISATION_KEY = 'motion-editor.assetOrganisation.v1';
+
+interface AssetOrganisation {
+  tags?: string[];
+  label?: string;
+  importedAt?: number;
+  path?: string;
+}
+
+function loadOrganisation(): Record<string, AssetOrganisation> {
+  try {
+    const raw = localStorage.getItem(ORGANISATION_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, AssetOrganisation>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Only rows with something in them are written; a bare asset is the absent case. */
+function saveOrganisation(assets: ImportedAsset[]): void {
+  try {
+    const map: Record<string, AssetOrganisation> = {};
+    for (const a of assets) {
+      const row: AssetOrganisation = {};
+      if (a.tags && a.tags.length > 0) row.tags = a.tags;
+      if (a.label) row.label = a.label;
+      if (a.importedAt) row.importedAt = a.importedAt;
+      if (a.path) row.path = a.path;
+      if (Object.keys(row).length > 0) map[a.id] = row;
+    }
+    localStorage.setItem(ORGANISATION_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** `File.path` — set by older Electron builds on dropped files; absent on the web. */
+function originPathOf(file: File, explicit: string | undefined): string | undefined {
+  if (explicit) return explicit;
+  const p = (file as File & { path?: unknown }).path;
+  return typeof p === 'string' && p.length > 0 ? p : undefined;
+}
 
 function loadFolders(): AssetFolder[] {
   try {
@@ -480,6 +564,8 @@ async function applyProbe(file: File, asset: ImportedAsset): Promise<void> {
     ...(facts.audio !== undefined ? { hasAudioTrack: facts.audio !== null } : {}),
     ...(facts.hasAlpha ? { hasAlpha: true } : {}),
     ...(facts.audio?.channels ? { audioChannels: facts.audio.channels } : {}),
+    ...(facts.videoCodec ? { codec: facts.videoCodec } : facts.audio?.codec ? { codec: facts.audio.codec } : {}),
+    ...(facts.container ? { container: facts.container } : {}),
   };
   // A non-square pixel aspect IS an interpretation — it is the container
   // telling us how it wants to be displayed, and the user can override it.
@@ -494,6 +580,7 @@ function applyAssignments(assets: ImportedAsset[], folders: AssetFolder[]): Impo
   const proxies = loadProxies();
   const analysisProxies = loadProxies(ANALYSIS_PROXY_KEY);
   const sources = loadSources();
+  const organisation = loadOrganisation();
   const validFolder = new Set(folders.map((f) => f.id));
   return assets.map((a) => {
     const fid = map[a.id];
@@ -501,6 +588,7 @@ function applyAssignments(assets: ImportedAsset[], folders: AssetFolder[]): Impo
     const p = proxies[a.id];
     const ap = analysisProxies[a.id];
     const src = sources[a.id];
+    const org = organisation[a.id];
     return {
       ...a,
       folderId: fid && validFolder.has(fid) ? fid : a.folderId ?? null,
@@ -508,6 +596,12 @@ function applyAssignments(assets: ImportedAsset[], folders: AssetFolder[]): Impo
       ...(p ? { proxy: p } : {}),
       ...(ap ? { analysisProxy: ap } : {}),
       ...(src ? { source: src } : {}),
+      // The asset's own record (a bundle restore carries tags and label)
+      // wins over the local map only when the map has nothing to say.
+      ...(org?.tags && org.tags.length > 0 ? { tags: org.tags } : {}),
+      ...(org?.label ? { label: org.label } : {}),
+      ...(org?.importedAt ? { importedAt: org.importedAt } : {}),
+      ...(org?.path ? { path: org.path } : {}),
     };
   });
 }
@@ -637,8 +731,9 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
       // Local-first: content-address the bytes into the open
       // project bundle and render from disk — never upload. Falls through to the
       // in-memory object-URL path (still upload-free) if no bundle is open.
+      const originPath = originPathOf(file, opts.path);
       if (isLocalFirst()) {
-        const imported = await importLocalAsset(file);
+        const imported = await importLocalAsset(file, opts.id ? { id: opts.id } : undefined);
         if (imported) {
           const type: 'image' | 'video' | 'audio' =
             imported.record.type === 'video' ? 'video' : imported.record.type === 'audio' ? 'audio' : 'image';
@@ -650,6 +745,8 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
             size: file.size,
             folderId,
             source,
+            importedAt: Date.now(),
+            ...(originPath ? { path: originPath } : {}),
             ...(imported.metadata ? { metadata: imported.metadata } : {}),
           };
           await applyProbe(file, asset);
@@ -658,6 +755,7 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
           });
           saveAssignments(get().assets);
           saveSources(get().assets);
+          saveOrganisation(get().assets);
           triggerAutoProxy(asset);
           if (originalExr) {
             try {
@@ -677,12 +775,13 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
       if (source === 'ai' && isAuthenticated() && !isLocalFirst()) {
         try {
           const uploaded = await api.uploadAsset(file);
-          const withFolder = { ...uploaded, folderId, source };
+          const withFolder = { ...uploaded, folderId, source, importedAt: Date.now() };
           set((s) => {
             s.assets.push(withFolder);
           });
           saveAssignments(get().assets);
           saveSources(get().assets);
+          saveOrganisation(get().assets);
           triggerAutoProxy(withFolder);
           return withFolder;
         } catch {
@@ -690,7 +789,7 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
         }
       }
 
-      const id = `asset_${shortId()}`;
+      const id = opts.id ?? `asset_${shortId()}`;
       const src = URL.createObjectURL(file);
       const type = mediaTypeOf(file);
 
@@ -702,6 +801,8 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
         size: file.size,
         folderId,
         source,
+        importedAt: Date.now(),
+        ...(originPath ? { path: originPath } : {}),
       };
 
       // Read dimensions or duration if possible
@@ -776,6 +877,7 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
       });
       saveAssignments(get().assets);
       saveSources(get().assets);
+      saveOrganisation(get().assets);
       triggerAutoProxy(asset);
 
       // Keep linear float planes for EXR (preview PNG is in `src`).
@@ -816,6 +918,7 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
             const src = URL.createObjectURL(file);
             const type = mediaTypeOf(file);
 
+            const batchPath = originPathOf(file, undefined);
             const asset: ImportedAsset = {
               id,
               name: file.name,
@@ -823,6 +926,8 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
               src,
               size: file.size,
               folderId: folderId ?? null,
+              importedAt: Date.now(),
+              ...(batchPath ? { path: batchPath } : {}),
             };
 
             let thumb: Blob | null = null;
@@ -916,6 +1021,7 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
       });
       saveAssignments(get().assets);
       saveSources(get().assets);
+      saveOrganisation(get().assets);
       // Same import-time proxy kick the single-file path does — batch-imported
       // video (the panel picker and OS drops) never got one.
       for (const asset of createdAssets) triggerAutoProxy(asset);
@@ -931,6 +1037,7 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
       });
       saveAssignments(get().assets);
       saveSources(get().assets);
+      saveOrganisation(get().assets);
     },
 
     removeAssets: (ids) => {
@@ -942,6 +1049,30 @@ export const useAssetStore = create<AssetStoreState & AssetStoreActions>()(
       });
       saveAssignments(get().assets);
       saveSources(get().assets);
+      saveOrganisation(get().assets);
+    },
+
+    setTags: (assetId, tags) => {
+      set((s) => {
+        const a = s.assets.find((x) => x.id === assetId);
+        if (!a) return;
+        if (tags.length > 0) a.tags = [...tags];
+        else delete a.tags;
+      });
+      saveOrganisation(get().assets);
+    },
+
+    setLabel: (assetIds, label) => {
+      const targets = new Set(assetIds);
+      if (targets.size === 0) return;
+      set((s) => {
+        for (const a of s.assets) {
+          if (!targets.has(a.id)) continue;
+          if (label) a.label = label;
+          else delete a.label;
+        }
+      });
+      saveOrganisation(get().assets);
     },
 
     createFolder: (name, parentId = null) => {

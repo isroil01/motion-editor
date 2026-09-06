@@ -34,7 +34,7 @@ import { useMemo, useState } from 'react';
 import { cn } from '@utils/cn';
 import { EmptyState } from '@components/EmptyState';
 import { useSelectionStore } from '@stores/selectionStore';
-import { useWorkspaceStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { getTimelineController } from '@core/timeline/TimelineController';
 import { useSceneRevision } from '@stores/sceneStore';
@@ -72,8 +72,7 @@ const FALLBACK_PPS = 60;
 export function MotionEditorPanel(): JSX.Element {
   const primary = useSelectionStore((s) => s.primary);
   const selectedIds = useSelectionStore((s) => s.ids);
-  const activeTabId = useWorkspaceStore((s) => s.activeTabId);
-  const playhead = useWorkspaceStore((s) => (activeTabId ? s.tabs[activeTabId]?.time : 0) ?? 0);
+  const playhead = useCurrentTime();
   const duration = useCompositionStore((s) => s.durationSeconds);
   const fps = useCompositionStore((s) => s.fps);
   // The engine mutates keyframes in place, so the track keeps its reference.

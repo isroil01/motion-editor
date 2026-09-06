@@ -24,7 +24,7 @@
  * not.
  */
 
-import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 import { ValueField } from '@components/ValueField';
 import { Button } from '@components/Button';
 import { useSceneRevision } from '@stores/sceneStore';
@@ -84,14 +84,16 @@ function MorphRow({ nodeId, componentId, index, label, layerT, autoKeyframe }: M
 
   return (
     <div className={s.row}>
-      <Checkbox
-        checked={animated}
-        onChange={() => {
+      <AnimToggle
+        nodeId={nodeId}
+        tracks={[prop]}
+        label={label}
+        animated={animated}
+        values={() => [value]}
+        onToggle={() => {
           if (animated) runAnimEdit(`Remove ${label} animation`, () => defaultAnimation.removeTrack(nodeId, prop));
           else runAnimEdit(`Animate ${label}`, () => defaultAnimation.setKeyframe(nodeId, prop, layerT, value));
         }}
-        title={animated ? `Stop animating ${label}` : `Animate ${label} — adds a keyframe at the playhead`}
-        style={{ width: 13, height: 13 }}
       />
       <span className={`${s.label}${animated ? ` ${s.labelAnimated}` : ''}`} title={label}>{label}</span>
       <input

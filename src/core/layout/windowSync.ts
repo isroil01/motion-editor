@@ -32,6 +32,7 @@ import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
 import { bumpScene } from '@stores/sceneStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useProjectStore } from '@stores/projectStore';
+import { usePlaybackClockStore, setTime as setClockTime } from '@stores/playbackClockStore';
 
 /** This window renders a detached panel, not the editor shell. */
 export function isPopoutWindow(): boolean {
@@ -98,17 +99,19 @@ export function startWindowSync(): () => void {
     syncChannel.publish<readonly string[]>(MSG_SELECTION, [...state.ids]);
   });
 
-  const unsubTime = useProjectStore.subscribe((state, prev) => {
+  // The LIVE clock, not the project store: the tab record there is only a
+  // ≤4Hz mirror during playback (see playbackClockStore).
+  const unsubTime = usePlaybackClockStore.subscribe((state, prev) => {
     if (applying) return;
-    const id = state.activeTabId;
+    const id = useProjectStore.getState().activeTabId;
     if (!id) return;
-    const now = state.tabs[id]?.time;
-    const before = prev.activeTabId === id ? prev.tabs[id]?.time : undefined;
-    if (now === undefined || now === before) return;
+    const now = state.clocks[id];
+    const before = prev.clocks[id];
+    if (!now || now.time === before?.time) return;
     const stamp = performance.now();
     if (stamp - lastTimeSent < TIME_THROTTLE_MS) return;
     lastTimeSent = stamp;
-    syncChannel.publish<TimePayload>(MSG_TIME, { time: now, frame: state.tabs[id]?.frame ?? 0 });
+    syncChannel.publish<TimePayload>(MSG_TIME, { time: now.time, frame: now.frame });
   });
 
   // ── Inbound ─────────────────────────────────────────────────────
@@ -153,7 +156,8 @@ export function startWindowSync(): () => void {
     if (!p || typeof p.time !== 'number') return;
     applying = true;
     try {
-      useProjectStore.getState().actions.setTime(p.time, p.frame);
+      const id = useProjectStore.getState().activeTabId;
+      if (id) setClockTime(id, p.time, p.frame);
     } finally {
       window.setTimeout(() => { applying = false; }, 0);
     }

@@ -17,6 +17,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from '@components/Icon';
 import { usePresentationStore } from '@stores/presentationStore';
 import { useWorkspaceStore, useActiveWorkspace } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useRenderQualityStore, RESOLUTION_LABELS, type PreviewResolution } from '@stores/renderQualityStore';
@@ -49,7 +50,7 @@ export function PresentationMode(): JSX.Element | null {
   const previewResolution = useRenderQualityStore((s) => s.resolution);
   const setResolution = useRenderQualityStore((s) => s.setResolution);
 
-  const time = ws?.time ?? 0;
+  const time = useCurrentTime();
   const playing = ws?.playing ?? false;
   const durationFrames = Math.max(1, Math.round(duration * fps));
   const currentFrame = Math.min(durationFrames, Math.max(0, Math.round(time * fps)));

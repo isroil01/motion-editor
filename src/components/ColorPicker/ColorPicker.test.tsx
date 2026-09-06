@@ -8,8 +8,9 @@
  * shut, and the colours appear once it opens.
  */
 
-import { render, screen, fireEvent, within } from '@testing-library/react';
-import { ColorPicker } from './ColorPicker';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { ColorPicker, colorManagementSummary } from './ColorPicker';
+import { useColorManagementStore } from '@stores/colorManagementStore';
 import { useSwatchStore } from '@stores/swatchStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
@@ -142,5 +143,53 @@ describe('recents are untouched by any of this', () => {
     expect(localStorage.getItem('motion-editor.recentColors.v1')).toContain('#abcdef');
     // And nothing leaked into the document palette.
     expect(useSwatchStore.getState().swatches).toEqual([]);
+  });
+});
+
+/*
+ * A hex is not a colour until you know what space it is in: the same
+ * `#B34A2F` is a different pixel under ACEScg than under linear Rec.709. The
+ * readout is the picker's disclosure of that, and it is a READOUT — the
+ * settings are project-wide and render-affecting, so a swatch popover must
+ * never be able to change them.
+ */
+describe('colour-management readout', () => {
+  afterEach(() => {
+    act(() => {
+      useColorManagementStore.getState().setWorkingSpace('srgb-linear');
+      useColorManagementStore.getState().setDisplayTransform('srgb');
+      useColorManagementStore.getState().setBitDepth(16);
+    });
+  });
+
+  it('names the working space, the display transform and the bit depth', () => {
+    expect(colorManagementSummary({ workingSpace: 'srgb-linear', displayTransform: 'srgb', bitDepth: 16 }))
+      .toBe('Linear Rec.709 · sRGB · 16-bit');
+    expect(colorManagementSummary({ workingSpace: 'aces-cg', displayTransform: 'aces', bitDepth: 32 }))
+      .toBe('ACEScg · ACES · 32-bit');
+  });
+
+  it('shows the project`s current settings when the popover opens', () => {
+    render(<ColorPicker value="#123456" onChange={jest.fn()} />);
+    open();
+    expect(screen.getByText('Linear Rec.709 · sRGB · 16-bit')).toBeTruthy();
+  });
+
+  it('follows a change made in project settings', () => {
+    render(<ColorPicker value="#123456" onChange={jest.fn()} />);
+    act(() => {
+      useColorManagementStore.getState().setWorkingSpace('aces-cg');
+      useColorManagementStore.getState().setDisplayTransform('pq');
+      useColorManagementStore.getState().setBitDepth(32);
+    });
+    open();
+    expect(screen.getByText('ACEScg · PQ · 32-bit')).toBeTruthy();
+  });
+
+  it('offers no control that could re-grade the comp from inside a swatch', () => {
+    render(<ColorPicker value="#123456" onChange={jest.fn()} />);
+    open();
+    const readout = screen.getByText('Linear Rec.709 · sRGB · 16-bit').parentElement!;
+    expect(readout.querySelector('button, input, select')).toBeNull();
   });
 });

@@ -16,9 +16,6 @@
 .root {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  box-sizing: border-box;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -33,6 +30,71 @@
   box-shadow: inset 0 0 0 1px var(--color-focus-ring);
 }
 
+/* ── Top Header Rows ───────────────────────────────────────────── */
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex: none;
+}
+
+.toolbarRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex: none;
+  min-width: 0;
+}
+
+.toolbarGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.toolbarBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.toolbarBtn:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.toolbarBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbarBtnActive {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Kept for backwards compatibility and test assertions */
 .toolbar {
   display: flex;
   align-items: center;
@@ -62,18 +124,13 @@
 
 /**
  * The layer-scope toggle: a two-state pill, not a checkbox.
- *
- * Both states are a positive statement of what the next Delete will cut ("All
- * layers" / "Selected layers only"), because a checkbox labelled "selected
- * layers only" in its OFF state tells the user what will not happen and leaves
- * them to infer what will.
  */
 .scopeToggle {
-  height: var(--control-height-xs);
+  height: 24px;
   padding: 0 var(--space-2);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--color-surface-1);
+  background: var(--color-surface-0);
   color: var(--color-text-secondary);
   font-size: var(--font-size-micro);
   font-weight: var(--font-weight-medium);
@@ -81,26 +138,65 @@
   white-space: nowrap;
   cursor: pointer;
   transition: var(--motion-hover-transition);
+  box-sizing: border-box;
+}
+
+.scopeToggle:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
 }
 
 .scopeToggle[aria-pressed='true'] {
-  border-color: var(--color-accent);
-  background: var(--color-accent-subtle);
-  color: var(--color-text-primary);
+  border-color: var(--color-primary);
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+/* ── Custom Filler Words Drawer / Card ─────────────────────────── */
+
+.fillerEditorCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  flex: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.fillerEditorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .fillerList {
-  flex: none;
+  width: 100%;
   min-height: 56px;
   resize: vertical;
   padding: var(--space-2);
   border: 1px solid var(--color-field-border);
   border-radius: var(--radius-sm);
-  background: var(--color-surface-1);
+  background: var(--color-surface-0);
   color: var(--color-text-primary);
   font-family: inherit;
   font-size: var(--font-size-xs);
   line-height: 1.5;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.fillerList:focus {
+  border-color: var(--color-primary);
 }
 
 .progress,
@@ -115,21 +211,36 @@
 }
 
 .progress {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border-subtle);
   color: var(--color-text-secondary);
 }
 
 .meta {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-micro);
+  padding: 4px var(--space-3);
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border-subtle);
   flex-wrap: wrap;
-  gap: 0;
+  gap: 4px;
 }
 
 .selectionBar {
-  color: var(--color-text-secondary);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-1);
+  color: var(--color-text-primary);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-primary-subtle);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  justify-content: space-between;
+}
+
+.selectionBarText {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
 }
 
 .error {

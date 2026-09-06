@@ -16,6 +16,7 @@ import { Button } from '@components/Button';
 import { Checkbox } from '@components/Checkbox';
 import { ValueField } from '@components/ValueField';
 import { openModal } from '@stores/modalStore';
+import { DialogFooter, useDialogPrimaryAction } from '@components/Modal';
 import { defaultAnimation, type Keyframe, type PropPath } from '@motion/animation';
 import { smoothTrackKeyframes } from '@core/animation/keyframeAssistants';
 import { resolvePropertyMeta } from '@core/inspector/propertyMeta';
@@ -118,6 +119,9 @@ function SmootherBody({ nodeId, tracks, close, onDone }: SmootherBodyProps): JSX
     close();
   };
 
+  // Enter smooths, once there is something to smooth.
+  useDialogPrimaryAction(chosen.size > 0 ? confirm : null);
+
   const toggle = (prop: PropPath): void => {
     setChosen((prev) => {
       const next = new Set(prev);
@@ -171,15 +175,19 @@ function SmootherBody({ nodeId, tracks, close, onDone }: SmootherBodyProps): JSX
           : `${before} keyframes → ${after} across ${chosen.size} track${chosen.size === 1 ? '' : 's'}.`}
       </p>
 
-      <div className={styles.footer}>
-        <span className={styles.footerNote}>Previewing on the composition</span>
-        <Button variant="ghost" onClick={cancel}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={confirm} disabled={chosen.size === 0}>
-          Smooth
-        </Button>
-      </div>
+      <DialogFooter
+        note="Previewing on the composition"
+        secondary={
+          <Button variant="ghost" onClick={cancel}>
+            Cancel
+          </Button>
+        }
+        primary={
+          <Button variant="primary" onClick={confirm} disabled={chosen.size === 0}>
+            Smooth
+          </Button>
+        }
+      />
     </div>
   );
 }
@@ -199,8 +207,12 @@ export function openSmootherDialog(nodeId: string): Promise<string | null> {
       resolve(summary);
     };
     openModal({
+      id: 'smoother',
       title: 'The Smoother',
       size: 'sm',
+      // A tool window: the preview is ON the comp, so the comp must stay
+      // reachable — scrub the playhead to judge the result before committing.
+      variant: 'floating',
       onClose: () => finish(null),
       render: (close) => (
         <SmootherBody nodeId={nodeId} tracks={tracks} close={close} onDone={finish} />

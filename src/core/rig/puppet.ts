@@ -1,6 +1,6 @@
 import type { SceneNode } from '../types';
 import { earClip, subdivide, polygonArea } from './mesh';
-import { splitBendPins, driverRestMesh, applyBendPins, solveDeform } from './bendPins';
+import { splitBendPins, driverRestMesh, applyBendPins, applyBendPinsArap, solveDeform } from './bendPins';
 import { buildAlphaOutlineGeometry } from './alphaMesh';
 
 /**
@@ -759,7 +759,60 @@ export function deform(
   if (!split) return solveDeform(pins, restMesh, solver, maxRotationDeg);
   const driverMesh = driverRestMesh(restMesh, split.bends);
   const base = solveDeform(split.drivers, driverMesh, solver, maxRotationDeg);
-  return applyBendPins(base, split.bends, restMesh, maxRotationDeg);
+  // ARAP turns the bend's region rigidly and solves the transition; the LBS
+  // solver keeps the weight-blended rotation, which is all LBS can express.
+  return solver === 'arap'
+    ? applyBendPinsArap(base, split.drivers, split.bends, restMesh, driverMesh, maxRotationDeg)
+    : applyBendPins(base, split.bends, restMesh, maxRotationDeg);
+}
+
+/**
+ * Map a point in DEFORMED mesh space back to rest space.
+ *
+ * A pin's `x`/`y` is a rest-space anchor, but the user places a pin by clicking
+ * the artwork as it currently looks — which, once any pin has moved, is the
+ * deformed mesh. Storing that click as the anchor binds the new pin to whatever
+ * rest vertex happens to lie under a deformed-space coordinate (a different
+ * body part, or empty space), and because a fresh pin's live position IS its
+ * anchor, the mesh then snaps toward it the instant the pin lands. Inverting
+ * the deformation first puts the anchor on the artwork the user actually
+ * clicked.
+ *
+ * Finds the deformed triangle containing `p` and carries its barycentric
+ * coordinates onto the rest triangle. Returns null when no triangle contains
+ * the point (outside the mesh, or in a fold the painter's order hides) — the
+ * caller then falls back to the raw coordinate. Where several folded triangles
+ * overlap, the first in index order wins, deterministically.
+ */
+export function restPointFromDeformed(
+  p: { x: number; y: number },
+  restMesh: DeformedMesh,
+  deformed: Float32Array,
+): { x: number; y: number } | null {
+  const tris = restMesh.triangles;
+  const rest = restMesh.vertices;
+  // A little tolerance so a click exactly on a shared edge is not lost to
+  // floating point between the two triangles that own it.
+  const EPS = -1e-4;
+  for (let t = 0; t < tris.length; t += 3) {
+    const a = tris[t]!;
+    const b = tris[t + 1]!;
+    const c = tris[t + 2]!;
+    const ax = deformed[a * 4]!, ay = deformed[a * 4 + 1]!;
+    const bx = deformed[b * 4]!, by = deformed[b * 4 + 1]!;
+    const cx = deformed[c * 4]!, cy = deformed[c * 4 + 1]!;
+    const det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+    if (Math.abs(det) < 1e-12) continue;
+    const u = ((bx - p.x) * (cy - p.y) - (cx - p.x) * (by - p.y)) / det;
+    const v = ((cx - p.x) * (ay - p.y) - (ax - p.x) * (cy - p.y)) / det;
+    const w = 1 - u - v;
+    if (u < EPS || v < EPS || w < EPS) continue;
+    return {
+      x: u * rest[a * 4]! + v * rest[b * 4]! + w * rest[c * 4]!,
+      y: u * rest[a * 4 + 1]! + v * rest[b * 4 + 1]! + w * rest[c * 4 + 1]!,
+    };
+  }
+  return null;
 }
 
 /**

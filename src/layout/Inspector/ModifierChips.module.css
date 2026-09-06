@@ -1,0 +1,133 @@
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 2px 0;
+}
+
+/* One modifier. The kind is the loud part, the summary the quiet part — a
+   chip has to read as "wiggle" from across the panel and as "wiggle 2Hz ×30"
+   only when you look. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  cursor: grab;
+}
+
+.chipOff {
+  opacity: 0.55;
+}
+
+.chipDragging {
+  opacity: 0.4;
+}
+
+.chipBody {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: var(--control-height-2xs);
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-micro);
+  cursor: pointer;
+}
+
+.chipBody:hover {
+  color: var(--color-primary);
+}
+
+.chipKind {
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.chipSummary {
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 96px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chipRemove:hover {
+  color: var(--color-danger);
+}
+
+.add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-2xs);
+  height: var(--control-height-2xs);
+  padding: 0;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.add:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+.error {
+  display: inline-flex;
+  color: var(--color-warning);
+}
+
+/* The parameter popover. */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 180px;
+  padding: var(--space-3);
+}
+
+.editorHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.editorTitle {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.editorToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
+}

@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useState, memo } from 'react';
 import { Icon } from '@components/Icon';
-import { Dropdown } from '@components/Dropdown';
+import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { viewportFrameCache } from '@core/rendering/frameCache';
 import { activeViewportDiskCache } from '@core/rendering/frameDiskCache';
 import {
@@ -39,7 +39,13 @@ import styles from './CacheActions.module.css';
 /** How often the readout re-reads coverage while it is changing. */
 const REFRESH_HZ = 2;
 
-function CacheActionsImpl(): JSX.Element {
+/**
+ * The live coverage readout and a way to re-read it after an action. The
+ * subscription is here rather than in the component so the toolbar's
+ * last-resort `⋯` menu (`TimelineToolbarOverflow`) can list the same rows
+ * from the same numbers when the button group has had to leave the row.
+ */
+export function usePreviewCacheStats(): { stats: PreviewCacheStats; refresh: () => void } {
   const [stats, setStats] = useState<PreviewCacheStats>(() => previewCacheStats());
 
   // The commands exist because this component does; registering from here
@@ -81,9 +87,57 @@ function CacheActionsImpl(): JSX.Element {
     setStats(previewCacheStats());
   }, []);
 
-  const full = stats.total > 0 && stats.cached >= stats.total;
+  return { stats, refresh };
+}
+
+/** The dropdown's rows: cache now, purge RAM, purge disk. */
+export function previewCacheMenuItems(stats: PreviewCacheStats, refresh: () => void): DropdownItem[] {
   const hasRam = stats.ramMb > 0;
   const hasDisk = activeViewportDiskCache() !== null;
+  return [
+    { type: 'label', label: describePreviewCache(stats) },
+    { type: 'separator' },
+    {
+      type: 'item',
+      id: 'cache-work-area',
+      label: stats.workArea ? 'Cache Work Area Now' : 'Cache Composition Now',
+      icon: 'refresh',
+      disabled: stats.total === 0,
+      onSelect: () => {
+        cacheWorkAreaNow();
+        refresh();
+      },
+    },
+    { type: 'separator' },
+    {
+      type: 'item',
+      id: 'purge-ram',
+      label: 'Purge RAM Preview',
+      icon: 'trash',
+      disabled: !hasRam,
+      onSelect: () => {
+        purgeRamPreview();
+        refresh();
+      },
+    },
+    {
+      type: 'item',
+      id: 'purge-disk',
+      label: 'Purge Disk Cache',
+      icon: 'trash',
+      danger: true,
+      disabled: !hasDisk,
+      onSelect: () => {
+        purgeDiskCache();
+        refresh();
+      },
+    },
+  ];
+}
+
+function CacheActionsImpl(): JSX.Element {
+  const { stats, refresh } = usePreviewCacheStats();
+  const full = stats.total > 0 && stats.cached >= stats.total;
 
   return (
     <div className={styles.group} role="group" aria-label="Preview cache">
@@ -123,45 +177,7 @@ function CacheActionsImpl(): JSX.Element {
             <Icon name="more-horizontal" size="sm" />
           </button>
         }
-        items={[
-          { type: 'label', label: describePreviewCache(stats) },
-          { type: 'separator' },
-          {
-            type: 'item',
-            id: 'cache-work-area',
-            label: stats.workArea ? 'Cache Work Area Now' : 'Cache Composition Now',
-            icon: 'refresh',
-            disabled: stats.total === 0,
-            onSelect: () => {
-              cacheWorkAreaNow();
-              refresh();
-            },
-          },
-          { type: 'separator' },
-          {
-            type: 'item',
-            id: 'purge-ram',
-            label: 'Purge RAM Preview',
-            icon: 'trash',
-            disabled: !hasRam,
-            onSelect: () => {
-              purgeRamPreview();
-              refresh();
-            },
-          },
-          {
-            type: 'item',
-            id: 'purge-disk',
-            label: 'Purge Disk Cache',
-            icon: 'trash',
-            danger: true,
-            disabled: !hasDisk,
-            onSelect: () => {
-              purgeDiskCache();
-              refresh();
-            },
-          },
-        ]}
+        items={previewCacheMenuItems(stats, refresh)}
       />
     </div>
   );

@@ -29,7 +29,7 @@ import {
 } from '@core/scene/pathOps';
 import type { RepeaterComposite } from '@core/scene/repeater';
 import styles from './TextAnimatorControls.module.css';
-import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 import { InspectorSection } from './InspectorSection';
 
 const TYPES: { id: PathOpType; label: string }[] = [
@@ -133,12 +133,7 @@ function ParamRow({
   return (
     <div className={styles.paramRow}>
       <span className={styles.rowToggle}>
-        <Checkbox
-          checked={animated}
-          onChange={toggle}
-          title="Toggle Animation"
-          style={{ width: 14, height: 14 }}
-        />
+        <AnimToggle nodeId={nodeId} tracks={[path]} label={label} animated={animated} onToggle={toggle} values={() => [display]} />
       </span>
       <span className={styles.paramLabel}>{label}</span>
       <ValueField value={display} onChange={onChange} min={min} max={max} step={step} unit={unit} aria-label={label} />

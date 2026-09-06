@@ -190,6 +190,37 @@ interface LayoutActions {
   setLeftSidebarPosition(pos: 'left' | 'right'): void;
   setRightInspectorPosition(pos: 'left' | 'right'): void;
   setTimelinePosition(pos: 'bottom' | 'top'): void;
+  /**
+   * One-key focus modes (`Tab` / `Shift+Tab`).
+   *
+   * Entering a mode snapshots which regions were collapsed and collapses the
+   * ones the mode hides; toggling the SAME mode again restores that snapshot;
+   * switching to the OTHER mode re-collapses against the original snapshot,
+   * so leaving either way puts back what the user had before the first Tab.
+   */
+  setFocusMode(mode: FocusMode): void;
+}
+
+/**
+ * `viewport-timeline` = both sidebars collapsed, timeline kept;
+ * `viewport` = sidebars and timeline collapsed; `none` = as the user left it.
+ */
+export type FocusMode = 'none' | 'viewport-timeline' | 'viewport';
+
+/** The regions a focus mode may collapse, and therefore must remember. */
+export const FOCUS_MODE_REGIONS: ReadonlyArray<RegionId> = [
+  'leftSidebar',
+  'leftSidebar_bottom',
+  'rightInspector',
+  'rightInspector_bottom',
+  'bottomTimeline',
+];
+
+/** Which of those a mode collapses. */
+export function focusModeCollapses(mode: FocusMode, region: RegionId): boolean {
+  if (mode === 'none') return false;
+  if (region === 'bottomTimeline') return mode === 'viewport';
+  return FOCUS_MODE_REGIONS.includes(region);
 }
 
 export interface LayoutStore {
@@ -207,6 +238,10 @@ export interface LayoutStore {
   timelinePosition: 'bottom' | 'top';
   leftSidebarSplit: boolean;
   rightInspectorSplit: boolean;
+  /** Active focus mode. Not persisted: a reload puts the user back in charge of the panels. */
+  focusMode: FocusMode;
+  /** Collapsed state per region as it was before the focus mode was entered. */
+  focusModeRestore: Partial<Record<RegionId, boolean>> | null;
 }
 
 const DEFAULT_REGIONS: LayoutMap = {
@@ -227,6 +262,8 @@ export const useLayoutStore = create<LayoutStore & LayoutActions>()(
   immer((set, get) => ({
     panels: {},
     regions: _initialRegions,
+    focusMode: 'none',
+    focusModeRestore: null,
     // De-dupe restored order: older persisted layouts (written before the
     // registerPanel guard below) can contain each id twice, which rendered
     // every sidebar tab twice.
@@ -450,6 +487,38 @@ export const useLayoutStore = create<LayoutStore & LayoutActions>()(
       set((s) => {
         if (s.regions[region]) {
           s.regions[region].collapsed = collapsed;
+        }
+      }),
+
+    setFocusMode: (mode) =>
+      set((s) => {
+        const leaving = mode === 'none' || mode === s.focusMode;
+        if (leaving) {
+          if (s.focusMode === 'none') return; // nothing to leave
+          for (const region of FOCUS_MODE_REGIONS) {
+            const was = s.focusModeRestore?.[region];
+            if (typeof was === 'boolean') s.regions[region].collapsed = was;
+          }
+          s.focusMode = 'none';
+          s.focusModeRestore = null;
+        } else {
+          // Snapshot only on the way IN from `none`: switching between the two
+          // modes keeps the original snapshot, or the second toggle would
+          // "restore" to the first mode's already-collapsed layout.
+          if (s.focusMode === 'none') {
+            const snap: Partial<Record<RegionId, boolean>> = {};
+            for (const region of FOCUS_MODE_REGIONS) snap[region] = s.regions[region].collapsed;
+            s.focusModeRestore = snap;
+          }
+          for (const region of FOCUS_MODE_REGIONS) {
+            s.regions[region].collapsed = focusModeCollapses(mode, region)
+              ? true
+              : (s.focusModeRestore?.[region] ?? s.regions[region].collapsed);
+          }
+          s.focusMode = mode;
+        }
+        for (const region of FOCUS_MODE_REGIONS) {
+          getEventBus().emit('PanelResized', { panelId: region, size: s.regions[region].size });
         }
       }),
 

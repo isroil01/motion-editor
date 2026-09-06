@@ -48,6 +48,9 @@ export interface SyncableAsset {
   src: string;
   size?: number;
   metadata?: { width?: number; height?: number; duration?: number };
+  /** Organisation the bundle keeps beside the bytes — see `AssetRecord`. */
+  tags?: string[];
+  label?: string;
 }
 
 /**
@@ -172,14 +175,19 @@ export async function collectAssetsIntoBundle(
     srcById: new Map(),
   };
 
+  const collected: SyncableAsset[] = [];
   const pending = assets.filter((a) => {
     if (isCollected(a.src)) {
       result.alreadyLocal += 1;
+      collected.push(a);
       return false;
     }
     return needsCollecting(a.src);
   });
-  if (pending.length === 0) return result;
+  // Tags and labels change after the bytes were collected, so an
+  // already-local asset can still owe the registry a metadata write.
+  const owesMeta = collected.some((a) => (a.tags && a.tags.length > 0) || a.label);
+  if (pending.length === 0 && !owesMeta) return result;
 
   const fs = detectBundleFs();
   // ONE registry for the whole pass, saved once. `importAssetToBundle` loads and
@@ -187,6 +195,13 @@ export async function collectAssetsIntoBundle(
   // rewrite the file forty times — and, worse, each load would discard records
   // added by an in-flight sibling.
   const registry = await loadAssetRegistry(fs, root);
+
+  let metaChanged = false;
+  for (const asset of collected) {
+    if (registry.updateMeta(asset.id, { ...(asset.tags ? { tags: asset.tags } : {}), ...(asset.label ? { label: asset.label } : {}) })) {
+      metaChanged = true;
+    }
+  }
 
   for (const asset of pending) {
     const bytes = await readBytes(asset.src);
@@ -204,6 +219,8 @@ export async function collectAssetsIntoBundle(
         ...(asset.metadata?.width != null ? { width: asset.metadata.width } : {}),
         ...(asset.metadata?.height != null ? { height: asset.metadata.height } : {}),
         ...(asset.metadata?.duration != null ? { duration: asset.metadata.duration } : {}),
+        ...(asset.tags && asset.tags.length > 0 ? { tags: asset.tags } : {}),
+        ...(asset.label ? { label: asset.label } : {}),
       });
       result.collected.push(asset.id);
       result.srcById.set(asset.id, localBlobRef(record.hash));
@@ -212,7 +229,7 @@ export async function collectAssetsIntoBundle(
     }
   }
 
-  if (result.collected.length > 0) await saveAssetRegistry(fs, root, registry);
+  if (result.collected.length > 0 || metaChanged) await saveAssetRegistry(fs, root, registry);
   return result;
 }
 
@@ -236,6 +253,8 @@ export function assetsFromRecords(records: ReadonlyArray<AssetRecord>): Syncable
       type,
       src: localBlobRef(record.hash),
       size: record.size,
+      ...(record.tags && record.tags.length > 0 ? { tags: [...record.tags] } : {}),
+      ...(record.label ? { label: record.label } : {}),
       ...(record.width != null || record.height != null || record.duration != null
         ? {
             metadata: {

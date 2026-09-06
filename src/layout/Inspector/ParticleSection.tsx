@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import { ValueField } from '@components/ValueField';
-import { Checkbox } from '@components/Checkbox';
+import { AnimToggle } from './AnimToggle';
 import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { readNodeParticle, DEFAULT_PARTICLE_CONFIG, particlePropPath, type ParticleConfig, type ParticleNumericKey } from '@core/particles/particleSim';
@@ -67,7 +67,7 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
     };
     return (
       <div className={styles.popoverRow}>
-        <Checkbox checked={animated} onChange={toggle} title="Toggle Keyframes" style={{ width: 13, height: 13 }} />
+        <AnimToggle nodeId={nodeId} tracks={[prop]} label={label} animated={animated} onToggle={toggle} values={() => [shown]} />
         <span className={styles.popoverLabel}>{label}</span>
         <ValueField
           value={shown}

@@ -8,16 +8,21 @@
  * engine can replace it via the `transport` prop.
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { Icon } from '@components/Icon';
 import { SearchField } from '@components/SearchField';
+import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { useCompositionStore } from '@stores/compositionStore';
 import { framesToTimecode } from '@core/time/timecode';
-import { Timeline, headerWidthFor, type TimelineProps } from '@layout/Timeline';
+import { Timeline, type TimelineProps } from '@layout/Timeline';
 import { CacheActions } from '@layout/Timeline/CacheActions';
 import { GraphEditor } from '@layout/Timeline/GraphEditor';
+import { TimelineTools, TimelineToolsMenu } from '@layout/Timeline/TimelineTools';
+import { TransitionPalette, TransitionsMenu } from '@layout/Timeline/transitionPalette';
+import { useTransportDemote } from '@layout/Workspace/useTransportDemote';
 import { cn } from '@utils/cn';
 import { useWorkspaceStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useLayoutStore } from '@stores/layoutStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { usePropertySelectionStore } from '@stores/propertySelectionStore';
@@ -31,7 +36,27 @@ import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenComposition } from '@core/scene/sceneDerive';
 import { deleteComposition, duplicateComposition } from '@core/composition/compositionOps';
 import { openCompositionSettings } from '@layout/Composition/CompositionSettingsDialog';
-import { customConfirm, customPrompt } from '@components/Modal';
+import { customConfirm } from '@components/Modal';
+import { parseGoToTime } from '@layout/Timeline/goToTime';
+import { TIMELINE_EXTRA_COLUMNS, parseExtraColumns, toggleExtraColumn, type TimelineExtraColumn } from '@layout/Timeline/timelineColumns';
+import { ROW_HEIGHT_PRESETS } from '@layout/Timeline/rowHeightDrag';
+import {
+  NAV_MIN_WIDTH,
+  navigatorHit,
+  navigatorWindow,
+  panWindow,
+  resizeWindow,
+  scrollForWindow,
+  zoomForWindow,
+  type NavWindow,
+} from '@layout/Timeline/timeNavigator';
+import { getTimelineViewport, scrollTimelineTo, subscribeTimelineViewport } from '@layout/Timeline/timelineViewport';
+import { TIMELINE_LEFT_OFFSET, resolveTrackHeaderWidth } from '@layout/Timeline/timelineShared';
+import { navigatorColumnFor } from './toolbarGeometry';
+import { TimelineToolbarOverflow } from './TimelineToolbarOverflow';
+import { fitTimelineToComposition } from '@layout/Timeline/timelineFit';
+import { useTranscriptStore } from '@layout/Transcript';
+import { activeCompRootId } from '@core/scene/activeComp';
 import styles from './BottomTimeline.module.css';
 
 export interface BottomTimelineProps extends Omit<TimelineProps, 'className'> {
@@ -44,6 +69,64 @@ export interface BottomTimelineProps extends Omit<TimelineProps, 'className'> {
    because the graph editor still clamps whatever it is handed. */
 const ZOOM_MIN = 4;
 const ZOOM_MAX = 800;
+
+/**
+ * What the toolbar's LEFT column gives up when it runs short, in order.
+ *
+ * The column is exactly the track-header column's width, and the header can
+ * be dragged down to `TRACK_HEADER_MIN_WIDTH`, so the ladder has to reach a
+ * form that fits there. The transition chips go first — they are the widest
+ * group and every one of them has a command — then the edit tools, each
+ * swapping for a one-trigger menu of the same rows (`TransitionsMenu`,
+ * `TimelineToolsMenu`). Last, `more`: those two triggers, View and the cache
+ * actions fold into a single `⋯` (`TimelineToolbarOverflow`), leaving the
+ * timecode, the filter (at its floor) and Graph Editor — the tour's anchor.
+ *
+ * Measured on the column itself (`useTransportDemote`), not a breakpoint: the
+ * width is the user's drag, and the panel sits between two docks whose widths
+ * the window knows nothing about. Nothing is ever clipped: the column has no
+ * `overflow: hidden`, so a control that did not fit would visibly cross into
+ * the navigator's column — which is exactly the deficit the ladder reads.
+ */
+export const TIMELINE_TOOLBAR_DEMOTE_ORDER = ['transitions', 'tools', 'more'] as const;
+export type TimelineToolbarGroup = (typeof TIMELINE_TOOLBAR_DEMOTE_ORDER)[number];
+export function isToolbarShed(group: TimelineToolbarGroup, level: number): boolean {
+  return TIMELINE_TOOLBAR_DEMOTE_ORDER.indexOf(group) < level;
+}
+
+/**
+ * An element's left edge in client pixels, live.
+ *
+ * The navigator column is placed from the lanes' client-space left edge
+ * (`timelineViewport`), so the row needs its own to subtract. A ResizeObserver
+ * rather than a one-off read: the docks either side of the panel move this
+ * edge without any window event, and every one of those moves resizes the
+ * row. `key` re-arms it when the row remounts (the panel collapses and
+ * reopens) — the ref object itself never changes identity.
+ */
+function useClientLeft(ref: RefObject<HTMLElement | null>, key: unknown): number {
+  const [left, setLeft] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = (): void => setLeft(el.getBoundingClientRect().left);
+    read();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', read);
+      return () => window.removeEventListener('resize', read);
+    }
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    window.addEventListener('resize', read);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', read);
+    };
+  }, [ref, key]);
+  return left;
+}
+
+const ROW_HEIGHT_LABEL: Record<number, string> = { 28: 'Compact', 36: 'Normal', 46: 'Tall' };
 
 export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
   const { className, transport, ...timelineProps } = props;
@@ -72,7 +155,16 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
   // Parent columns compete for the same width, and showing both needs a header
   // wider than any default panel. See `TimelineColumns`.
   const timelineColumns = useUIStore((s) => s.timelineColumns);
-  const cycleTimelineColumns = useUIStore((s) => s.cycleTimelineColumns);
+  const setTimelineColumns = useUIStore((s) => s.setTimelineColumns);
+  // The two optional lanes' switches. Both live in the UI store rather than
+  // in preferences: they answer "what am I looking at right now", not "how do
+  // I like my editor" — and a heat lane that came back on after a restart
+  // would be diffing against a baseline from a session nobody remembers.
+  const heatSource = useUIStore((s) => s.timelineHeatSource);
+  const setTimelineHeatSource = useUIStore((s) => s.setTimelineHeatSource);
+  const transcriptLaneOn = useUIStore((s) => s.timelineTranscriptLane);
+  const setTimelineTranscriptLane = useUIStore((s) => s.setTimelineTranscriptLane);
+  const hasTranscript = useTranscriptStore((s) => activeCompRootId() in s.byComp);
   
   const updateComp = useCompositionStore((s) => s.update);
   // Horizontal scroll mirror from Timeline → GraphEditor for pixel-alignment
@@ -83,27 +175,31 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
   const pps = props.model.pixelsPerSecond;
   const onZoom = props.onZoom;
   const clampZoom = (v: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v));
+  const setPref = usePreferenceStore((s) => s.set);
   const prefHeaderWidth = usePreferenceStore((s) => s.timelineHeaderWidth);
-  /**
-   * The same number the Timeline lays its header column out with — the sub-header
-   * above it splits on this pixel, so the search field ends where the column
-   * legend ends and the navigator starts where the lanes start.
-   *
-   * It used to take `max(pref, headerWidthFor(columns))`, a floor the Timeline
-   * itself dropped when the header column learned to scroll. The two then
-   * disagreed the moment you dragged the divider in: the rows narrowed and the
-   * search bar above them did not, so the one vertical line running down the
-   * panel broke in half.
-   */
-  const headerWidth = props.model.trackHeaderWidth ?? prefHeaderWidth ?? headerWidthFor(timelineColumns);
-
+  const extraColumnPref = usePreferenceStore((s) => s.timelineExtraColumns);
+  // Stretch is filtered out for want of a time-stretch API to drive it — the
+  // same filter <Timeline> applies, so the two cannot disagree about how many
+  // columns the header is sized for.
+  const extraColumns = useMemo<TimelineExtraColumn[]>(
+    () => parseExtraColumns(extraColumnPref).filter((c) => c !== 'stretch'),
+    [extraColumnPref],
+  );
   // Compact (28px) is the default of the three sizes the button cycles. A
   // motion comp is usually many short layers, and the taller rows pushed most
   // of them below the fold on a laptop — you spent the first interaction with
   // every project shrinking the rows back down.
-  const [rowTrackHeight, setRowTrackHeight] = useState(28);
+  //
+  // PERSISTED, because that first interaction was happening on every restart
+  // too: a local `useState` meant the choice lasted exactly as long as the
+  // window. Row height is a fact about the display you work on, not about the
+  // project, so it belongs in preferences and not in the document.
+  const rowTrackHeight = usePreferenceStore((s) => s.timelineRowHeight);
 
-  const playheadTime = ws?.time ?? timelineProps.model.currentTime;
+  // The live clock (playbackClockStore), not the tab record — that record is
+  // only a ≤4Hz mirror while playing. No tab at all falls back to the model.
+  const liveTime = useCurrentTime();
+  const playheadTime = ws ? liveTime : timelineProps.model.currentTime;
   const model = useMemo<TimelineProps['model']>(
     () => ({ ...timelineProps.model, trackHeight: rowTrackHeight }),
     [timelineProps.model, rowTrackHeight],
@@ -119,6 +215,214 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
   // Preview resolution and the loop flag moved out with the transport — they
   // are read by `TransportBar` under the stage now.
   const [searchQuery, setSearchQuery] = useState('');
+
+  /**
+   * The toolbar's left column is the track-header column's width — the SAME
+   * number `<Timeline>` resolves for the headers below, from the same inputs,
+   * so the seam between the buttons and the navigator is the seam between the
+   * headers and the lanes. Dragging the header resizer moves both at once.
+   */
+  const headerWidth = resolveTrackHeaderWidth(
+    timelineProps.model.trackHeaderWidth,
+    prefHeaderWidth,
+    timelineColumns,
+    extraColumns.length,
+  );
+
+  // How many groups the left column has shed — see TIMELINE_TOOLBAR_DEMOTE_ORDER.
+  // Measured on the COLUMN: its width is the header width, not the row's.
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const toolsColRef = useRef<HTMLDivElement | null>(null);
+  const toolbarLevel = useTransportDemote(toolsColRef, TIMELINE_TOOLBAR_DEMOTE_ORDER.length);
+  const moreShed = isToolbarShed('more', toolbarLevel);
+
+  // ── Go-to-time, inline ────────────────────────────────────────────────────
+  const [goToOpen, setGoToOpen] = useState(false);
+  const goToRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!goToOpen) return;
+    const el = goToRef.current;
+    el?.focus();
+    el?.select();
+  }, [goToOpen]);
+
+  // ── Time navigator ────────────────────────────────────────────────────────
+  /*
+    The bar draws the WINDOW the lanes are showing, not a fill from zero. A
+    fill answered "how far in am I" and nothing else; at any zoom past "whole
+    comp" the question you actually have is "which part of the comp am I
+    looking at", and only a box with two ends can answer it — and be dragged.
+  */
+  const navRef = useRef<HTMLDivElement | null>(null);
+  // The lanes' geometry, as <Timeline> measures it: client width, client-space
+  // left edge, and the minimap's overlay at the right when it is showing. Live
+  // — the window is drawn against the width the lanes actually have, and the
+  // navigator COLUMN is placed over them from the same record.
+  const lanes = useSyncExternalStore(subscribeTimelineViewport, getTimelineViewport, getTimelineViewport);
+  const navViewport = lanes.width;
+  const rowLeft = useClientLeft(toolbarRef, isCollapsed);
+  /**
+   * Where the navigator sits: the lanes' span, from the ruler's time origin
+   * to the visible clips' right edge. `null` while there is nothing to align
+   * to (graph editor open, panel collapsed) — the column then takes what is
+   * left of the row. See `toolbarGeometry`.
+   */
+  const navCol = navigatorColumnFor(lanes, rowLeft);
+  const navWindow = useMemo<NavWindow>(
+    () =>
+      navigatorWindow({
+        scrollLeft,
+        viewportWidth: navViewport,
+        pixelsPerSecond: pps,
+        duration: props.model.duration,
+        leftOffset: TIMELINE_LEFT_OFFSET,
+      }),
+    [scrollLeft, navViewport, pps, props.model.duration],
+  );
+
+  const applyNavWindow = useCallback(
+    (win: NavWindow, zoomed: boolean): void => {
+      const duration = props.model.duration;
+      if (!(duration > 0)) return;
+      if (!zoomed) {
+        scrollTimelineTo(scrollForWindow(win, { duration, pixelsPerSecond: pps }));
+        return;
+      }
+      const next = zoomForWindow(win, { duration, viewportWidth: navViewport }, { min: ZOOM_MIN, max: ZOOM_MAX });
+      onZoom?.(next.pixelsPerSecond);
+      // After the zoom, not with it — the lane content is only as wide as the
+      // CURRENT zoom until React re-renders, and the browser clamps a
+      // scrollLeft past that width away. Same reasoning as `fitTimelineToRange`.
+      const apply = (): void => scrollTimelineTo(next.scrollLeft);
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(apply);
+      else apply();
+    },
+    [props.model.duration, pps, navViewport, onZoom],
+  );
+
+  const onNavPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>): void => {
+      const el = navRef.current;
+      if (!el || e.button !== 0) return;
+      const rect = el.getBoundingClientRect();
+      if (!(rect.width > 0)) return;
+      const hit = navigatorHit(e.clientX - rect.left, navWindow, rect.width);
+      // Outside the box is still a seek — the bar has always been clickable and
+      // taking that away to add dragging would be a net loss.
+      if (hit === 'outside') {
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        getTimelineController().seekSeconds(ratio * props.model.duration);
+        return;
+      }
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const startWin = navWindow;
+      const move = (ev: PointerEvent): void => {
+        const dx = (ev.clientX - startX) / rect.width;
+        if (hit === 'body') applyNavWindow(panWindow(startWin, dx), false);
+        else applyNavWindow(resizeWindow(startWin, hit, dx), true);
+      };
+      const up = (): void => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        try {
+          el.releasePointerCapture(e.pointerId);
+        } catch {
+          /* the capture is already gone when the pointer left the window */
+        }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [navWindow, applyNavWindow, props.model.duration],
+  );
+
+  /**
+   * The View menu's rows — the seven toggles that used to be buttons. Built
+   * here, once, so the View ▾ trigger and the `⋯` menu that replaces it at the
+   * last rung list the very same rows.
+   */
+  const viewItems: DropdownItem[] = [
+        { type: 'checkbox', id: 'tl-view-shy', label: 'Hide Shy Layers', checked: globalShy, onChange: setGlobalShy },
+        {
+          type: 'checkbox',
+          id: 'tl-view-proportional',
+          label: 'Proportional Scrubbing — a drag on one selected property ramps across the selection',
+          checked: proportionalScrub,
+          onChange: setProportionalScrub,
+        },
+        {
+          /* One row, three states: off is in the list, and off costs
+             nothing — the diff is not computed at all. */
+          type: 'item',
+          id: 'tl-view-heat',
+          icon: 'sparkles',
+          label: `Highlight what changed: ${heatSource === 'off' ? 'Off' : heatSource === 'save' ? 'since last save' : 'last AI run'}`,
+          submenu: [
+            { type: 'checkbox', id: 'tl-view-heat-off', label: 'Off', checked: heatSource === 'off', onChange: () => setTimelineHeatSource('off') },
+            { type: 'checkbox', id: 'tl-view-heat-save', label: 'Since the last save', checked: heatSource === 'save', onChange: () => setTimelineHeatSource('save') },
+            { type: 'checkbox', id: 'tl-view-heat-ai', label: 'The last AI run', checked: heatSource === 'ai', onChange: () => setTimelineHeatSource('ai') },
+          ],
+        },
+        {
+          /* Disabled until the comp has been transcribed: a lane that
+             can only ever be empty teaches people the feature is
+             broken. */
+          type: 'checkbox',
+          id: 'tl-view-transcript',
+          label: hasTranscript ? 'Transcript lane' : 'Transcript lane — transcribe this composition first (Transcript panel)',
+          checked: transcriptLaneOn,
+          disabled: !hasTranscript,
+          onChange: setTimelineTranscriptLane,
+        },
+        { type: 'separator' },
+        {
+          /* AE's "Toggle Switches / Modes" — the switch column and the
+             Mode / TrkMat / Parent columns compete for the same width. */
+          type: 'item',
+          id: 'tl-view-columns-mode',
+          icon: 'layout',
+          label: `Switches / Modes: ${timelineColumns === 'switches' ? 'Switches' : timelineColumns === 'modes' ? 'Modes' : 'Both'}`,
+          submenu: [
+            { type: 'checkbox', id: 'tl-view-cols-switches', label: 'Switches', checked: timelineColumns === 'switches', onChange: () => setTimelineColumns('switches') },
+            { type: 'checkbox', id: 'tl-view-cols-modes', label: 'Modes', checked: timelineColumns === 'modes', onChange: () => setTimelineColumns('modes') },
+            { type: 'checkbox', id: 'tl-view-cols-both', label: 'Both', checked: timelineColumns === 'both', onChange: () => setTimelineColumns('both') },
+          ],
+        },
+        {
+          /* In / Out / Duration — off by default; each costs 72px of
+             a header column people already drag narrower. */
+          type: 'item',
+          id: 'tl-view-columns',
+          icon: 'sliders-h',
+          label: extraColumns.length > 0
+            ? `Columns: ${extraColumns.map((c) => TIMELINE_EXTRA_COLUMNS.find((d) => d.id === c)?.label).join(', ')}`
+            : 'Columns',
+          submenu: TIMELINE_EXTRA_COLUMNS.filter((c) => c.id !== 'stretch').map<DropdownItem>((c) => ({
+            type: 'checkbox',
+            id: `tl-view-col-${c.id}`,
+            label: c.label,
+            checked: extraColumns.includes(c.id),
+            onChange: () => setPref('timelineExtraColumns', toggleExtraColumn(extraColumns, c.id)),
+          })),
+        },
+        {
+          /* The three presets. The grip on the column seam drags the
+             height continuously; this is the discrete form of it. */
+          type: 'item',
+          id: 'tl-view-row-height',
+          icon: 'expand',
+          label: `Row height: ${ROW_HEIGHT_LABEL[rowTrackHeight] ?? `${rowTrackHeight}px`}`,
+          submenu: ROW_HEIGHT_PRESETS.map<DropdownItem>((h) => ({
+            type: 'checkbox',
+            id: `tl-view-row-${h}`,
+            label: `${ROW_HEIGHT_LABEL[h] ?? 'Custom'} (${h}px)`,
+            checked: rowTrackHeight === h,
+            onChange: () => setPref('timelineRowHeight', h),
+          })),
+        },
+      ];
 
   return (
     <section className={cn(styles.root, className)}>
@@ -251,37 +555,109 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
         )}
       </header>
 
-      {/* ── Unified Sub-header: Search Bar & Switches (Left) + Comp Tabs (Right) ── */}
+      {/*
+        ── The toolbar row ──
+        ONE row between the comp tabs and the tracks, in TWO columns that are
+        the columns beneath it.
+
+        LEFT, exactly the track-header column's width: timecode · edit tools ·
+        transition chips · filter · Graph Editor · View ▾ · cache actions —
+        every button the panel has. It never crosses the seam: when the header
+        is dragged narrow it sheds, right to left, into the Tools ▾ and
+        Transitions ▾ menus and finally one `⋯` (`useTransportDemote` on the
+        column, `TIMELINE_TOOLBAR_DEMOTE_ORDER`), with the filter giving up its
+        width first.
+
+        RIGHT, exactly the lanes: the time navigator alone, placed from the
+        lanes' own measurement so its left edge is the ruler's time origin and
+        its right edge is the visible clips' — a click at an x seeks the frame
+        the ruler shows at that x, and the window sits over the span of clips
+        it stands for.
+
+        The seven small toggles that used to sit here (shy, proportional
+        scrubbing, what-changed, transcript lane, switches/modes, columns, row
+        height) are rows of the View menu; the edit tools and the chips were a
+        second header row inside <Timeline> and are not any more.
+      */}
       {!isCollapsed && (
-        <div className={styles.subHeaderRow}>
-          {/* Left Column: Timecode, Search Bar and Action Buttons spanning exactly the Track Header width */}
-          <div className={styles.searchBarCol} style={{ width: headerWidth }}>
+        <div
+          ref={toolbarRef}
+          className={styles.subHeaderRow}
+          role="toolbar"
+          aria-label="Timeline tools"
+          data-timeline-toolbar=""
+        >
+          {/* ── Left column: the buttons, the header column's width ── */}
+          <div
+            ref={toolsColRef}
+            className={styles.toolsCol}
+            style={{ width: headerWidth }}
+            data-timeline-toolbar-tools=""
+          >
             <div className={styles.timecodeBlock}>
-              <button
-                type="button"
-                className={styles.timecodeMain}
-                title="Current timecode (Click to seek)"
-                onClick={() => {
-                  // `customPrompt`, not `window.prompt`: Electron has no
-                  // `prompt`, so in the desktop build this button did nothing
-                  // at all. The lint rule that names it exists for that reason.
-                  void customPrompt(
-                    'Go to Time',
-                    'Timecode or seconds',
-                    (ws?.time ?? props.model.currentTime).toFixed(2),
-                  ).then((sec) => {
-                    if (sec === null) return;
-                    const val = parseFloat(sec);
-                    if (!Number.isNaN(val)) getTimelineController().seekSeconds(val);
-                  });
-                }}
-              >
-                {framesToTimecode(ws?.time ?? props.model.currentTime, fps, startFrame)}
-              </button>
+              {goToOpen ? (
+                /*
+                  An INLINE field, not `customPrompt`. A modal to type four
+                  characters stole focus from the panel, dimmed the very ruler
+                  you were aiming at, and could not be dismissed by clicking
+                  back where you were looking. Typing in place keeps the comp
+                  visible, and the grammar (`+10`, `1:04`, `320f`, `2.5s`)
+                  lives in `goToTime.ts` where it is pinned by tests.
+                */
+                <input
+                  ref={goToRef}
+                  type="text"
+                  className={styles.timecodeInput}
+                  aria-label="Go to time"
+                  defaultValue={framesToTimecode(playheadTime, fps, startFrame)}
+                  onBlur={() => setGoToOpen(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      setGoToOpen(false);
+                      return;
+                    }
+                    if (e.key !== 'Enter') return;
+                    e.stopPropagation();
+                    const sec = parseGoToTime(e.currentTarget.value, {
+                      currentSeconds: playheadTime,
+                      fps,
+                      startFrame,
+                      durationSeconds: props.model.duration,
+                    });
+                    if (sec !== null) getTimelineController().seekSeconds(sec);
+                    setGoToOpen(false);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={styles.timecodeMain}
+                  title="Current timecode — click to type a time (1:04, 320f, 2.5s, +10)"
+                  onClick={() => setGoToOpen(true)}
+                >
+                  {framesToTimecode(playheadTime, fps, startFrame)}
+                </button>
+              )}
               <span className={styles.timecodeSub}>
-                {String(Math.round((ws?.time ?? props.model.currentTime) * fps)).padStart(5, '0')} ({fps.toFixed(2)} fps)
+                {String(Math.round(playheadTime * fps)).padStart(5, '0')} ({fps.toFixed(2)} fps)
               </span>
             </div>
+
+            {/* The edit tools (select / razor / slip / slide / roll), snap and
+                playhead follow — the TIMELINE's own tools, in the timeline's
+                own row — and beside them the transition chips: both are about
+                what an edit at a cut means, and separating them would put the
+                razor that makes a cut and the dissolve that softens it in two
+                different places. At the last rung both live in the `⋯`. */}
+            {!moreShed && (
+              <>
+                <span className={styles.toolbarDivider} aria-hidden="true" />
+                {isToolbarShed('tools', toolbarLevel) ? <TimelineToolsMenu /> : <TimelineTools />}
+                <span className={styles.toolbarDivider} aria-hidden="true" />
+                {isToolbarShed('transitions', toolbarLevel) ? <TransitionsMenu /> : <TransitionPalette />}
+              </>
+            )}
 
             <SearchField
               className={styles.searchContainer}
@@ -301,137 +677,94 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
                 aria-pressed={graphEditorOpen}
                 onClick={() => setGraphEditorOpen(!graphEditorOpen)}
               >
-                {/* A curve, because that is what the graph editor shows. It was
-                    `track` — a bulleted-list glyph that means "playlist" and
-                    named the panel this button REPLACES, not the one it
-                    opens. */}
+                {/* A curve, because that is what the graph editor shows. */}
                 <Icon name="graph-value" size="sm" />
               </button>
 
-              <button
-                type="button"
-                className={globalShy ? styles.toggleIconActive : styles.toggleIcon}
-                title={globalShy ? 'Hide Shy Layers (Active)' : 'Hide Shy Layers (Inactive)'}
-                aria-label="Hide Shy Layers"
-                aria-pressed={globalShy}
-                onClick={() => setGlobalShy(!globalShy)}
-              >
-                <Icon name="shy" size="sm" />
-              </button>
+              {moreShed ? (
+                /* The last rung: Tools, Transitions, View and the cache
+                   actions, one trigger. */
+                <TimelineToolbarOverflow viewItems={viewItems} />
+              ) : (
+                <>
+                  {/*
+                    View ▾ — how the timeline LISTS layers. Seven toggles as
+                    menu rows: each is a store write, so the lane / column /
+                    row it drives reacts exactly as it did when the toggle was
+                    a button.
+                  */}
+                  <Dropdown
+                    placement="bottom-end"
+                    trigger={
+                      <button
+                        type="button"
+                        className={styles.toggleBtn}
+                        aria-label="Timeline view options"
+                        title="View — shy layers, proportional scrubbing, what changed, transcript lane, switches / modes, columns, row height"
+                      >
+                        View
+                        <Icon name="chevron-down" size="sm" className={styles.triggerChevron} />
+                      </button>
+                    }
+                    items={viewItems}
+                  />
 
-              {/* Motion blur, Draft 3D and Onion Skinning used to sit here, in
-                  a row otherwise made of TIMELINE switches (graph editor, shy,
-                  columns, row height). All three are PREVIEW settings — what
-                  the viewport draws, not how the timeline lists it — and each
-                  had a second home besides: resolution was in two places, draft
-                  3D in the 3D menu, onion skin only here. They now live in one
-                  Preview menu on the viewport bar (`ViewControls`), which is
-                  also where the resolution they trade against lives. Stores and
-                  shortcuts are unchanged; only the button moved. */}
-
-              <button
-                type="button"
-                className={proportionalScrub ? styles.toggleIconActive : styles.toggleIcon}
-                title={
-                  proportionalScrub
-                    ? 'Proportional Scrubbing (On) — a drag on one selected property ramps across the selection, first 0% → last 100%'
-                    : 'Proportional Scrubbing (Off) — a drag moves every selected property by the same amount'
-                }
-                aria-label="Proportional Scrubbing"
-                aria-pressed={proportionalScrub}
-                onClick={() => setProportionalScrub(!proportionalScrub)}
-              >
-                <Icon name="distribute-horizontal" size="sm" />
-              </button>
-
-              <button
-                type="button"
-                className={timelineColumns === 'both' ? styles.toggleIconActive : styles.toggleIcon}
-                title={
-                  timelineColumns === 'switches'
-                    ? 'Toggle Switches / Modes — showing Switches (click for Modes)'
-                    : timelineColumns === 'modes'
-                      ? 'Toggle Switches / Modes — showing Modes (click for both)'
-                      : 'Toggle Switches / Modes — showing both (click for Switches)'
-                }
-                aria-label="Toggle Switches / Modes"
-                onClick={cycleTimelineColumns}
-              >
-                {/* A pane grid — the button chooses which COLUMN BLOCK the
-                    track header shows. `panel-right` is the dock glyph and read
-                    as "open a side panel". */}
-                <Icon name="layout" size="sm" />
-              </button>
-
-              <button
-                type="button"
-                className={rowTrackHeight > 28 ? styles.toggleIconActive : styles.toggleIcon}
-                title={`Timeline Row Height: ${rowTrackHeight === 28 ? 'Compact (28px)' : rowTrackHeight === 36 ? 'Normal (36px)' : 'Tall (46px)'} (Click to toggle)`}
-                aria-label="Change timeline row height"
-                onClick={() => {
-                  setRowTrackHeight((h) => (h === 28 ? 36 : h === 36 ? 46 : 28));
-                }}
-              >
-                <Icon name="expand" size="sm" />
-              </button>
-
-              {/*
-                The cache lanes' actions, at the end of the switch row — which
-                is the row directly above the ruler the green and blue strips
-                are painted on, and the closest a control can get to them
-                without moving INSIDE the lane.
-
-                Not at the lane's right end, which is where it was first put and
-                is the wrong place twice over: inside the lane the group scrolls
-                horizontally with the composition and slides off the panel edge,
-                and in the navigator column beside it the group shortens the
-                time navigator — a bar deliberately sized to span exactly what
-                the ruler spans, so that a click at a given x lands on the same
-                frame in both. See CacheActions.
-              */}
-              <CacheActions />
+                  {/*
+                    The cache lanes' actions, at the end of the switch cluster
+                    — the row directly above the ruler the green and blue
+                    strips are painted on, and the closest a control can get
+                    to them without moving INSIDE the lane. See CacheActions.
+                  */}
+                  <CacheActions />
+                </>
+              )}
             </div>
           </div>
 
           {/*
-            Right Column: the time navigator alone.
-
-            The render queue and the composition tabs used to trail it here.
-            They are the panel's IDENTITY — which comp am I looking at — so
-            they now open the header row above, in the space the transport
-            vacated, where a tab strip reads as a tab strip instead of as the
-            tail of a zoom slider.
+            ── Right column: the time navigator, over the lanes ──
+            Pinned to the lanes' measured span when there is one; otherwise
+            (graph editor open, nothing mounted) it takes what is left.
           */}
-          <div className={styles.navigatorCol}>
-            {/* AE-Style Time Navigator / Overview Zoom Track */}
+          <div
+            className={cn(styles.navigatorCol, navCol && styles.navigatorColPinned)}
+            style={navCol ? { left: navCol.left, width: navCol.width } : undefined}
+            data-timeline-toolbar-navigator=""
+          >
             <div
+              ref={navRef}
               className={styles.timeNavigatorTrack}
-              title="Time Navigator — click to seek"
-              onPointerDown={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                getTimelineController().seekSeconds(ratio * props.model.duration);
+              title="Time Navigator — drag the box to pan, its ends to zoom, double-click to fit the comp; click outside it to seek"
+              role="scrollbar"
+              aria-label="Time navigator"
+              aria-orientation="horizontal"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(navWindow.left * 100)}
+              onPointerDown={onNavPointerDown}
+              onDoubleClick={() => {
+                fitTimelineToComposition();
               }}
             >
-              {/*
-                A fill from ZERO to the playhead, not a window sliding along the
-                track. The window was sized off the ZOOM level and centred on
-                the current time, so what moved as the comp played was a
-                fixed-width block of colour — it told you where you were only
-                if you read its centre, and its width changed meaning every
-                time you zoomed. A bar that fills answers "how far in am I"
-                without being read at all.
-              */}
+              {/* The playhead is drawn UNDER the window so the window's own
+                  edges stay the two things you can aim at. */}
               <div
-                className={styles.timeNavigatorFill}
+                className={styles.timeNavPlayhead}
                 style={{
-                  width: `${Math.min(100, Math.max(0, ((ws?.time ?? props.model.currentTime) / (props.model.duration || 1)) * 100))}%`,
+                  left: `${Math.min(100, Math.max(0, (playheadTime / (props.model.duration || 1)) * 100))}%`,
+                }}
+              />
+              <div
+                className={styles.timeNavigatorWindow}
+                style={{
+                  left: `${navWindow.left * 100}%`,
+                  width: `${Math.max(NAV_MIN_WIDTH, navWindow.width) * 100}%`,
                 }}
               >
-                <div className={styles.timeNavPlayhead} />
+                <span className={styles.timeNavGrip} data-edge="start" />
+                <span className={styles.timeNavGrip} data-edge="end" />
               </div>
             </div>
-
           </div>
         </div>
       )}

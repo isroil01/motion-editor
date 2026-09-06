@@ -41,6 +41,7 @@ import { framesToTimecode } from '@core/time/timecode';
 import { factsOf, useExactStepper } from '@layout/Assets/footagePreviewHooks';
 import { insertFromSource, newCompFromRange } from './sourceMonitorOps';
 import type { ImportedAsset } from '@stores/assetStore';
+import { threePointSummary } from '@core/timeline/transportController';
 import styles from './SourceMonitorPanel.module.css';
 
 /**
@@ -258,6 +259,11 @@ function SourceMonitorBody({
     void fn().finally(() => setBusy(false));
   };
 
+  // In / Out / Duration, resolved through the SHARED helper so this viewer
+  // and the comp viewport's transport agree on what an unmarked in ("from the
+  // start") and an unmarked out ("to the end") mean.
+  const threePoint = threePointSummary(inPoint, outPoint, duration);
+
   const rangeLabel = range
     ? `${framesToTimecode(range.inSec, fps)} → ${framesToTimecode(range.outSec, fps)} (${(range.outSec - range.inSec).toFixed(2)}s)`
     : 'no usable range';
@@ -350,6 +356,37 @@ function SourceMonitorBody({
         <span className={styles.spacer} />
         <span className={styles.dim}>{rangeLabel}</span>
       </div>
+
+      {/*
+        The three-point-edit HUD.
+
+        In, Out and the Duration between them — the three numbers a
+        three-point edit is defined by, and the reason `rangeLabel` alone was
+        not enough: it says how long the marked piece is, but not where it
+        starts or ends, so you could not check a mark without hovering the
+        scrubber. Shown as soon as the range is usable and hidden otherwise,
+        rather than as three permanent "--:--:--" slots.
+
+        `threePointSummary` is shared with the comp viewport's transport, so
+        an unmarked in (meaning "from the start") and an unmarked out (meaning
+        "to the end") resolve the same way in both viewers.
+      */}
+      {threePoint && (
+        <div className={styles.threePoint} role="group" aria-label="Three-point edit">
+          <span className={styles.threePointCell}>
+            <span className={styles.threePointKey}>IN</span>
+            {framesToTimecode(threePoint.inSec, fps)}
+          </span>
+          <span className={styles.threePointCell}>
+            <span className={styles.threePointKey}>OUT</span>
+            {framesToTimecode(threePoint.outSec, fps)}
+          </span>
+          <span className={styles.threePointCell}>
+            <span className={styles.threePointKey}>DUR</span>
+            {framesToTimecode(threePoint.durationSec, fps)}
+          </span>
+        </div>
+      )}
 
       {/* ── Transport ────────────────────────────────────────────────── */}
       <div className={styles.transport}>

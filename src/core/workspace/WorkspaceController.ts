@@ -46,6 +46,9 @@ const TOOL_MAP: Record<UITool, string> = {
   eraser: 'select',
   'puppet-pin': 'select',
   bone: 'select',
+  // The engine tool exists (cursor + label + shortcut) but the strokes are the
+  // host's: `RotoBrushOverlay` sits above the canvas and claims the pointer.
+  roto: 'roto',
 };
 
 export class WorkspaceController {
@@ -108,6 +111,51 @@ export class WorkspaceController {
    * the renderer draws — including a scaled / offset text box, not a tiny
    * unscaled input at the layer origin.
    */
+  /**
+   * The comp viewport's CONTENT canvas — the one the renderer draws into.
+   *
+   * Registered by `useWorkspace` when it attaches, cleared when it detaches.
+   * Anything outside the viewport that needs the composited picture (the AI
+   * panel's preview thumbnail, a screenshot) asks for it HERE rather than
+   * running `document.querySelector('canvas')`, which returns the first canvas
+   * in the DOM — the scopes panel's histogram, or a 2/4-up secondary pane,
+   * depending on what happens to be mounted.
+   *
+   * Null before the viewport mounts and after it unmounts, so every caller has
+   * to handle its absence — which they had to anyway.
+   */
+  private contentCanvas: HTMLCanvasElement | null = null;
+
+  /** Called by the viewport on attach/detach. Not for general use. */
+  setContentCanvas(canvas: HTMLCanvasElement | null): void {
+    this.contentCanvas = canvas;
+  }
+
+  /**
+   * The composited frame's canvas, or null when no viewport is mounted.
+   *
+   * Its pixels are only readable in the task that drew them (no
+   * `preserveDrawingBuffer`) — a `toDataURL` from a timer can come back blank.
+   * For a reliable copy, use `frameTap` / `compareStore`, which take theirs
+   * inside the render tick.
+   */
+  getContentCanvas(): HTMLCanvasElement | null {
+    return this.contentCanvas;
+  }
+
+  /**
+   * Every interactable node with its world geometry already resolved — the
+   * same view the hit-tester and the selection outline read.
+   *
+   * Exposed for the wireframe / bounding-box DISPLAY MODES, which need the
+   * whole scene rather than the selection. The port is deliberately not made
+   * public wholesale: this hands out the one read (`getNodes`) the painter
+   * needs, so nothing outside can drive the engine's scene through it.
+   */
+  sceneNodes(): Iterable<ReturnType<SceneGraphPort['getNode']>> {
+    return this.scenePort.getNodes();
+  }
+
   getNodeScreenPlacement(nodeId: string): {
     x: number;
     y: number;

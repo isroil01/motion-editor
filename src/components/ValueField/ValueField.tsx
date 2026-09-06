@@ -58,6 +58,28 @@ export interface ValueFieldProps {
   unit?: string;
   disabled?: boolean;
   'aria-label'?: string;
+  /**
+   * The field describes SEVERAL values that disagree — a multi-selection.
+   * Shows `—` instead of a number, and switches the gestures to RELATIVE:
+   * a scrub reports a delta through `onRelative` rather than an absolute
+   * through `onChange`, so each underlying value moves by the same amount
+   * from where it was; typed text goes through `onCommitText` so `+10` can
+   * be evaluated per value. Typing a plain number still means "set all".
+   */
+  mixed?: boolean;
+  /**
+   * Relative gesture sink, used when `mixed`. `cumulative` is true during a
+   * scrub (delta measured from the scrub's start, re-reported on every move
+   * and once more on release) and false for a one-shot nudge (an arrow key),
+   * which applies to wherever the values are now.
+   */
+  onRelative?: (delta: number, cumulative: boolean) => void;
+  /**
+   * Typed-text sink, used when `mixed`. Receives the raw draft (`+10`,
+   * `*2`, `100`) and returns false when it could not be applied, which
+   * flashes the field exactly as an unparsable expression does.
+   */
+  onCommitText?: (raw: string) => boolean;
 }
 
 // clamp / format / stepScale live in scrubMath.ts (pure + unit-tested).
@@ -75,7 +97,14 @@ export function ValueField({
   unit,
   disabled = false,
   'aria-label': ariaLabel,
+  mixed = false,
+  onRelative,
+  onCommitText,
 }: ValueFieldProps): JSX.Element {
+  // Relative mode: a mixed field whose caller can take a delta. A mixed field
+  // WITHOUT a relative sink degrades to absolute — dragging it sets every
+  // value to the same number, which is still a sane thing for it to do.
+  const relative = mixed && onRelative !== undefined;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -115,12 +144,20 @@ export function ValueField({
   }, [editing]);
 
   const beginEdit = useCallback(() => {
-    setDraft(format(value, precision));
+    // A mixed field has no one number to pre-fill; an empty draft says so and
+    // lets `+10` be typed without first deleting a value that was never there.
+    setDraft(mixed ? '' : format(value, precision));
     setInvalid(false);
     setEditing(true);
-  }, [value, precision]);
+  }, [value, precision, mixed]);
 
   const commitEdit = useCallback(() => {
+    if (mixed && onCommitText) {
+      setEditing(false);
+      if (draft.trim() === '') return; // nothing typed — leave every value alone
+      if (!onCommitText(draft)) setInvalid(true);
+      return;
+    }
     const next = applyValueExpression(value, draft);
     if (next === null) {
       // Invalid — flash and revert.
@@ -130,7 +167,7 @@ export function ValueField({
     }
     setEditing(false);
     onChange(clamp(next, min, max));
-  }, [draft, value, min, max, onChange]);
+  }, [draft, value, min, max, onChange, mixed, onCommitText]);
 
   const cancelEdit = useCallback(() => {
     setEditing(false);
@@ -144,7 +181,8 @@ export function ValueField({
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault();
       const delta = (e.key === 'ArrowUp' ? 1 : -1) * step * stepScale(e);
-      onChange(clamp(value + delta, min, max));
+      if (relative) onRelative(delta, false);
+      else onChange(clamp(value + delta, min, max));
     } else if (e.key === 'Home' && Number.isFinite(min)) {
       e.preventDefault();
       onChange(min);
@@ -309,10 +347,15 @@ export function ValueField({
           : Number.isFinite(s.lastX) ? e.clientX - s.lastX : 0;
       s.locked = lockedNow;
       s.lastX = e.clientX;
-      s.state = advanceScrub(s.state, delta, step, e, min, max);
-      commitScrub(s.state.value);
+      // Relative: the scrub state carries the DELTA from the press, unbounded
+      // here — each underlying value clamps itself when the caller applies it.
+      s.state = relative
+        ? advanceScrub(s.state, delta, step, e)
+        : advanceScrub(s.state, delta, step, e, min, max);
+      if (relative) onRelative(s.state.value, true);
+      else commitScrub(s.state.value);
     },
-    [step, min, max, commitScrub, onScrubStart],
+    [step, min, max, commitScrub, onScrubStart, relative, onRelative],
   );
 
   const onPointerUp = useCallback(() => {
@@ -322,13 +365,14 @@ export function ValueField({
     if (s.moved) {
       setDragging(false);
       // Ensure the final value is committed through onChange (not just onScrub).
-      onChange(clamp(s.state.value, min, max));
+      if (relative) onRelative(s.state.value, true);
+      else onChange(clamp(s.state.value, min, max));
       onScrubEnd?.();
     } else {
       // No drag → treat as a click: enter edit mode.
       beginEdit();
     }
-  }, [detachWindowListeners, onChange, min, max, beginEdit, onScrubEnd, releaseLock]);
+  }, [detachWindowListeners, onChange, min, max, beginEdit, onScrubEnd, releaseLock, relative, onRelative]);
 
   // Refreshed every render so the stable listeners always call TODAY's
   // handlers, with today's `onChange`, `step`, `min` and `max`.
@@ -348,7 +392,8 @@ export function ValueField({
       moved: false,
       locked: false,
       active: true,
-      state: beginScrub(value, e),
+      // Relative: the scrub measures a delta, so it starts from zero.
+      state: beginScrub(relative ? 0 : value, e),
     };
     window.addEventListener('pointermove', windowHandlers.current.move);
     window.addEventListener('pointerup', windowHandlers.current.up);
@@ -376,19 +421,22 @@ export function ValueField({
         editing && styles.editing,
         invalid && styles.invalid,
         disabled && styles.disabled,
+        mixed && styles.mixed,
       )}
       onPointerDown={onPointerDown}
       onKeyDown={onFieldKeyDown}
       data-numeric
+      data-mixed={mixed || undefined}
+      title={mixed ? 'Mixed values — drag to offset all, type to set all (+10, *2 apply per layer)' : undefined}
       {...(!editing
         ? {
             role: 'spinbutton',
             tabIndex: disabled ? -1 : 0,
             'aria-label': ariaLabel,
-            'aria-valuenow': Number.isFinite(value) ? value : undefined,
+            'aria-valuenow': !mixed && Number.isFinite(value) ? value : undefined,
             'aria-valuemin': Number.isFinite(min) ? min : undefined,
             'aria-valuemax': Number.isFinite(max) ? max : undefined,
-            'aria-valuetext': `${format(value, precision)}${unit ?? ''}`,
+            'aria-valuetext': mixed ? 'Mixed' : `${format(value, precision)}${unit ?? ''}`,
             'aria-disabled': disabled || undefined,
           }
         : {})}
@@ -409,8 +457,8 @@ export function ValueField({
         />
       ) : (
         <span className={styles.value} aria-label={ariaLabel}>
-          {format(value, precision)}
-          {unit ? <span className={styles.unit}>{unit}</span> : null}
+          {mixed ? '—' : format(value, precision)}
+          {unit && !mixed ? <span className={styles.unit}>{unit}</span> : null}
         </span>
       )}
     </div>

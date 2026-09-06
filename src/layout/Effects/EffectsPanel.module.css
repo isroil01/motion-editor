@@ -765,3 +765,141 @@
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+/* ── Virtualised effects browser ─────────────────────────────────────
+   The library is one flat, virtualised list (see `EffectsPanelRows.ts`),
+   so it needs a box of its OWN height inside the scrolling panel — a
+   virtual list cannot size itself to content it does not render. */
+.browserList {
+  height: clamp(180px, 46vh, 460px);
+  min-height: 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.browserList:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+/* Hover host around a row — the row itself is the shared BrowserRow. */
+.fxRowHost {
+  display: block;
+  min-width: 0;
+}
+
+/* Folder header, as a ROW: the same chrome BrowserFolder draws, minus the
+   accordion, because an open folder's children are now siblings in the list. */
+.fxFolderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.fxFolderRow:hover,
+.fxFolderRow[data-active] {
+  background: var(--color-hover);
+}
+
+.fxFolderTwisty {
+  flex: none;
+  color: var(--color-text-tertiary);
+}
+
+.fxFolderIcon {
+  flex: none;
+  color: var(--color-text-tertiary);
+}
+
+.fxFolderRow:hover .fxFolderIcon,
+.fxFolderRow[aria-expanded='true'] .fxFolderIcon {
+  color: var(--color-primary);
+}
+
+.fxFolderName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Orientation, not a metric — quiet until the folder is hovered or open. */
+.fxFolderCount {
+  flex: none;
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+  opacity: 0;
+}
+
+.fxFolderRow:hover .fxFolderCount,
+.fxFolderRow[aria-expanded='true'] .fxFolderCount {
+  opacity: 1;
+}
+
+/* ── Hover preview card ──────────────────────────────────────────────
+   Fixed to the viewport (the panel scrolls; the card must not) and inert
+   to the pointer, so it can sit over the row that spawned it. */
+.fxPreviewCard {
+  position: fixed;
+  z-index: var(--z-index-tooltip);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;
+}
+
+.fxPreviewImg {
+  display: block;
+  border-radius: var(--radius-sm);
+}
+
+.fxPreviewFallback {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 54px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-0);
+  color: var(--color-text-tertiary);
+}
+
+.fxPreviewCaption {
+  display: flex;
+  flex-direction: column;
+  max-width: 96px;
+}
+
+.fxPreviewName {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.fxPreviewCat {
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}

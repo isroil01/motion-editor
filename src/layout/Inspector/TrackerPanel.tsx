@@ -8,7 +8,7 @@ import styles from './CharacterPanel.module.css';
 
 export function TrackerPanel(): JSX.Element {
   const selected = useSelectionStore((s) => s.ids);
-  useSceneRevision((s) => s.rev);
+  const sceneRev = useSceneRevision((s) => s.rev);
 
   // Find all video layers in the current composition to offer as Motion Source
   const videoLayers = useMemo(() => {
@@ -20,7 +20,8 @@ export function TrackerPanel(): JSX.Element {
       }
     });
     return list;
-  }, [useSceneRevision((s) => s.rev)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sceneRev triggers re-traversal when graph changes
+  }, [sceneRev]);
 
   const [chosenSourceId, setChosenSourceId] = useState<string | null>(null);
 
@@ -43,10 +44,8 @@ export function TrackerPanel(): JSX.Element {
 
   return (
     <div className={styles.root}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-        <span style={{ fontSize: 'var(--font-size-micro)', fontWeight: 700, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          Motion Source
-        </span>
+      <div className={styles.col} style={{ marginBottom: 'var(--space-2)' }}>
+        <span className={styles.sectionTitle}>Motion Source</span>
         <select
           value={activeSourceId}
           onChange={(e) => setChosenSourceId(e.target.value)}

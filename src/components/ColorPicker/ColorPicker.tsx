@@ -31,7 +31,69 @@ import * as Popover from '@radix-ui/react-popover';
 import { HexColorPicker, HexAlphaColorPicker, HexColorInput } from 'react-colorful';
 import { cn } from '@utils/cn';
 import { useSwatchStore } from '@stores/swatchStore';
+import {
+  useColorManagementStore,
+  type DisplayTransform,
+  type IntermediateBitDepth,
+  type WorkingSpace,
+} from '@stores/colorManagementStore';
 import styles from './ColorPicker.module.css';
+
+/*
+ * ── The colour-management readout ───────────────────────────────────────────
+ *
+ * A hex is not a colour until you know what space it is in. The same
+ * `#B34A2F` is a different pixel under ACEScg than under linear Rec.709, and
+ * a different pixel again once the display transform has run — so a picker
+ * that shows only the hex is telling half the truth, and the half it omits is
+ * the half people get wrong.
+ *
+ * It is a READOUT, not a control. The settings are project-wide and
+ * render-affecting; changing them from inside a swatch popover would let a
+ * one-off colour pick silently re-grade the whole comp. Project Settings owns
+ * the change, this line owns the disclosure.
+ */
+
+const WORKING_SPACE_LABEL: Record<WorkingSpace, string> = {
+  'srgb-linear': 'Linear Rec.709',
+  'aces-cg': 'ACEScg',
+};
+
+const DISPLAY_TRANSFORM_LABEL: Record<DisplayTransform, string> = {
+  srgb: 'sRGB',
+  aces: 'ACES',
+  pq: 'PQ',
+  hlg: 'HLG',
+};
+
+/** The one-line summary, exported so a test can assert it without a DOM. */
+export function colorManagementSummary(s: {
+  workingSpace: WorkingSpace;
+  displayTransform: DisplayTransform;
+  bitDepth: IntermediateBitDepth;
+}): string {
+  return `${WORKING_SPACE_LABEL[s.workingSpace]} · ${DISPLAY_TRANSFORM_LABEL[s.displayTransform]} · ${s.bitDepth}-bit`;
+}
+
+function ColorManagementReadout(): JSX.Element {
+  const workingSpace = useColorManagementStore((s) => s.workingSpace);
+  const displayTransform = useColorManagementStore((s) => s.displayTransform);
+  const bitDepth = useColorManagementStore((s) => s.bitDepth);
+  const summary = colorManagementSummary({ workingSpace, displayTransform, bitDepth });
+  return (
+    <div
+      className={styles.cmReadout}
+      title={
+        `Values are authored in ${WORKING_SPACE_LABEL[workingSpace]} and viewed through the `
+        + `${DISPLAY_TRANSFORM_LABEL[displayTransform]} display transform at ${bitDepth}-bit float. `
+        + 'Change these in Project Settings › Color.'
+      }
+    >
+      <span className={styles.cmLabel}>Color</span>
+      <span className={styles.cmValue}>{summary}</span>
+    </div>
+  );
+}
 
 export interface ColorPickerProps {
   value: string;
@@ -211,6 +273,7 @@ export function ColorPicker({
       <Popover.Portal>
         <Popover.Content className={styles.content} sideOffset={6} align="start" collisionPadding={12}>
           <div className={styles.picker}>
+            <ColorManagementReadout />
             <Surface color={color} onChange={onChange} />
 
             <div className={styles.inputsRow}>

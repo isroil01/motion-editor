@@ -26,7 +26,8 @@ import {
 import type { Effect } from './effects';
 
 /** A Canvas2D-only effect (forces a bake) and a GPU-native one (does not). */
-const satin: Effect = { id: 'e1', type: 'satin', params: {} } as Effect;
+// vegas is CPU-only (contour tracing); satin held this role until round thirteen gave it a shader.
+const satin: Effect = { id: 'e1', type: 'vegas', params: {} } as Effect;
 const blur: Effect = { id: 'e2', type: 'blur', params: {} } as Effect;
 
 const KINDS = ['shape', 'text', 'image', 'video'];

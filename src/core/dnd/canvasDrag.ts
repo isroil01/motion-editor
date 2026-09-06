@@ -28,7 +28,15 @@ export type CanvasDragPayload =
   | { kind: 'mograph'; mographId: string; name: string }
   | { kind: 'transition'; transId: string; name: string }
   | { kind: 'sfx'; sfxId: string; name: string }
-  | { kind: 'lottie'; lottieId: string; name: string };
+  | { kind: 'lottie'; lottieId: string; name: string }
+  /**
+   * A file on DISK that is not yet an asset — the media browser's rows.
+   * `assetId` is pre-minted so a drop target that prefers to wait can look
+   * the asset up once `importMediaFile` (core/assets/local/importFromDisk)
+   * has landed it; a target that does not handle this kind can ignore it and
+   * the browser's own drag-end fallback imports and inserts.
+   */
+  | { kind: 'mediaFile'; path: string; name: string; assetId: string };
 
 
 /** Attach a typed payload to a drag event (call from a panel item's onDragStart). */

@@ -22,7 +22,8 @@ import { ValueField } from '@components/ValueField';
 import { ColorPicker } from '@components/ColorPicker';
 import { Checkbox } from '@components/Checkbox';
 import { AngleDial } from '@components/AngleDial';
-import { StopwatchButton } from '@components/PropertyRow';
+import { StopwatchButton, KeyframeNavigator } from '@components/PropertyRow';
+import { useTrackNavigator } from '@layout/Inspector/AnimToggle';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useActiveWorkspace, resolveGlobalLight } from '@stores/projectStore';
 import { useSceneRevision } from '@stores/sceneStore';
@@ -153,7 +154,13 @@ function StyleNum({
       aria-label={label}
     />
   );
-  const watch = path ? <StopwatchButton animated={animated} label={label} onToggle={toggle} /> : null;
+  const nav = useTrackNavigator(nodeId, path ? [path] : [], label, () => [display * trackFactor]);
+  const watch = path ? (
+    <>
+      <StopwatchButton animated={animated} label={label} onToggle={toggle} />
+      {animated && <KeyframeNavigator label={label} {...nav} />}
+    </>
+  ) : null;
 
   if (bare) return <>{watch}{field}</>;
   return (
@@ -212,9 +219,16 @@ function StyleColor({
     }
   };
 
+  const nav = useTrackNavigator(
+    nodeId,
+    path ? [`${path}_r`, `${path}_g`, `${path}_b`, `${path}_a`] : [],
+    label,
+    () => { const c = Color.fromHex(displayed); return [c.r, c.g, c.b, c.a ?? 1]; },
+  );
   return (
     <>
       {path ? <StopwatchButton animated={animated} label={label} onToggle={toggle} /> : null}
+      {path && animated ? <KeyframeNavigator label={label} {...nav} /> : null}
       <ColorPicker
         value={displayed}
         onChange={(hex) => { if (animated) writeChannels(hex, `Set ${label}`); else onChange(hex); }}

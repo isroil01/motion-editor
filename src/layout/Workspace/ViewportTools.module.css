@@ -1,8 +1,7 @@
 /*
- * `.root` is gone with `ViewportHeader` — there is no bar above the canvas any
- * more. So are `.compName` / `.compLabel`: the composition name is the Scene
- * tab's label now (`layout/Tabs/EditorTabs.tsx`), styled by the tab strip like
- * every other tab.
+ * The scene tools, inside the transport bar. `.compName` / `.compLabel` are
+ * gone: the composition name is the Scene tab's label now
+ * (`layout/Tabs/EditorTabs.tsx`), styled by the tab strip like every other tab.
  */
 
 .group {
@@ -15,20 +14,21 @@
 }
 
 /*
- * The tool cluster, INSIDE the timeline's tool row.
+ * The tool cluster, INSIDE the transport bar.
  *
  * Every property that made it a floating pill is gone: the border, the radius,
  * the shadow, the backdrop blur and its own surface colour. All of those exist
  * to separate a thing from the canvas it hovers over, and it does not hover
- * over anything now — it sits in a row beside Play and the trim buttons, so it
- * has to read as part of that row rather than as an object resting on it.
+ * over anything now — it sits in a row beside Play, so it has to read as part
+ * of that row rather than as an object resting on it.
  *
  * Still shrink-wrapped and `nowrap`: most of these controls are contextual, and
- * the row scrolls rather than reflows when they all appear at once.
+ * the bar sheds other groups rather than reflowing when they all appear.
  */
 .tools {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: var(--space-1);
   font-size: var(--font-size-xs);
   font-family: var(--font-family-sans);
@@ -85,6 +85,11 @@
   background: var(--color-surface-3);
   color: var(--color-primary);
   border-color: transparent;
+}
+
+/* The 3D view's name on the "viewing through" badge. */
+.viewName {
+  margin-left: var(--space-1);
 }
 
 /* The auto-keyframe button's "REC" word. Inline styles before — which meant it
@@ -207,34 +212,12 @@
 }
 
 /*
- * Progressive collapse, driven by the TIMELINE ROW's width (`tl-toolbar`).
- *
- * This cluster is 300-400px of controls dropped into a row that was already
- * using nearly all of its space, so on a narrow window it pushed the tools at
- * the right edge out of view. Rather than let that happen silently, the cluster
- * gives up its own least-valuable controls first, in a deliberate order — each
- * one chosen because it has ANOTHER route, so nothing becomes unreachable:
- *
- *   1. Pop out viewport — also on the panel's grip menu.
- *   2. Zoom group      — wheel zoom, +/- keys, and "Fit in view" inside the
- *                        View Options dropdown, which stays.
- *   3. The REC label   — the auto-keyframe button keeps its glyph and its
- *                        active colour; only the word goes.
- *
- * A container query, not a media query: this row is the viewport's, so the
- * window's width says nothing useful about how much room it actually has.
- *
- * The thresholds dropped by ~420px when the row moved from the full editor
- * width to the viewport's. They were tuned against a row spanning both docks;
- * left as they were, every control below would have been hidden on a perfectly
- * roomy screen the moment the sidebar and the inspector were open.
+ * Under width pressure the REC word goes — the auto-keyframe button keeps its
+ * glyph and its active colour; only the label does. Everything else in the
+ * transport bar sheds by measurement (`useTransportDemote`), not by a
+ * breakpoint; this is the one purely cosmetic drop, so a container query is
+ * the honest tool for it.
  */
-@container tl-toolbar (max-width: 700px) {
-  .tools .popOut {
-    display: none;
-  }
-}
-
 @container tl-toolbar (max-width: 560px) {
   .tools .recLabel {
     display: none;

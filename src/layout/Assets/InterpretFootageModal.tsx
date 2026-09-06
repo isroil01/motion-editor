@@ -341,6 +341,9 @@ export function openInterpretFootage(asset: ImportedAsset): void {
     id: `interpret-footage-${asset.id}`,
     title: `Interpret Footage: ${asset.name}`,
     size: 'md',
+    // Floating: compare the interpreted clip against the viewport while the
+    // fields are still open.
+    variant: 'floating',
     render: (close) => <InterpretFootageBody asset={asset} close={close} />,
   });
 }

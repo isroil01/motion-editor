@@ -18,8 +18,6 @@ import { Providers } from '@providers/Providers';
 import { useLayoutStore } from '@stores/layoutStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useUIStore } from '@stores/uiStore';
-import { framesToTimecode } from '@core/time/timecode';
-import { videoDiag, VIDEO_DIAG_LIVE_MS, DropRateWindow } from '@core/rendering/videoPlaybackDiag';
 import { type EasingPreset } from '@core/animation/keyframeAssistants';
 import { applyEasingToKeyframes } from '@core/animation/keyframeAssistants';
 import { copyKeyframes, pasteKeyframes } from '@core/animation/keyframeClipboard';
@@ -30,8 +28,10 @@ import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
 import { VIDEO_AUDIO_MUTED_PROP } from '@core/audio/audioScene';
 import { useProjectStore } from '@stores/projectStore';
+import { getTime as playheadNow } from '@stores/playbackClockStore';
 import { usePlaybackClock } from '@layout/Timeline/usePlaybackClock';
 import { useTimelineKeys } from '@layout/Timeline/useTimelineKeys';
+import { clipRippleMenuItems } from '@layout/Timeline/clipEditCommands';
 import { useSpaceTransport } from '@hooks/useSpaceTransport';
 import { getTimelineController, getRemappedTime, compToKeyframeTime, keyframeToCompTime } from '@core/timeline/TimelineController';
 import { staticOrDefaultValue, writeStaticPropertyValue } from '@core/inspector/propertyValue';
@@ -48,10 +48,9 @@ import {
   removeMaskKeyframe,
   readNodeMaskAnim,
 } from '@core/effects/mask';
-import { Icon } from '@components/Icon';
 import { EditorLayout } from '@layout/EditorLayout';
 
-import { StatusBar } from '@layout/StatusBar';
+import { EditorStatusBar } from '@layout/StatusBar';
 import { getEventBus } from '@core/events/EventBus';
 import { BottomTimeline } from '@layout/BottomTimeline';
 import { TopNav } from '@layout/TopNav';
@@ -112,13 +111,6 @@ import { reparentNode, moveNodeAdjacent } from '@core/scene/parenting';
 import { renameLayer } from '@core/scene/renameLayer';
 import { is3DEnabled, set3DEnabled, canBe3D } from '@core/scene/threeD';
 import { notifyCameraTipIfMissing } from '@core/workspace/cameraNav';
-import { openPalette } from '@stores/commandPaletteStore';
-import { AccountButton } from '@layout/Auth/AccountButton';
-import { openCompositionSettings } from '@layout/Composition/CompositionSettingsDialog';
-import { FpsMeter } from '@layout/StatusBar/FpsMeter';
-import { InfoReadout } from '@layout/StatusBar/InfoReadout';
-import { VUMeter } from '@layout/StatusBar/VUMeter';
-import { TimelineZoom } from '@layout/StatusBar/TimelineZoom';
 import { useFocusStore } from '@stores/focusStore';
 import { useFocusContext } from '@layout/focus/useFocusContext';
 import { openContextMenu } from '@stores/contextMenuStore';
@@ -170,117 +162,18 @@ export function EditorShell(): JSX.Element {
   );
 }
 
-/** The playhead time RIGHT NOW, read non-reactively. For event handlers: they
- *  fire at event time, so a render-captured value buys them nothing — while a
- *  reactive subscription in the shell re-rendered the whole editor tree every
- *  playback frame just to keep that captured value fresh. */
-function playheadNow(): number {
-  const s = useProjectStore.getState();
-  return s.activeTabId ? (s.tabs[s.activeTabId]?.time ?? 0) : 0;
-}
-
-/** Self-subscribing status-bar timecode — the ONE render-time consumer of the
- *  playhead in the shell. Isolated (same pattern as FpsMeter/VUMeter beside
- *  it) so only this span re-renders per comp frame, not EditorShellInner. */
-/** How far back the drop readout looks. Long enough that sustained pressure
- *  cannot hide between ticks, short enough that the badge clears within a
- *  breath of playback recovering. */
-const DROP_WINDOW_MS = 4000;
-/** Drops inside the window that turn the badge red — about a quarter-second of
- *  30fps footage lost while the window is only four seconds long. */
-const DROP_BAD_COUNT = 30;
-
-function StatusBarTimecode({ fps, startFrame }: { fps: number; startFrame: number }): JSX.Element {
-  const time = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
-  return (
-    <span style={{ fontFamily: 'var(--font-family-mono)', fontVariantNumeric: 'tabular-nums' }}>
-      {framesToTimecode(time, fps, startFrame)}
-    </span>
-  );
-}
-
-/**
- * Live video decoder health in the status bar. Two jobs: show dropped-frame
- * pressure during playback (decode overload reads as "broken video" with no
- * other symptom), and — the important one — say OUT LOUD when the browser's
- * media pipeline has wedged (every new <video> stalls at readyState 0 with no
- * error; only a full app/browser restart clears it). That failure mode used
- * to be indistinguishable from editor bugs.
- */
-function VideoHealth(): JSX.Element | null {
-  const [state, setState] = useState<{ label: string; bad: boolean } | null>(null);
-  const warnedRef = useRef(false);
-  // Recent drops, not lifetime drops — the counters are cumulative and the
-  // elements are reused across loops, so raw totals kept the badge red forever
-  // after one rough pass. The arithmetic and its reasoning live in
-  // `DropRateWindow`.
-  const dropsRef = useRef(new DropRateWindow(DROP_WINDOW_MS));
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (videoDiag.stalledSources.size > 0) {
-        setState({ label: 'video decoder not responding — restart the app', bad: true });
-        if (!warnedRef.current) {
-          warnedRef.current = true;
-          useUIStore.getState().notify({
-            level: 'error',
-            message:
-              'Video decoding is not responding (the system media pipeline appears wedged). '
-              + 'Fully restart the app — or your browser — to restore video playback.',
-            durationMs: 12000,
-          });
-        }
-        return;
-      }
-      const now = performance.now();
-      let live = 0;
-      let seeking = false;
-      let worstLagMs = 0;
-      const counts = new Map<string, number>();
-      for (const s of videoDiag.samples.values()) {
-        if (now - s.updatedAt > VIDEO_DIAG_LIVE_MS) continue;
-        live += 1;
-        counts.set(s.key, s.droppedFrames);
-        seeking = seeking || s.seeking;
-        if (s.driftMs < worstLagMs) worstLagMs = s.driftMs;
-      }
-      const recentDrops = dropsRef.current.sample(now, counts);
-      if (live === 0) {
-        setState(null);
-        return;
-      }
-      // "behind" = the decoder cannot sustain realtime on this machine; the
-      // timeline is pacing down to meet it. The cure is a preview proxy
-      // (Media Settings ▸ Proxy), not a code path.
-      const lag = worstLagMs < -150 ? ` · behind ${(-worstLagMs / 1000).toFixed(1)}s` : '';
-      setState({
-        label: `video ×${live} · drop ${recentDrops}${seeking ? ' · seeking' : ''}${lag}`,
-        // ~1/4 of a second's frames lost inside the window = real pressure now;
-        // a couple of drops around a seek is normal and stays quiet.
-        bad: recentDrops > DROP_BAD_COUNT || worstLagMs < -400,
-      });
-    }, 500);
-    return () => clearInterval(id);
-  }, []);
-  if (!state) return null;
-  return (
-    <>
-      <span style={{ opacity: 0.4 }}>·</span>
-      <span
-        style={{
-          fontVariantNumeric: 'tabular-nums',
-          ...(state.bad ? { color: 'var(--color-danger, #e06055)', fontWeight: 600 } : {}),
-        }}
-        title={`Video decoder health: live elements, frames dropped in the last ${DROP_WINDOW_MS / 1000}s`}
-      >
-        {state.label}
-      </span>
-    </>
-  );
-}
-
+/* The playhead RIGHT NOW is `playheadNow()` — `getTime` from the playback
+ * clock store, read non-reactively. For event handlers: they fire at event
+ * time, so a render-captured value buys them nothing — while a reactive
+ * subscription in the shell re-rendered the whole editor tree every playback
+ * frame just to keep that captured value fresh. The clock store is the live
+ * authority during playback; the project store's copy lags by the 4Hz mirror.
+ *
+ * The ONE render-time consumer of the playhead in the shell is the status
+ * bar's self-subscribing <StatusBarTimecode/> (`useCurrentTime`), isolated so
+ * only that span re-renders per comp frame, not EditorShellInner. */
 function EditorShellInner(): JSX.Element {
   const registerPanel = useLayoutStore((s) => s.registerPanel);
-  const selectionCount = useSelectionStore((s) => s.ids.length);
   const selectedIds = useSelectionStore((s) => s.ids);
   const setSelected = useSelectionStore((s) => s.set);
   // Property-row selection (ordered) — what proportional scrubbing acts on.
@@ -301,9 +194,9 @@ function EditorShellInner(): JSX.Element {
   // ~1200-line component (which hosts the entire editor tree, and whose children
   // are almost all unmemoized) re-rendered every playback frame. Only three
   // fields were ever read off it, and none of them change per frame.
+  // (The comp title / dirty flag used to be read here for the inlined status
+  // bar; they now live in ProjectStatus + EditorTabs, which subscribe themselves.)
   const activeCompId = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.compositionId : undefined));
-  const activeDirty = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.dirty ?? false : false));
-  const activeTitle = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.title : undefined));
   // NO reactive playhead subscription here. `time` changes once per comp frame
   // during playback, and a subscription re-rendered this ~1355-line shell (and
   // reconciled its entire unmemoized return tree — TopNav, dock, timeline) on
@@ -314,8 +207,6 @@ function EditorShellInner(): JSX.Element {
   // event time — non-reactive and always current.
 
   const compFps = useCompositionStore((s) => s.fps);
-  const compWidth = useCompositionStore((s) => s.width);
-  const compHeight = useCompositionStore((s) => s.height);
   const compStartFrame = useCompositionStore((s) => s.startFrame);
   const compDuration = useCompositionStore((s) => s.durationSeconds);
 
@@ -542,7 +433,7 @@ function EditorShellInner(): JSX.Element {
     };
 
     const addKeyframesFor = (sel: readonly string[], props: ReadonlyArray<string>): void => {
-      const rawTime = useProjectStore.getState().tabs[useProjectStore.getState().activeTabId ?? '']?.time ?? 0;
+      const rawTime = playheadNow();
       runAnimEdit('Add keyframe', () => {
         for (const id of sel) {
           const node = defaultSceneGraph.getNode(id);
@@ -1404,6 +1295,17 @@ function EditorShellInner(): JSX.Element {
           bumpScene();
         },
       },
+      { id: 'sep-remove', separator: true },
+      /*
+       * Ripple Delete / Lift / Extract.
+       *
+       * Built by `clipRippleMenuItems` rather than spelled out here: the three
+       * differ only in whether the gap closes, and that distinction is worth
+       * exactly one home. See `layout/Timeline/clipEditCommands.ts` — the same
+       * module registers the commands behind them, so the palette, the menus
+       * and Shift+Delete cannot drift apart from this menu.
+       */
+      ...clipRippleMenuItems(clipId, bumpScene),
       { id: 'sep-time', separator: true },
       {
         id: 'time-stretch',
@@ -1604,106 +1506,7 @@ function EditorShellInner(): JSX.Element {
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         <EditorLayout
           topNav={<TopNav />}
-          statusBar={
-            <StatusBar
-              left={
-                <>
-                  {/* Real state, not a hardcoded "Ready": amber while unsaved. */}
-                  <span style={{ color: activeDirty ? 'var(--color-modified)' : 'var(--color-success)' }}>●</span>
-                  <span>{activeDirty ? 'Unsaved changes' : 'Ready'}</span>
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <span>{tracks.length} layers</span>
-                  {selectionCount > 0 ? (
-                    <>
-                      <span style={{ opacity: 0.4 }}>·</span>
-                      <span>{selectionCount} selected</span>
-                    </>
-                  ) : null}
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <InfoReadout />
-                </>
-              }
-              center={
-                <button
-                  type="button"
-                  title="Composition settings"
-                  onClick={() => openCompositionSettings()}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    backgroundColor: 'var(--color-surface-hover, rgba(255, 255, 255, 0.05))',
-                    border: '1px solid var(--color-border)',
-                    cursor: 'pointer',
-                    font: 'inherit',
-                    fontSize: '11px',
-                    color: 'var(--color-text-primary)',
-                    transition: 'border-color 0.1s, background-color 0.1s',
-                  }}
-                  onMouseOver={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--color-border-strong)';
-                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-                  }}
-                  onMouseOut={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--color-border)';
-                    e.currentTarget.style.backgroundColor = 'var(--color-surface-hover, rgba(255, 255, 255, 0.05))';
-                  }}
-                >
-                  <Icon name="layers" size="sm" style={{ color: 'var(--color-text-tertiary)' }} />
-                  <span style={{ fontWeight: 500 }}>{activeTitle ?? 'Untitled'}</span>
-                  <span style={{ fontFamily: 'var(--font-family-mono)', fontSize: '10px', color: 'var(--color-text-secondary)' }}>
-                    {compWidth}×{compHeight} · {compFps}fps
-                  </span>
-                  {activeDirty ? (
-                    <span
-                      aria-label="Unsaved changes"
-                      title="Unsaved changes"
-                      style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-modified)' }}
-                    />
-                  ) : null}
-                </button>
-              }
-              right={
-                <>
-                  <VUMeter />
-                  {/* Timeline zoom. It had a 22px footer row to itself at the
-                      bottom of the timeline panel, empty across its whole left
-                      half; the status bar is already the strip for readouts you
-                      glance at and occasionally poke. */}
-                  <TimelineZoom />
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <FpsMeter />
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <StatusBarTimecode fps={compFps} startFrame={compStartFrame} />
-                  <VideoHealth />
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <button
-                    type="button"
-                    onClick={() => openPalette()}
-                    title="Search commands, layers, effects, presets…"
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                      background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
-                      color: 'var(--color-text-secondary)', cursor: 'pointer', font: 'inherit',
-                    }}
-                  >
-                    <Icon name="search" size="sm" />
-                    Search
-                    <kbd style={{
-                      fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-micro)',
-                      padding: '0 4px', borderRadius: 4, background: 'var(--color-surface-3)',
-                      color: 'var(--color-text-secondary)',
-                    }}>⌘⇧P</kbd>
-                  </button>
-                  <span style={{ opacity: 0.4 }}>·</span>
-                  <AccountButton />
-                </>
-              }
-            />
-          }
+          statusBar={<EditorStatusBar layerCount={tracks.length} />}
           timeline={
             <BottomTimeline
               model={timelineModel}

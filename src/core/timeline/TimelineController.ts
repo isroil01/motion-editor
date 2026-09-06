@@ -30,6 +30,7 @@ import {
   type Layer,
 } from '@motion/timeline';
 import { useWorkspaceStore } from '@stores/projectStore';
+import { getFrame, setTime as setClockTime } from '@stores/playbackClockStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
@@ -256,9 +257,12 @@ export class TimelineController {
         // display rate (60Hz for a 30fps comp = two identical mirrors per comp
         // frame), and the store set() re-rendered the whole viewport each
         // time. Rounding already erased the difference — emitting it twice
-        // only paid the render twice.
-        if (tab.frame === snapped && tab.playing) return;
-        ws.actions.setTime(framesToSeconds(snapped, timeline.getFrameRate()), snapped);
+        // only paid the render twice. Compared against the LIVE clock, not the
+        // tab record: the record is a ≤4Hz mirror during playback.
+        if (!activeTabId) return;
+        if (getFrame(activeTabId) === snapped && tab.playing) return;
+        // The transient clock, not the immer store — see playbackClockStore.
+        setClockTime(activeTabId, framesToSeconds(snapped, timeline.getFrameRate()), snapped);
       }
     });
 
@@ -1399,6 +1403,109 @@ export class TimelineController {
   removeMarker(id: string): void {
     this.timeline.removeMarker(id);
   }
+
+  /**
+   * Edit a marker in place — name, colour, comment, span or POSITION.
+   *
+   * One undoable step for the whole patch, because "rename it and make it red"
+   * is one act at the editor and two presses of Ctrl+Z is never what anyone
+   * meant by it. The inverse is exact (the previous field values), so this uses
+   * the engine's own history rather than a document snapshot.
+   *
+   * `time` and `duration` arrive in the SAME axis the marker is drawn on:
+   * COMP seconds for a comp marker, comp seconds for a layer marker too. A
+   * layer marker is STORED layer-relative so it travels with a trimmed layer,
+   * so a comp time has to be mapped back through `toLayerTime` — the exact
+   * inverse of the `toAbsoluteTime` `getLayerMarkers` applies when reading. A
+   * DURATION is a difference between two instants and is never mapped: adding
+   * the layer's start offset to a length is how a 1s span becomes a 3s one.
+   *
+   * Returns false when there is no such marker (it was deleted under a dialog
+   * that was still open), so callers can close rather than write into nothing.
+   */
+  updateMarker(
+    id: string,
+    patch: { label?: string; color?: string | null; comment?: string; time?: number; duration?: number },
+  ): boolean {
+    const marker = this.timeline.getMarker(id);
+    if (!marker) return false;
+    const rate = this.timeline.getFrameRate();
+
+    // Which list holds it, so a moved marker can be re-sorted. Layer markers
+    // live on their own layer; everything else is on the timeline's own list.
+    const list =
+      marker.scope === 'layer' && marker.ownerId
+        ? this.timeline.getLayer(marker.ownerId)?.markers ?? this.timeline.markers
+        : this.timeline.markers;
+
+    const before = {
+      name: marker.name,
+      color: marker.color,
+      comment: marker.comment,
+      frame: marker.frame,
+      duration: marker.duration,
+    };
+
+    const after = { ...before };
+    if (patch.label !== undefined) after.name = patch.label;
+    if (patch.color !== undefined) after.color = patch.color;
+    if (patch.comment !== undefined) after.comment = patch.comment;
+    if (patch.duration !== undefined) {
+      after.duration = Math.max(0, Math.round(secondsToFrames(patch.duration, rate)));
+    }
+    if (patch.time !== undefined) {
+      const layerSeconds =
+        marker.scope === 'layer' && marker.ownerId
+          ? this.toLayerTimeForLayer(marker.ownerId, patch.time)
+          : patch.time;
+      after.frame = Math.max(0, Math.round(secondsToFrames(layerSeconds, rate)));
+    }
+
+    const same =
+      after.name === before.name && after.color === before.color && after.comment === before.comment
+      && after.frame === before.frame && after.duration === before.duration;
+    if (same) return true;
+
+    const apply = (state: typeof before): void => {
+      marker.name = state.name;
+      marker.color = state.color;
+      marker.comment = state.comment;
+      marker.frame = state.frame;
+      marker.duration = state.duration;
+      // The list is kept sorted by frame; a moved marker has to be re-placed
+      // or `next`/`previous`/`goToMarkerIndex` binary-search a broken order.
+      list.reindex();
+      this.timeline.events.emit('MarkerUpdated', { marker });
+    };
+
+    this.timeline.history.run({
+      label: patch.time !== undefined && patch.label === undefined ? 'Move Marker' : 'Edit Marker',
+      do: () => apply(after),
+      undo: () => apply(before),
+    });
+    return true;
+  }
+
+  /** Move a marker to a comp time. The gesture behind a marker drag. */
+  moveMarker(id: string, timeSeconds: number): boolean {
+    return this.updateMarker(id, { time: Math.max(0, timeSeconds) });
+  }
+
+  /**
+   * Comp seconds → LAYER seconds for a marker addressed by its owning LAYER.
+   *
+   * Routed through the layer's scene node and `toLayerTime` rather than through
+   * that layer's own `start`, because it has to be the exact inverse of what
+   * `getLayerMarkers` applies when READING — and that reads through
+   * `toAbsoluteTime(nodeId, …)`, which anchors on the node's FIRST bar for
+   * every marker on the node. Anchoring a write on a different bar than the
+   * read would make a dragged marker jump the moment it was let go.
+   */
+  private toLayerTimeForLayer(layerId: string, compSeconds: number): number {
+    const nodeId = this.timeline.getLayer(layerId)?.sourceId;
+    return nodeId ? this.toLayerTime(nodeId, compSeconds) : compSeconds;
+  }
+
   // ── Work area (in/out region; playback loops within it) ──────────
   /** Set the work-area in-point to the current playhead (After Effects: B). */
   setWorkAreaIn(): void {
@@ -1612,6 +1719,27 @@ export class TimelineController {
       }
     }
     return out;
+  }
+
+  /**
+   * One marker by id, on the axis it is DRAWN on, whatever its scope.
+   *
+   * The editor popover opens from a chip that carries only an id, and it has to
+   * show the marker's real name, colour, comment and span — none of which the
+   * `TimelineModel`'s marker carries, on purpose (the model is rebuilt whenever
+   * anything in it changes, and a comment is not worth a rebuild). Reading them
+   * back through one accessor here, rather than widening the model, keeps the
+   * comp and layer cases converging on `getMarkers` / `getLayerMarkers` —
+   * which is what stops the layer-relative → comp conversion existing twice.
+   */
+  getMarkerById(id: string): (TimelineMarkerView & { scope: 'comp' | 'layer' }) | null {
+    const comp = this.getMarkers().find((m) => m.id === id);
+    if (comp) return { ...comp, scope: 'comp' };
+    const marker = this.timeline.getMarker(id);
+    const nodeId = marker?.ownerId ? this.timeline.getLayer(marker.ownerId)?.sourceId : null;
+    if (!nodeId) return null;
+    const layer = this.getLayerMarkers(nodeId).find((m) => m.id === id);
+    return layer ? { ...layer, scope: 'layer' } : null;
   }
 
   // ── Persistence ──────────────────────────────────────────────────

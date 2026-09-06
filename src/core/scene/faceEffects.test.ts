@@ -47,9 +47,11 @@ describe('faceEffectsFor — what an extrusion face may carry', () => {
   });
 
   it('withholds CPU-baked effects — each carrying face is a whole rasterization', () => {
-    // keylight has no shader form (CANVAS2D_ONLY), so a face carrying it costs
-    // a Canvas2D bake every frame. At 45 depth slices that is 45 bakes/frame.
-    expect(faceEffectsFor([fx('k', 'keylight')], SMALL)).toBeUndefined();
+    // vegas has no shader form (CANVAS2D_ONLY — it traces contours), so a face
+    // carrying it costs a Canvas2D bake every frame. At 45 depth slices that is
+    // 45 bakes/frame. (keylight held this role until round eight, inner-glow
+    // until round thirteen, equalize until round fourteen.)
+    expect(faceEffectsFor([fx('k', 'vegas')], SMALL)).toBeUndefined();
   });
 
   it('withholds a mask-scoped effect even when its type is GPU-drawable', () => {

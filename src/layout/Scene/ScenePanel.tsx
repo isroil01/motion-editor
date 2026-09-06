@@ -24,6 +24,7 @@ import { Panel } from '@components/Panel';
 import { TreeView, type TreeNode } from '@components/TreeView';
 import { SearchField } from '@components/SearchField';
 import { Icon, type IconName } from '@components/Icon';
+import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { customConfirm } from '@components/Modal';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useSceneRevision, bumpScene } from '@stores/sceneStore';
@@ -52,6 +53,15 @@ import { deleteComposition, duplicateComposition } from '@core/composition/compo
 import { openCompositionSettings } from '@layout/Composition/CompositionSettingsDialog';
 import { openNewCompositionDialog } from '@layout/Composition/NewCompositionDialog';
 import { svgContextMenuItems } from '@layout/Inspector/svgLayerActions';
+import { getNodeEffects } from '@core/effects/effects';
+import { defaultAnimation } from '@motion/animation';
+import {
+  filterSceneTree,
+  isSceneFilterActive,
+  toggleKind,
+  type SceneFilter,
+  type SceneNodeFacts,
+} from './sceneFilters';
 import { findLayerKind, findKindFor } from '@core/plugins/layerKindRegistry';
 import { ownerOf, readCustomLayer } from '@core/plugins/customLayers';
 import type { SceneNode } from '@core/types';
@@ -78,20 +88,44 @@ const KIND_ICON: Record<SceneKind, IconName> = {
   comp: 'component',
 };
 
+/**
+ * Per-kind glyph tint. The COLOURS live in `tokens/domain.css` as
+ * `--color-kind-*` — they used to be thirteen hex literals here, which put a
+ * palette outside the theme layer: light mode, high contrast and the CVD
+ * overrides could not reach them, and nothing checked they still contrasted
+ * with the row behind them.
+ */
 const KIND_COLOR: Record<SceneKind, string> = {
-  group: '#a78bfa',
-  null: '#94a3b8',
-  shape: '#2dd4bf',
-  text: '#60a5fa',
-  image: '#f59e0b',
-  video: '#f43f5e',
-  svg: '#34d399',
-  audio: '#10b981',
-  camera: '#fb923c',
-  light: '#facc15',
-  adjustment: '#c084fc',
-  particle: '#ec4899',
-  comp: '#818cf8',
+  group: 'var(--color-kind-group)',
+  null: 'var(--color-kind-null)',
+  shape: 'var(--color-kind-shape)',
+  text: 'var(--color-kind-text)',
+  image: 'var(--color-kind-image)',
+  video: 'var(--color-kind-video)',
+  svg: 'var(--color-kind-svg)',
+  audio: 'var(--color-kind-audio)',
+  camera: 'var(--color-kind-camera)',
+  light: 'var(--color-kind-light)',
+  adjustment: 'var(--color-kind-adjustment)',
+  particle: 'var(--color-kind-particle)',
+  comp: 'var(--color-kind-comp)',
+};
+
+/** Kind names as the filter menu says them (`svg` is not "Svg"). */
+const KIND_LABEL: Record<SceneKind, string> = {
+  group: 'Group',
+  null: 'Null',
+  shape: 'Shape',
+  text: 'Text',
+  image: 'Image',
+  video: 'Video',
+  svg: 'SVG',
+  audio: 'Audio',
+  camera: 'Camera',
+  light: 'Light',
+  adjustment: 'Adjustment',
+  particle: 'Particles',
+  comp: 'Composition',
 };
 
 function toTreeNode(node: SceneNode): TreeNode<SceneNodeData> {
@@ -181,23 +215,11 @@ export function sceneGraphToTree(): TreeNode<SceneNodeData>[] {
   return defaultSceneGraph.getRoots().map(toTreeNode);
 }
 
-/** A small round swatch shown next to a color name in the Label Color menu. */
+/** A small round swatch shown next to a color name in the Label Color menu.
+ *  Everything but the colour itself is in `panels.module.css`; the colour is
+ *  the one genuinely dynamic value here. */
 function LabelSwatch({ color }: { color: string }): JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: 9,
-        height: 9,
-        borderRadius: '50%',
-        background: color,
-        marginRight: 8,
-        verticalAlign: 'baseline',
-        flex: 'none',
-      }}
-    />
-  );
+  return <span aria-hidden="true" className={styles.labelSwatch} style={{ background: color }} />;
 }
 
 /**
@@ -245,17 +267,34 @@ function labelColorMenuItems(targetId: string): ContextMenuItem[] {
   ];
 }
 
-/** Filter the tree by label, keeping ancestors of any match. */
-function filterTree(nodes: TreeNode<SceneNodeData>[], q: string): TreeNode<SceneNodeData>[] {
-  const out: TreeNode<SceneNodeData>[] = [];
-  for (const node of nodes) {
-    const label = String(node.label).toLowerCase();
-    const kids = node.children ? filterTree(node.children as TreeNode<SceneNodeData>[], q) : [];
-    if (label.includes(q) || kids.length) {
-      out.push({ ...node, children: kids.length ? kids : node.children });
+/**
+ * What the filter knows about one layer. Read from the live scene graph and
+ * the animation engine — `sceneFilters` itself stays pure and takes these.
+ */
+function sceneNodeFacts(id: string): SceneNodeFacts | null {
+  const node = defaultSceneGraph.getNode(id);
+  if (!node) return null;
+  return {
+    kind: readNodeKind(node),
+    label: readNodeLabelColor(node),
+    animated: defaultAnimation.hasAnimation(id),
+    hasEffects: getNodeEffects(id).length > 0,
+    name: node.name ?? id,
+  };
+}
+
+/** Every kind actually present, in KIND_LABEL's order — the menu lists what
+ *  this composition HAS, not the thirteen kinds that exist. */
+function presentKinds(nodes: ReadonlyArray<TreeNode<SceneNodeData>>): SceneKind[] {
+  const seen = new Set<SceneKind>();
+  const walk = (list: ReadonlyArray<TreeNode<SceneNodeData>>): void => {
+    for (const n of list) {
+      if (n.data) seen.add(n.data.type);
+      if (n.children) walk(n.children as TreeNode<SceneNodeData>[]);
     }
-  }
-  return out;
+  };
+  walk(nodes);
+  return (Object.keys(KIND_LABEL) as SceneKind[]).filter((k) => seen.has(k));
 }
 
 function collectIds(nodes: TreeNode<SceneNodeData>[]): string[] {
@@ -267,6 +306,17 @@ export function ScenePanel(): JSX.Element {
   const setSelected = useSelectionStore((s) => s.set);
   const rev = useSceneRevision((s) => s.rev);
   const [query, setQuery] = useState('');
+  const [kindFilter, setKindFilter] = useState<ReadonlySet<SceneKind> | null>(null);
+  const [labelFilter, setLabelFilter] = useState<string | 'none' | null>(null);
+  const [animatedOnly, setAnimatedOnly] = useState(false);
+  const [effectsOnly, setEffectsOnly] = useState(false);
+  const clearFilters = (): void => {
+    setKindFilter(null);
+    setLabelFilter(null);
+    setAnimatedOnly(false);
+    setEffectsOnly(false);
+    setQuery('');
+  };
 
   const comps = useProjectStore((s) => s.comps);
   const projectTabs = useProjectStore((s) => s.tabs);
@@ -328,7 +378,22 @@ export function ScenePanel(): JSX.Element {
 
   const tree = useMemo(() => sceneGraphToTree(), [rev]);
   const q = query.trim().toLowerCase();
-  const filtered = useMemo(() => (q ? filterTree(tree, q) : tree), [tree, q]);
+  /*
+    Search is one of FIVE questions this panel answers, not the only one. A
+    stack of forty layers is narrowed by kind ("show me the cameras"), by label
+    colour ("the shots I tagged red"), by whether a layer is animated and by
+    whether it carries effects — and they compose, with the search, in
+    `sceneFilters.ts`.
+  */
+  const filter: SceneFilter = { kinds: kindFilter, label: labelFilter, animatedOnly, effectsOnly, query: q };
+  const filterActive = isSceneFilterActive(filter);
+  const filtered = useMemo(
+    () => filterSceneTree(tree, filter, sceneNodeFacts),
+    // The filter object is rebuilt every render; its FIELDS are the dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tree, kindFilter, labelFilter, animatedOnly, effectsOnly, q],
+  );
+  const kindChoices = useMemo(() => presentKinds(tree), [tree]);
   const expandIds = useMemo(() => collectIds(filtered), [filtered]);
   // Expand only the composition roots by default, so their LAYERS are visible
   // but groups stay shut. `collectIds` returns every descendant, so an imported
@@ -564,6 +629,103 @@ export function ScenePanel(): JSX.Element {
           onChange={setQuery}
         />
       </div>
+      <div className={styles.sceneFilterRow} aria-label="Layer filters">
+        <Dropdown
+          placement="bottom-start"
+          trigger={
+            <button
+              type="button"
+              className={styles.sceneFilterBtn}
+              title={kindFilter ? `Showing ${[...kindFilter].map((k) => KIND_LABEL[k]).join(', ')}` : 'Filter by layer kind'}
+              aria-label="Filter by layer kind"
+              aria-pressed={kindFilter !== null}
+              disabled={kindChoices.length === 0}
+            >
+              <Icon name="layers" size="sm" />
+            </button>
+          }
+          items={[
+            { type: 'item', id: 'all-kinds', label: 'All kinds', icon: kindFilter === null ? 'check' : undefined, onSelect: () => setKindFilter(null) },
+            { type: 'separator' },
+            ...kindChoices.map((k): DropdownItem => ({
+              type: 'checkbox',
+              id: k,
+              label: KIND_LABEL[k],
+              checked: kindFilter?.has(k) ?? false,
+              // An empty set collapses back to "every kind" — unchecking the
+              // last box means "stop filtering", not "show nothing".
+              onChange: () => setKindFilter((cur) => toggleKind(cur, k)),
+            })),
+          ]}
+        />
+        <Dropdown
+          placement="bottom-start"
+          trigger={
+            <button
+              type="button"
+              className={styles.sceneFilterBtn}
+              title="Filter by label colour"
+              aria-label="Filter by label colour"
+              aria-pressed={labelFilter !== null}
+            >
+              {labelFilter && labelFilter !== 'none' ? (
+                <span className={styles.sceneFilterLabelDot} style={{ background: labelFilter }} aria-hidden />
+              ) : (
+                <Icon name="palette" size="sm" />
+              )}
+            </button>
+          }
+          items={[
+            { type: 'item', id: 'any-label', label: 'Any label', icon: labelFilter === null ? 'check' : undefined, onSelect: () => setLabelFilter(null) },
+            // The set you forgot to tag — the other half of what a label is for.
+            { type: 'item', id: 'no-label', label: 'Unlabelled', icon: labelFilter === 'none' ? 'check' : undefined, onSelect: () => setLabelFilter('none') },
+            { type: 'separator' },
+            ...LABEL_COLORS.map((c): DropdownItem => ({
+              type: 'item',
+              id: c.id,
+              label: (
+                <>
+                  <LabelSwatch color={c.color} />
+                  {c.label}
+                </>
+              ),
+              icon: labelFilter === c.color ? 'check' : undefined,
+              onSelect: () => setLabelFilter(labelFilter === c.color ? null : c.color),
+            })),
+          ]}
+        />
+        <button
+          type="button"
+          className={styles.sceneFilterBtn}
+          title="Only layers with keyframes"
+          aria-label="Only layers with keyframes"
+          aria-pressed={animatedOnly}
+          onClick={() => setAnimatedOnly((v) => !v)}
+        >
+          <Icon name="keyframe" size="sm" />
+        </button>
+        <button
+          type="button"
+          className={styles.sceneFilterBtn}
+          title="Only layers with effects"
+          aria-label="Only layers with effects"
+          aria-pressed={effectsOnly}
+          onClick={() => setEffectsOnly((v) => !v)}
+        >
+          <Icon name="magic-wand" size="sm" />
+        </button>
+        {filterActive && (
+          <button
+            type="button"
+            className={styles.sceneFilterBtn}
+            title="Clear layer filters"
+            aria-label="Clear layer filters"
+            onClick={clearFilters}
+          >
+            <Icon name="close" size="sm" />
+          </button>
+        )}
+      </div>
       {/*
         A pick-whip drop surface. Rows already carry `data-id` from the shared
         TreeView and that id IS the scene node id here, so scoping the container
@@ -578,7 +740,7 @@ export function ScenePanel(): JSX.Element {
             selectedIds={selected}
             onSelect={setSelected}
             defaultExpandedIds={defaultExpandIds}
-            expandedIds={q ? expandIds : undefined}
+            expandedIds={filterActive ? expandIds : undefined}
             revealIds={revealIds}
             onNodeContextMenu={openNodeMenu}
             onReorder={handleReorder}
@@ -602,12 +764,20 @@ export function ScenePanel(): JSX.Element {
           />
         ) : (
           <div className={styles.empty}>
-            {q ? 'No layers match your search.' : 'No layers yet. Add one from the “+ New layer” menu in the toolbar.'}
+            {filterActive
+              ? 'No layers match this filter.'
+              : 'No layers yet. Add one from the “+ New layer” menu in the toolbar.'}
           </div>
         )}
       </div>
       <div className={styles.footer}>
         <span>{itemCount} items</span>
+        {filterActive && (
+          <>
+            <span>·</span>
+            <span>{expandIds.length} shown</span>
+          </>
+        )}
         <span>·</span>
         <span>{selected.length} selected</span>
       </div>

@@ -65,6 +65,7 @@ import {
 } from '@core/paint/fill';
 import { useGradientEditStore } from './gradientEditStore';
 import { layerScreenMapping } from './layerScreen';
+import { beginViewportGesture, endViewportGesture } from '@core/workspace/viewportGesture';
 import {
   addStopAt,
   duplicateStop,
@@ -358,6 +359,9 @@ export function GradientHandleOverlay(): JSX.Element | null {
       } catch {
         /* best-effort — jsdom and synthetic events have no capture */
       }
+      // The drag flag, so the RAM preview is not blitted over the live
+      // gradient while a stop is being dragged (see beginViewportGesture).
+      beginViewportGesture();
 
       if (hit.kind === 'grip') {
         drag = { kind: 'grip', grip: hit.grip };
@@ -419,6 +423,7 @@ export function GradientHandleOverlay(): JSX.Element | null {
       if (!drag) return;
       drag = null;
       liveStops = null;
+      endViewportGesture();
       if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
     };
 
@@ -445,6 +450,7 @@ export function GradientHandleOverlay(): JSX.Element | null {
       svg.removeEventListener('pointerup', onUp);
       svg.removeEventListener('pointercancel', onUp);
       svg.removeEventListener('dblclick', onDblClick);
+      if (drag) { drag = null; endViewportGesture(); }
     };
   }, [armed, nodeId, selectStop]);
 

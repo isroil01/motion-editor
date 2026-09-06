@@ -8,7 +8,7 @@
  * pen), the same way AE adds them from a tool rather than from Effect Controls.
  */
 
-import { useState, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useMemo, useSyncExternalStore } from 'react';
 import { Icon, type IconName } from '@components/Icon';
 import { SearchField } from '@components/SearchField';
 import { ValueField } from '@components/ValueField';
@@ -16,14 +16,15 @@ import { Checkbox } from '@components/Checkbox';
 import { PropertyRow } from '@components/PropertyRow';
 import { EmptyState } from '@components/EmptyState';
 import { Dropdown } from '@components/Dropdown';
-import { BrowserTree, BrowserFolder, BrowserRow, BrowserTag, BrowserEmpty } from '@components/BrowserTree';
+import { VirtualList } from '@components/VirtualList';
+import { BrowserRow, BrowserTag, BrowserEmpty } from '@components/BrowserTree';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useActiveWorkspace } from '@stores/projectStore';
 import { useUIStore } from '@stores/uiStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
-import { EFFECT_DEFS, getNodeEffects } from '@core/effects/effects';
+import { EFFECT_DEFS, getNodeEffects, type EffectDef } from '@core/effects/effects';
 import { pluginEffectDefs, pluginEffectsCanRender, PLUGIN_EFFECT_CATEGORY } from '@core/effects/pluginEffectDefs';
 import { subscribeToEffects, pluginEffectRevision } from '@core/plugins/pluginEffects';
 import { addEffectAndReveal, revealEffectControls } from './revealEffectControls';
@@ -65,6 +66,15 @@ import { setCanvasDrag } from '@core/dnd/canvasDrag';
 import { enableNodeCloner, readNodeCloner } from '@core/scene/clonerExpand';
 import { enableNodePhysics, readNodePhysics } from '@core/simulation/physicsBodies';
 import { EFFECT_CATEGORY } from './effectCategory';
+import { effectPreviewFor, EFFECT_PREVIEW_H, EFFECT_PREVIEW_W } from './effectPreviewThumbs';
+import {
+  flattenFxGroups,
+  fxRowHeight,
+  stepFxFocus,
+  FX_LEAF_ROW_H,
+  type FxGroup,
+  type FxRow,
+} from './EffectsPanelRows';
 import styles from './EffectsPanel.module.css';
 
 export { EFFECT_CATEGORY };
@@ -176,12 +186,46 @@ const EFFECT_CATEGORY_ICON: Record<string, IconName> = {
   Transition: 'wipe',
 };
 
+/** How long the pointer must rest on a row before its preview appears. */
+const PREVIEW_DELAY_MS = 250;
+
+/** What the floating preview card is showing, and where. */
+interface FxPreview {
+  label: string;
+  category: string;
+  icon: IconName;
+  /** A data URL, or null when the effect has no cheap preview path. */
+  url: string | null;
+  x: number;
+  y: number;
+}
+
 export function EffectsPanel(): JSX.Element {
   const primary = useSelectionStore((s) => s.primary);
   useSceneRevision((s) => s.rev);
   const maskTime = useActiveWorkspace()?.time ?? 0;
   const [effectQuery, setEffectQuery] = useState('');
   const [starredOnly, setStarredOnly] = useState(false);
+  /*
+    Browser state: which folders the user has toggled away from their default,
+    where the keyboard is, and the hover preview.
+
+    The folder map holds OVERRIDES rather than the open set, so "the first
+    folder starts open" survives a search that rebuilds the folder list — and
+    a folder the user shut stays shut when it comes back.
+  */
+  const [folderOverride, setFolderOverride] = useState<Record<string, boolean>>({});
+  const [focusIndex, setFocusIndex] = useState(0);
+  const [preview, setPreview] = useState<FxPreview | null>(null);
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPreview = (): void => {
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current);
+    previewTimer.current = null;
+    setPreview(null);
+  };
+  // A row unmounted mid-hover (scrolled out of the window, or the panel
+  // closed) must not leave a timer that fires into a dead component.
+  useEffect(() => () => { if (previewTimer.current !== null) clearTimeout(previewTimer.current); }, []);
   const { favorites: effectFavorites } = useEffectFavorites();
   // The clipboard and the preset list live outside React (module state and
   // localStorage), so a counter is what tells this panel they changed.
@@ -281,6 +325,176 @@ export function EffectsPanel(): JSX.Element {
     );
   }
 
+  /*
+    The browser, as ONE flat array of rows.
+
+    Folders, effects, presets, shape operators and the simulation modifiers all
+    become rows of two heights, which is what `VirtualList` needs: a library of
+    ninety-odd effects used to mount ninety-odd buttons — each with a star, a
+    tag and a drag handler — the moment a folder opened.
+  */
+  const groups: FxGroup[] = [];
+  if (!starredOnly && browserPresets.length > 0) {
+    groups.push({
+      id: 'presets',
+      label: 'Effect Presets',
+      icon: 'sparkles',
+      defaultOpen: false,
+      items: browserPresets.map((p) => ({
+        kind: 'preset' as const,
+        id: p.name,
+        name: p.name,
+        effectCount: p.items.length,
+        userSaved: !builtinPresetNames.has(p.name),
+      })),
+    });
+  }
+  browserFolders.forEach(([cat, items], index) => {
+    const pluginNoGpu = cat === PLUGIN_EFFECT_CATEGORY && !pluginEffectsCanRender();
+    groups.push({
+      id: cat,
+      label: cat,
+      icon: EFFECT_CATEGORY_ICON[cat],
+      defaultOpen: index === 0,
+      items: items.map((d) => ({
+        kind: 'effect' as const,
+        id: d.type,
+        def: d,
+        gpuTag: pluginNoGpu ? ('no-webgpu' as const) : d.gpuOnly ? ('gpu' as const) : null,
+      })),
+    });
+  });
+  if (!starredOnly && shapeOps.length > 0 && node) {
+    groups.push({
+      id: 'Shape',
+      label: 'Shape',
+      icon: EFFECT_CATEGORY_ICON.Shape,
+      defaultOpen: browserFolders.length === 0,
+      items: shapeOps.map((op) => ({
+        kind: 'shapeOp' as const,
+        id: op.type,
+        opType: op.type,
+        label: op.label,
+        taken: (op.type === 'trim' && !!readTrimOp(node)) || (op.type === 'repeater' && !!readRepeaterOp(node)),
+      })),
+    });
+  }
+  if (!starredOnly && simulationItems.length > 0) {
+    // Simulation — Cloner and Physics, enabled here and edited in Effect
+    // Controls. Not EffectType entries, same browser chrome.
+    groups.push({
+      id: 'Simulation',
+      label: 'Simulation',
+      icon: 'zap',
+      defaultOpen: false,
+      items: simulationItems.map((item) => ({
+        kind: 'sim' as const,
+        id: item.id,
+        label: item.label,
+        icon: item.icon,
+        on: item.id === 'cloner' ? clonerOn : physicsOn,
+      })),
+    });
+  }
+
+  // Typing is hunting, not browsing: every folder still holding a match opens,
+  // and stays open for as long as the query does.
+  const rows = flattenFxGroups(groups, (g) => (q ? true : folderOverride[g.id] ?? g.defaultOpen));
+  const focus = rows.length === 0 ? 0 : Math.min(focusIndex, rows.length - 1);
+
+  const toggleFolder = (id: string, open: boolean): void => {
+    // While a search forces folders open, collapsing would flip invisible
+    // state and appear to do nothing — so it is simply not offered.
+    if (q) return;
+    setFolderOverride((cur) => ({ ...cur, [id]: !open }));
+  };
+
+  const activateRow = (row: FxRow): void => {
+    switch (row.kind) {
+      case 'folder':
+        toggleFolder(row.id, row.open);
+        break;
+      case 'effect':
+        addEffectAndReveal(primary, row.def.type);
+        break;
+      case 'preset':
+        applyEffectPreset(row.name, [primary]);
+        bumpClipboard((n) => n + 1);
+        revealEffectControls();
+        break;
+      case 'shapeOp':
+        if (row.taken) return;
+        addPathOp(primary, defaultPathOpOf(row.opType as Parameters<typeof defaultPathOpOf>[0]));
+        revealEffectControls();
+        break;
+      case 'sim':
+        if (row.id === 'cloner') enableNodeCloner(primary);
+        else enableNodePhysics(primary);
+        revealEffectControls();
+        break;
+    }
+  };
+
+  const onBrowserKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (rows.length === 0) return;
+    const row = rows[focus];
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusIndex(stepFxFocus(rows.length, focus, 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusIndex(stepFxFocus(rows.length, focus, -1));
+        break;
+      case 'ArrowRight':
+        if (row?.kind === 'folder' && !row.open) { e.preventDefault(); toggleFolder(row.id, row.open); }
+        break;
+      case 'ArrowLeft':
+        if (row?.kind === 'folder' && row.open) { e.preventDefault(); toggleFolder(row.id, row.open); }
+        break;
+      case 'Home':
+        e.preventDefault();
+        setFocusIndex(0);
+        break;
+      case 'End':
+        e.preventDefault();
+        setFocusIndex(rows.length - 1);
+        break;
+      case 'Enter':
+      case ' ':
+        if (!row) return;
+        e.preventDefault();
+        activateRow(row);
+        break;
+      default:
+    }
+  };
+
+  /**
+   * Arm the hover preview. The picture itself is made synchronously from a
+   * CSS filter (`effectPreviewThumbs`) and cached for the session, so this
+   * costs one `drawImage` per effect per run — but only after the pointer has
+   * rested, so scanning down the list makes none at all.
+   */
+  const armPreview = (e: React.MouseEvent<HTMLElement>, def: EffectDef, category: string): void => {
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current);
+    const rect = e.currentTarget.getBoundingClientRect();
+    previewTimer.current = setTimeout(() => {
+      previewTimer.current = null;
+      setPreview({
+        label: def.label,
+        category,
+        icon: EFFECT_CATEGORY_ICON[category] ?? 'zap',
+        // Null when the effect is GPU-only or its filter cannot be built —
+        // the card then shows its icon and folder instead of pretending.
+        url: effectPreviewFor(def),
+        x: Math.max(8, rect.left - EFFECT_PREVIEW_W - 20),
+        y: Math.max(8, rect.top - 6),
+      });
+    }, PREVIEW_DELAY_MS);
+  };
+
   return (
     <div className={styles.root}>
       {/* Effects & Presets browser — the AE library tree of effect types. */}
@@ -348,65 +562,107 @@ export function EffectsPanel(): JSX.Element {
             <Icon name="star" size="sm" />
           </button>
         </div>
-        {browserFolders.length > 0 || (!starredOnly && (shapeOps.length > 0 || browserPresets.length > 0 || simulationItems.length > 0)) ? (
-          <BrowserTree>
-            {!starredOnly && browserPresets.length > 0 && (
-              <BrowserFolder
-                key="presets"
-                label="Effect Presets"
-                icon="sparkles"
-                count={browserPresets.length}
-                defaultOpen={false}
-                forceOpen={!!q}
-              >
-                {browserPresets.map((p) => {
-                  const userSaved = !builtinPresetNames.has(p.name);
+        {rows.length > 0 ? (
+          <div
+            className={styles.browserList}
+            role="tree"
+            aria-label="Effects and presets"
+            tabIndex={0}
+            onKeyDown={onBrowserKeyDown}
+            onMouseLeave={cancelPreview}
+          >
+            <VirtualList
+              items={rows}
+              itemHeight={FX_LEAF_ROW_H}
+              getItemHeight={fxRowHeight}
+              itemKey={(r) => r.key}
+              scrollToIndex={focus}
+              onScroll={cancelPreview}
+              renderItem={(row, i) => {
+                const active = i === focus;
+                if (row.kind === 'folder') {
+                  return (
+                    <button
+                      type="button"
+                      className={styles.fxFolderRow}
+                      data-active={active || undefined}
+                      aria-expanded={row.open}
+                      title={row.label}
+                      onClick={() => { setFocusIndex(i); toggleFolder(row.id, row.open); }}
+                    >
+                      <Icon name={row.open ? 'chevron-down' : 'chevron-right'} size="sm" className={styles.fxFolderTwisty} />
+                      {row.icon ? <Icon name={row.icon} size="md" className={styles.fxFolderIcon} /> : null}
+                      <span className={styles.fxFolderName}>{row.label}</span>
+                      <span className={styles.fxFolderCount}>{row.count}</span>
+                    </button>
+                  );
+                }
+                if (row.kind === 'preset') {
                   return (
                     <BrowserRow
-                      key={p.name}
-                      label={p.name}
+                      label={row.name}
                       icon="sparkles"
+                      selected={active}
                       title={
-                        userSaved
-                          ? `Apply "${p.name}" (${p.items.length} effect(s)) — Alt-click deletes`
-                          : `Apply "${p.name}" (${p.items.length} effect(s))`
+                        row.userSaved
+                          ? `Apply "${row.name}" (${row.effectCount} effect(s)) — Alt-click deletes`
+                          : `Apply "${row.name}" (${row.effectCount} effect(s))`
                       }
                       onClick={(e) => {
-                        if (userSaved && e.altKey) {
-                          deleteEffectPreset(p.name);
+                        // A double-click is two clicks; applying on both
+                        // stacked the preset twice.
+                        if (e.detail > 1) return;
+                        setFocusIndex(i);
+                        if (row.userSaved && e.altKey) {
+                          deleteEffectPreset(row.name);
                           bumpClipboard((n) => n + 1);
                           return;
                         }
-                        applyEffectPreset(p.name, [primary]);
-                        bumpClipboard((n) => n + 1);
-                        revealEffectControls();
+                        activateRow(row);
                       }}
                     />
                   );
-                })}
-              </BrowserFolder>
-            )}
-            {browserFolders.map(([cat, items], index) => (
-              <BrowserFolder
-                key={cat}
-                label={cat}
-                icon={EFFECT_CATEGORY_ICON[cat]}
-                count={items.length}
-                defaultOpen={index === 0}
-                // Typing is hunting, not browsing: every folder still holding a
-                // match opens, and stays open for as long as the query does.
-                forceOpen={!!q}
-              >
-                {items.map((d) => {
-                  const pluginNoGpu = cat === PLUGIN_EFFECT_CATEGORY && !pluginEffectsCanRender();
-                  const tag = pluginNoGpu
-                    ? <BrowserTag>No WebGPU</BrowserTag>
-                    : d.gpuOnly ? <BrowserTag>GPU</BrowserTag> : null;
+                }
+                if (row.kind === 'shapeOp') {
                   return (
                     <BrowserRow
-                      key={d.type}
+                      label={row.label}
+                      fx
+                      selected={active}
+                      title={row.taken ? `${row.label} is already on this layer` : `Add ${row.label}`}
+                      onClick={(e) => { if (e.detail > 1) return; setFocusIndex(i); activateRow(row); }}
+                    />
+                  );
+                }
+                if (row.kind === 'sim') {
+                  return (
+                    <BrowserRow
+                      label={row.label}
+                      icon={row.icon}
+                      selected={active}
+                      right={row.on ? <BrowserTag>On</BrowserTag> : undefined}
+                      title={row.on ? `Edit ${row.label} in Effect Controls` : `Add ${row.label}`}
+                      onClick={(e) => { if (e.detail > 1) return; setFocusIndex(i); activateRow(row); }}
+                    />
+                  );
+                }
+                const d = row.def;
+                return (
+                  /*
+                    The hover host, not the row: `BrowserRow` is a shared
+                    presentational button and teaching it about previews would
+                    push effect-specific knowledge into a component the library
+                    browser also uses.
+                  */
+                  <div
+                    className={styles.fxRowHost}
+                    onMouseEnter={(e) => armPreview(e, d, row.folder)}
+                    onMouseLeave={cancelPreview}
+                  >
+                    <BrowserRow
                       label={d.label}
                       fx
+                      selected={active}
                       /*
                         A plugin effect on the WebGL2 tier is WGSL with no
                         pipeline to compile it, so it renders its input unchanged.
@@ -421,81 +677,25 @@ export function EffectsPanel(): JSX.Element {
                       right={
                         <>
                           <EffectFavoriteStar id={d.type} label={d.label} />
-                          {tag}
+                          {row.gpuTag === 'no-webgpu' ? <BrowserTag>No WebGPU</BrowserTag> : null}
+                          {row.gpuTag === 'gpu' ? <BrowserTag>GPU</BrowserTag> : null}
                         </>
                       }
                       title={
-                        pluginNoGpu
+                        row.gpuTag === 'no-webgpu'
                           ? `${d.label} needs WebGPU — this machine is on the WebGL2 fallback. `
                             + 'It is saved with your project and renders on a machine that has it.'
                           : `Add ${d.label} — or drag onto a layer`
                       }
                       draggable
-                      onDragStart={(e) => setCanvasDrag(e, { kind: 'effect', effectType: d.type })}
-                      onClick={() => { if (primary) addEffectAndReveal(primary, d.type); }}
+                      onDragStart={(e) => { cancelPreview(); setCanvasDrag(e, { kind: 'effect', effectType: d.type }); }}
+                      onClick={(e) => { if (e.detail > 1) return; setFocusIndex(i); activateRow(row); }}
                     />
-                  );
-                })}
-              </BrowserFolder>
-            ))}
-            {!starredOnly && shapeOps.length > 0 && node && (
-              <BrowserFolder
-                key="Shape"
-                label="Shape"
-                icon={EFFECT_CATEGORY_ICON.Shape}
-                count={shapeOps.length}
-                defaultOpen={browserFolders.length === 0}
-                forceOpen={!!q}
-              >
-                {shapeOps.map((op) => {
-                  const taken = (op.type === 'trim' && !!readTrimOp(node))
-                    || (op.type === 'repeater' && !!readRepeaterOp(node));
-                  return (
-                    <BrowserRow
-                      key={op.type}
-                      label={op.label}
-                      fx
-                      title={taken ? `${op.label} is already on this layer` : `Add ${op.label}`}
-                      onClick={() => {
-                        if (!primary || taken) return;
-                        addPathOp(primary, defaultPathOpOf(op.type));
-                        revealEffectControls();
-                      }}
-                    />
-                  );
-                })}
-              </BrowserFolder>
-            )}
-            {!starredOnly && simulationItems.length > 0 && (
-              <BrowserFolder
-                key="Simulation"
-                label="Simulation"
-                icon="zap"
-                count={simulationItems.length}
-                defaultOpen={false}
-                forceOpen={!!q}
-              >
-                {simulationItems.map((item) => {
-                  const on = item.id === 'cloner' ? clonerOn : physicsOn;
-                  return (
-                    <BrowserRow
-                      key={item.id}
-                      label={item.label}
-                      icon={item.icon}
-                      right={on ? <BrowserTag>On</BrowserTag> : undefined}
-                      title={on ? `Edit ${item.label} in Effect Controls` : `Add ${item.label}`}
-                      onClick={() => {
-                        if (!primary) return;
-                        if (item.id === 'cloner') enableNodeCloner(primary);
-                        else enableNodePhysics(primary);
-                        revealEffectControls();
-                      }}
-                    />
-                  );
-                })}
-              </BrowserFolder>
-            )}
-          </BrowserTree>
+                  </div>
+                );
+              }}
+            />
+          </div>
         ) : (
           <BrowserEmpty>
             {starredOnly && effectFavorites.size === 0
@@ -504,6 +704,27 @@ export function EffectsPanel(): JSX.Element {
                 ? 'No favourite effects match this search.'
                 : `No effects match “${effectQuery}”.`}
           </BrowserEmpty>
+        )}
+        {preview && (
+          <div className={styles.fxPreviewCard} style={{ top: preview.y, left: preview.x }} role="presentation">
+            {preview.url ? (
+              <img
+                className={styles.fxPreviewImg}
+                src={preview.url}
+                alt=""
+                width={EFFECT_PREVIEW_W}
+                height={EFFECT_PREVIEW_H}
+              />
+            ) : (
+              <div className={styles.fxPreviewFallback}>
+                <Icon name={preview.icon} size="lg" />
+              </div>
+            )}
+            <div className={styles.fxPreviewCaption}>
+              <span className={styles.fxPreviewName}>{preview.label}</span>
+              <span className={styles.fxPreviewCat}>{preview.url ? preview.category : `${preview.category} · no preview`}</span>
+            </div>
+          </div>
         )}
       </div>
 

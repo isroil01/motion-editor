@@ -3,14 +3,14 @@
 import { RenderGraph } from '../RenderGraph';
 import { ClearPass } from './ClearPass';
 import { BackgroundPass } from './BackgroundPass';
-import { CompositionPass, PLUGIN_ORIGIN, PLUGIN_HALF1, PLUGIN_HALF2, PLUGIN_QUARTER1, PLUGIN_QUARTER2, LAYER_TARGET, BLUR_TARGET1, BLUR_TARGET2, BLUR_TARGET3, MATTE_TARGET, DOF_TARGET, BACKDROP_HALF1, BACKDROP_HALF2, BACKDROP_DOWNSCALE, PRECOMP_TARGETS } from './CompositionPass';
+import { CompositionPass, PLUGIN_ORIGIN, PLUGIN_HALF1, PLUGIN_HALF2, PLUGIN_QUARTER1, PLUGIN_QUARTER2, LAYER_TARGET, BLUR_TARGET1, BLUR_TARGET2, BLUR_TARGET3, MATTE_TARGET, DOF_TARGET, BACKDROP_HALF1, BACKDROP_HALF2, BACKDROP_DOWNSCALE, PRECOMP_TARGETS, FX_HIST_TARGET, FX_LUT_TARGET } from './CompositionPass';
 import { OverlayPass } from './OverlayPass';
 import { MaskPass, MASK_TARGET } from './MaskPass';
 import { EffectPass, SCENE_COLOR_TARGET } from './EffectPass';
 
 export { ClearPass } from './ClearPass';
 export { BackgroundPass } from './BackgroundPass';
-export { CompositionPass, PLUGIN_ORIGIN, PLUGIN_HALF1, PLUGIN_HALF2, PLUGIN_QUARTER1, PLUGIN_QUARTER2, PLUGIN_SCALED_TARGETS, LAYER_TARGET, BLUR_TARGET1, BLUR_TARGET2, BLUR_TARGET3, MATTE_TARGET, DOF_TARGET, BACKDROP_HALF1, BACKDROP_HALF2, BACKDROP_DOWNSCALE, PRECOMP_TARGETS, MAX_PRECOMP_DEPTH } from './CompositionPass';
+export { CompositionPass, FX_HIST_TARGET, FX_LUT_TARGET, PLUGIN_ORIGIN, PLUGIN_HALF1, PLUGIN_HALF2, PLUGIN_QUARTER1, PLUGIN_QUARTER2, PLUGIN_SCALED_TARGETS, LAYER_TARGET, BLUR_TARGET1, BLUR_TARGET2, BLUR_TARGET3, MATTE_TARGET, DOF_TARGET, BACKDROP_HALF1, BACKDROP_HALF2, BACKDROP_DOWNSCALE, PRECOMP_TARGETS, MAX_PRECOMP_DEPTH } from './CompositionPass';
 export { OverlayPass } from './OverlayPass';
 export { MaskPass, MASK_TARGET } from './MaskPass';
 export { EffectPass, SCENE_COLOR_TARGET } from './EffectPass';
@@ -163,6 +163,14 @@ export function buildDefaultGraph(): RenderGraph {
 
   // One isolated-precomp target per nesting depth (see CompositionPass).
   // Depth-capable so a 3D group INSIDE an isolated precomp depth-tests too.
+  // Round fourteen: the histogram colour autos reduce the layer into a 256×1
+  // histogram and turn it into a 256×1 lookup table before the pixel pass.
+  // Fixed-size, so declared without reference to the viewport; f16 holds the
+  // ≤ 1936 stratified-sample counts exactly.
+  for (const name of [FX_HIST_TARGET, FX_LUT_TARGET]) {
+    graph.declareTarget(name, () => ({ label: name, width: 256, height: 1, format: 'rgba16float' }));
+  }
+
   for (const name of PRECOMP_TARGETS) {
     graph.declareTarget(name, (vp) => ({
       label: name,

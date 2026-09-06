@@ -70,6 +70,9 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
     return !node || node.children.length === 0;
   });
   const compName = activePristine ? '' : rawCompName;
+  // Unsaved edits on the active comp's tab — the same flag the discard prompt
+  // and ProjectStatus read, so the three can never disagree.
+  const activeDirty = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.dirty === true : false));
 
   // Footage tab = source viewer (AE Footage panel).
   //
@@ -149,6 +152,7 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
   return (
     <div className={styles.root}>
       <div className={styles.strip} role="tablist" aria-label="Editor tabs" ref={stripRef}>
+        <div className={styles.tabs}>
         {/*
           Composition's tab, labelled with the COMPOSITION's name like After Effects:
           "Composition: <compName>" or "Composition (none)"
@@ -158,11 +162,16 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
           role="tab"
           aria-selected={sceneActive}
           className={cn(styles.tab, sceneActive && styles.tabActive)}
-          title={`Composition: ${compName || 'none'}`}
+          title={`Composition: ${compName || 'none'}${activeDirty ? ' — unsaved changes' : ''}`}
           onClick={() => activate(SCENE_TAB_ID)}
         >
           <Icon name="shape" size="sm" />
           <span className={styles.tabLabel}>Composition {compName ? `(${compName})` : '(none)'}</span>
+          {/* The dirty dot. Decorative for AT: the tab's `title` and the
+              accessible name below carry it as words. */}
+          {activeDirty ? (
+            <span className={styles.dirtyDot} data-testid="comp-dirty-dot" role="img" aria-label="Unsaved changes" />
+          ) : null}
         </button>
 
         {/*
@@ -262,18 +271,26 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
             </span>
           </button>
         ))}
+        </div>
 
         <div className={styles.panelActions}>
+          {/*
+            Only the panel's own two actions here: the lock and the menu. The
+            viewport's display controls (layout, channel, resolution, preview,
+            LUT, overlays, snapshot compare, display mode, bookmarks, pop out)
+            sat before the lock for a while and made this end of the row a
+            wall of buttons; they are in the transport row under the stage
+            now (`Workspace/TransportBar.tsx`), which had the room.
+          */}
           {/* View lock — the workspace's fixed/free camera mode. Fixed frames
               and centres the comp and disables panning; free is the infinite
               canvas. The button reflects the live mode. */}
           <button
             type="button"
-            className={styles.panelActionBtn}
+            className={viewMode === 'fixed' ? `${styles.panelActionBtn} ${styles.panelActionBtnOn}` : styles.panelActionBtn}
             title={viewMode === 'fixed' ? 'View locked (comp framed & centred) — click to unlock' : 'Lock view — frame the comp and disable panning'}
             aria-label="Lock view"
             aria-pressed={viewMode === 'fixed'}
-            style={viewMode === 'fixed' ? { color: 'var(--color-primary, #4c8dff)' } : undefined}
             onClick={() => useWorkspaceViewStore.getState().toggleMode()}
           >
             <Icon name="lock" size="sm" />

@@ -22,13 +22,14 @@ import { Project3D, type Vec3 } from '@motion/scene';
 import { Gizmo3D } from '@motion/workspace';
 import { useGuidesStore } from '@stores/guidesStore';
 import { useCompositionStore } from '@stores/compositionStore';
-import { useProjectStore } from '@stores/projectStore';
+import { useCurrentTime } from '@stores/playbackClockStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { getWorkspaceController } from '@core/workspace/WorkspaceController';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import { isCustomViewId } from '@core/workspace/customViews';
 import { useSceneRefGeometry } from './useSceneRefGeometry';
 import { viewDragToWorldDelta } from '@core/workspace/ports';
+import { beginViewportGesture, endViewportGesture } from '@core/workspace/viewportGesture';
 import { currentViewCamera } from '@core/workspace/viewProjection';
 import {
   collectDeviceHandles,
@@ -49,7 +50,7 @@ export function useDeviceHandles(stageRef: React.RefObject<HTMLElement | null>) 
   const camera3dMode = useGuidesStore((s) => s.camera3dMode);
   const compWidth = useCompositionStore((s) => s.width);
   const compHeight = useCompositionStore((s) => s.height);
-  const time = useProjectStore((s) => (s.activeTabId ? s.tabs[s.activeTabId]?.time ?? 0 : 0));
+  const time = useCurrentTime();
   // The camera this view looks THROUGH gets no handle — the same suppression
   // the wireframe already has, resolved from the same shared hook so the two
   // can never disagree about which camera that is.
@@ -119,6 +120,10 @@ export function useDeviceHandles(stageRef: React.RefObject<HTMLElement | null>) 
       // Selecting the device makes the drag legible in the timeline and the
       // inspector, and matches clicking any other object.
       useSelectionStore.getState().set([hit.nodeId]);
+      // One gesture per drag: one undo entry, one structural bump at the end,
+      // and the drag flag that keeps the RAM preview from blitting the
+      // pre-drag frame over the light (or camera) being moved.
+      beginViewportGesture();
       dragRef.current = { handle: hit, startWorld: hit.world, startComp: compPt };
     };
 
@@ -150,6 +155,7 @@ export function useDeviceHandles(stageRef: React.RefObject<HTMLElement | null>) 
       if (!dragRef.current) return;
       try { stage.releasePointerCapture(e.pointerId); } catch { /* best-effort */ }
       dragRef.current = null;
+      endViewportGesture();
     };
 
     stage.addEventListener('pointerdown', onPointerDown, { capture: true });

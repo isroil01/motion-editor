@@ -12,6 +12,15 @@
  *
  * Persistence: pass `storageKey` to remember size in localStorage.
  *
+ * ## Collapsing to the rail
+ *
+ * `collapsible` gives the fixed pane a second resting state: the dock rail
+ * (`--dock-rail-width`, 36px — one icon column). Double-click the divider to
+ * collapse or restore; drag it under half of `minSize` and it snaps to the
+ * rail on release; Enter on the focused divider toggles. `onCollapseChange`
+ * reports every transition. Pass `collapsed` to CONTROL it (EditorLayout does,
+ * from the layout store) — the pane then only reports and never decides.
+ *
  * ## Why a drag does not re-render this component
  *
  * A pointer device reports far faster than the screen refreshes — a 1000 Hz
@@ -63,9 +72,28 @@ export interface SplitPaneProps {
   /** First pane content. */
   children: [ReactNode, ReactNode];
   className?: string;
-  /** When true, the primary pane is collapsed (size = 0) and the splitter
-   *  is still visible so the user can re-expand by dragging. */
+  /**
+   * Controlled collapse. When true the fixed pane sits at whatever `size` the
+   * parent passes (the rail, usually) and the splitter stays visible so the
+   * user can re-expand by dragging or double-clicking.
+   */
   collapsed?: boolean;
+  /** Let the user collapse the fixed pane to the rail. See the header. */
+  collapsible?: boolean;
+  /** Uncontrolled initial collapse state. */
+  defaultCollapsed?: boolean;
+  /** Rail size in px. Defaults to `--dock-rail-width` (36). */
+  collapsedSize?: number;
+  /** Fires when the user collapses or restores the pane. */
+  onCollapseChange?: (collapsed: boolean) => void;
+}
+
+/** `--dock-rail-width` from the root, or its documented value when unavailable. */
+export function readDockRailWidth(): number {
+  if (typeof window === 'undefined' || typeof getComputedStyle !== 'function') return 36;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--dock-rail-width');
+  const n = parseFloat(raw);
+  return Number.isFinite(n) && n > 0 ? n : 36;
 }
 
 function readPersisted(key: string | undefined, fallback: number): number {
@@ -98,9 +126,22 @@ export function SplitPane({
   primary = 'first',
   children,
   className,
-  collapsed = false,
+  collapsed,
+  collapsible = false,
+  defaultCollapsed = false,
+  collapsedSize,
+  onCollapseChange,
 }: SplitPaneProps): JSX.Element {
   const [internal, setInternal] = useState<number>(() => readPersisted(storageKey, defaultSize));
+  const [internalCollapsed, setInternalCollapsed] = useState<boolean>(defaultCollapsed);
+  const collapseControlled = collapsed !== undefined;
+  const isCollapsed = collapseControlled ? collapsed : (collapsible && internalCollapsed);
+  const railSize = collapsedSize ?? readDockRailWidth();
+
+  const setCollapsed = useCallback((next: boolean): void => {
+    if (!collapseControlled) setInternalCollapsed(next);
+    onCollapseChange?.(next);
+  }, [collapseControlled, onCollapseChange]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const firstPaneRef = useRef<HTMLDivElement | null>(null);
   const lastPaneRef = useRef<HTMLDivElement | null>(null);
@@ -126,14 +167,17 @@ export function SplitPane({
   /** Detaches this drag's window listeners. Held so an unmount can call it. */
   const detachRef = useRef<(() => void) | null>(null);
 
-  const current = (size ?? internal);
+  // The expanded size; while an UNCONTROLLED collapse is in force the pane
+  // paints the rail instead, and `internal` keeps the width to restore to.
+  const expanded = (size ?? internal);
+  const current = (!collapseControlled && isCollapsed) ? railSize : expanded;
   // When the fixed pane is the last one, dragging the splitter toward it
   // (increasing pointer coordinate) shrinks it, so invert the delta.
   const sign = primary === 'last' ? -1 : 1;
 
   // Keep latest callbacks and options in a ref so event listeners don't rebind or abort during drag
-  const propsRef = useRef({ onResize, onResizeEnd, minSize, maxSize, sign, direction, storageKey, primary });
-  propsRef.current = { onResize, onResizeEnd, minSize, maxSize, sign, direction, storageKey, primary };
+  const propsRef = useRef({ onResize, onResizeEnd, minSize, maxSize, sign, direction, storageKey, primary, collapsible, collapseControlled, isCollapsed, railSize, setCollapsed });
+  propsRef.current = { onResize, onResizeEnd, minSize, maxSize, sign, direction, storageKey, primary, collapsible, collapseControlled, isCollapsed, railSize, setCollapsed };
 
   /**
    * Paint a size without going through React.
@@ -182,10 +226,17 @@ export function SplitPane({
     document.body.style.cursor = direction === 'horizontal' ? 'col-resize' : 'row-resize';
     document.body.style.userSelect = 'none';
 
-    /** Pointer position → clamped pane size. */
+    /** Pointer position → the raw, unclamped size the pointer is asking for. */
+    const rawFromPos = (pos: number): number => {
+      const { sign: s } = propsRef.current;
+      return startSize.current + s * (pos - startPos.current);
+    };
+    /** Pointer position → clamped pane size, or the rail when a collapsible pane is dragged under half its minimum. */
     const sizeFromPos = (pos: number): number => {
-      const { minSize: min, maxSize: max, sign: s } = propsRef.current;
-      return clamp(startSize.current + s * (pos - startPos.current), min, max);
+      const { minSize: min, maxSize: max, collapsible: canCollapse, collapseControlled: controlled, railSize: rail } = propsRef.current;
+      const raw = rawFromPos(pos);
+      if (canCollapse && !controlled && raw < min / 2) return rail;
+      return clamp(raw, min, max);
     };
 
     const handlePointerMove = (ev: PointerEvent): void => {
@@ -232,14 +283,30 @@ export function SplitPane({
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
 
-      const { direction: dir, storageKey: key, onResizeEnd: endCb } = propsRef.current;
-      const next = sizeFromPos(dir === 'horizontal' ? ev.clientX : ev.clientY);
+      const {
+        direction: dir, storageKey: key, onResizeEnd: endCb, minSize: min, maxSize: max,
+        collapsible: canCollapse, collapseControlled: controlled, isCollapsed: wasCollapsed, setCollapsed: setC,
+      } = propsRef.current;
+      const pos = dir === 'horizontal' ? ev.clientX : ev.clientY;
+      const next = sizeFromPos(pos);
       dragSize.current = null;
       paintSize(next);
+
+      if (canCollapse && !controlled) {
+        const raw = rawFromPos(pos);
+        if (raw < min / 2) {
+          // Snapped to the rail: keep the last expanded size for the restore.
+          if (!wasCollapsed) setC(true);
+          endCb?.(next);
+          return;
+        }
+        if (wasCollapsed) setC(false);
+      }
+      const committed = clamp(next, min, max);
       // The single React update of the entire gesture.
-      setInternal(next);
-      writePersisted(key, next);
-      endCb?.(next);
+      setInternal(committed);
+      writePersisted(key, committed);
+      endCb?.(committed);
     }
 
     detachRef.current = detach;
@@ -295,7 +362,7 @@ export function SplitPane({
       ref={containerRef}
       className={cn(styles.root, isH ? styles.horizontal : styles.vertical, className)}
       data-direction={direction}
-      data-collapsed={collapsed || undefined}
+      data-collapsed={isCollapsed || undefined}
     >
       <div ref={firstPaneRef} className={cn(styles.pane, styles.first)} style={firstStyle}>
         {children[0]}
@@ -309,8 +376,17 @@ export function SplitPane({
         aria-valuemax={maxSize}
         tabIndex={0}
         className={cn(styles.splitter, isH ? styles.splitterH : styles.splitterV)}
+        aria-expanded={collapsible ? !isCollapsed : undefined}
+        data-collapsible={collapsible || undefined}
+        title={collapsible ? (isCollapsed ? 'Double-click to restore' : 'Double-click to collapse') : undefined}
         onPointerDown={onPointerDown}
+        onDoubleClick={collapsible ? () => setCollapsed(!isCollapsed) : undefined}
         onKeyDown={(e) => {
+          if (collapsible && e.key === 'Enter') {
+            e.preventDefault();
+            setCollapsed(!isCollapsed);
+            return;
+          }
           const big = 32, small = 8;
           let delta = 0;
           if (isH) {
@@ -330,7 +406,8 @@ export function SplitPane({
           }
           if (delta !== 0) {
             e.preventDefault();
-            const next = clamp(current + sign * delta, minSize, maxSize);
+            if (collapsible && !collapseControlled && isCollapsed) setCollapsed(false);
+            const next = clamp(expanded + sign * delta, minSize, maxSize);
             setInternal(next);
             writePersisted(storageKey, next);
             onResize?.(next);

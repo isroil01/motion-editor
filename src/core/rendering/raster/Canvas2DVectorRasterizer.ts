@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_RASTER_DIMENSION,
 } from '@motion/renderer';
 import { layoutText } from '@core/text/textLayout';
+import { applyTextCase, textStyleTransform } from '@core/text/measureText';
 import { applyTextPath } from '@core/text/textPath';
 import { arcTable } from '@core/scene/trimPath';
 import { mixHex } from '@core/text/textAnimators';
@@ -288,16 +289,41 @@ export class Canvas2DVectorRasterizer implements VectorRasterizer {
     ctx.scale(ss, ss);
     // Everything below lays out in the UNPADDED box, so shift into it once.
     ctx.translate(pad, pad);
+    // Character panel: horizontal/vertical scale, baseline shift and
+    // super/subscript are ONE affine transform about the box centre, applied
+    // before any glyph is laid out so both draw paths below inherit it.
+    {
+      const tr = textStyleTransform(spec);
+      if (tr.sx !== 1 || tr.sy !== 1 || tr.dy !== 0) {
+        ctx.translate(spec.width / 2, spec.height / 2 + tr.dy);
+        ctx.scale(tr.sx, tr.sy);
+        ctx.translate(-spec.width / 2, -spec.height / 2);
+      }
+    }
     ctx.font = textCssFont(spec);
     {
       const vars = textFontVariationSettings(spec);
       if (vars) (ctx as CanvasRenderingContext2D & { fontVariationSettings?: string }).fontVariationSettings = vars;
+      // Small caps is a font FEATURE, not a font shorthand token Canvas accepts.
+      const caps = ctx as CanvasRenderingContext2D & { fontVariantCaps?: string };
+      if ('fontVariantCaps' in caps) caps.fontVariantCaps = spec.fontVariant === 'small-caps' ? 'small-caps' : 'normal';
     }
     ctx.textBaseline = 'middle';
     ctx.letterSpacing = spec.letterSpacing ? `${spec.letterSpacing}px` : '0px';
     ctx.fillStyle = spec.color;
 
-    const text = spec.text || 'Text';
+    const text = applyTextCase(spec.text || 'Text', spec.textTransform);
+    // The layer's own stroke (Character panel), drawn under or over the fill
+    // per `strokeOverFill`. Zero width = no stroke, the default.
+    const layerStrokeW = typeof spec.textStrokeWidth === 'number' && spec.textStrokeWidth > 0 ? spec.textStrokeWidth : 0;
+    const layerStrokeColor = typeof spec.textStroke === 'string' && spec.textStroke ? spec.textStroke : spec.color;
+    const strokeLine = (line: string, x: number, y: number): void => {
+      if (layerStrokeW <= 0) return;
+      ctx.lineWidth = layerStrokeW;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = layerStrokeColor;
+      ctx.strokeText(line, x, y);
+    };
 
     const hasGlyphWork =
       (spec.runs && spec.runs.length > 0) ||
@@ -317,7 +343,13 @@ export class Canvas2DVectorRasterizer implements VectorRasterizer {
       const lh = (spec.lineHeight ?? 1.2) * size;
       const gap = lh + (spec.paragraphSpacing ?? 0);
       const startY = spec.height / 2 - ((lines.length - 1) * gap) / 2;
-      lines.forEach((line: string, i: number) => ctx.fillText(line, anchorX, startY + i * gap));
+      lines.forEach((line: string, i: number) => {
+        const y = startY + i * gap;
+        if (layerStrokeW > 0 && !spec.strokeOverFill) strokeLine(line, anchorX, y);
+        ctx.fillStyle = spec.color;
+        ctx.fillText(line, anchorX, y);
+        if (layerStrokeW > 0 && spec.strokeOverFill) strokeLine(line, anchorX, y);
+      });
       return finishBake();
     }
 
@@ -394,7 +426,7 @@ export class Canvas2DVectorRasterizer implements VectorRasterizer {
 
       // The cheap path stays cheap: a glyph with no animator transform and no
       // path angle draws exactly as it did before, with no save/restore.
-      const plain = !tr && g.angle === undefined;
+      const plain = !tr && g.angle === undefined && layerStrokeW <= 0;
       if (plain) {
         ctx.font = textCssFont(g.style);
         ctx.fillStyle = g.style.fill ?? spec.color;
@@ -437,10 +469,12 @@ export class Canvas2DVectorRasterizer implements VectorRasterizer {
       // letterforms. Over is still worth having — it is how you get a hard
       // outline that stays crisp against a busy background.
       const strokeGlyph = (): void => {
-        if (!tr || tr.strokeWidth <= 0) return;
-        ctx.lineWidth = tr.strokeWidth;
+        // An animator's stroke wins; otherwise the layer's own.
+        const w = tr && tr.strokeWidth > 0 ? tr.strokeWidth : layerStrokeW;
+        if (w <= 0) return;
+        ctx.lineWidth = w;
         ctx.lineJoin = 'round';
-        ctx.strokeStyle = tr.strokeColor ?? fill;
+        ctx.strokeStyle = tr && tr.strokeWidth > 0 ? (tr.strokeColor ?? fill) : layerStrokeColor;
         ctx.strokeText(ch, 0, 0);
       };
       const fillGlyph = (): void => {

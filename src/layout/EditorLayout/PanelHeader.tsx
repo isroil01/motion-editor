@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useLayoutStore, type RegionId } from '@stores/layoutStore';
 import { Icon } from '@components/Icon';
+import { openHelp } from '@layout/Help/openHelp';
 import styles from './PanelHeader.module.css';
 
 interface PanelHeaderProps {
@@ -76,6 +77,20 @@ export function PanelHeader({ panelId, title, icon, closable = true, isPopout = 
       </div>
 
       <div className={styles.rightGroup} style={{ position: 'relative' }}>
+        {/* Help: the matching section of docs/*.md, in a dialog. Every panel
+            gets one; `helpLinks.ts` maps the id to a doc and falls back to
+            the editor reference, so an unmapped panel still opens something. */}
+        <button
+          type="button"
+          className={styles.actionBtn}
+          onClick={() => { void openHelp(panelId); }}
+          title={`Help for ${title}`}
+          aria-label={`Help for ${title}`}
+          data-tour="panel-help"
+        >
+          <Icon name="info" size="sm" />
+        </button>
+
         {/* In a pop-out window every menu item below is either self-referential
             ("Pop Out" from an already-popped-out window) or a guaranteed no-op
             (the three "Dock …" items act on a store with no registered panels),

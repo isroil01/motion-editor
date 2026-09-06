@@ -1,9 +1,9 @@
 /**
  * Scene / canvas right-click must show the full list, not a 280px scroller.
  *
- * The shared Menu defaults to max-height: 280px. ContextMenuHost is the only
- * surface for those layer menus, so the opt-out lives here — not on every
- * toolbar dropdown.
+ * The shared Menu defaults to max-height: 280px. The <ContextMenu> primitive
+ * (which ContextMenuHost binds to the store) is the only surface for those
+ * layer menus, so the opt-out lives there — not on every toolbar dropdown.
  */
 
 import { readFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ import { Menu, MenuItem } from '@components/Menu';
 import { ContextMenuHost } from './ContextMenuHost';
 import { openContextMenu, closeContextMenu } from '@stores/contextMenuStore';
 
-const HOST = join(__dirname, 'ContextMenuHost.tsx');
+const PRIMITIVE = join(__dirname, '..', '..', 'components', 'ContextMenu', 'ContextMenu.tsx');
 
 afterEach(() => {
   cleanup();
@@ -21,8 +21,8 @@ afterEach(() => {
 });
 
 describe('Scene context menu', () => {
-  it('opts the host Menu out of the 280px scroller', () => {
-    const src = readFileSync(HOST, 'utf8');
+  it('opts the primitive Menu out of the 280px scroller', () => {
+    const src = readFileSync(PRIMITIVE, 'utf8');
     expect(src).toMatch(/<Menu[^>]*\bnoScroll\b/);
     expect(src).toMatch(/<Menu[^>]*\bspacious\b/);
   });

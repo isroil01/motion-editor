@@ -367,3 +367,35 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-divider);
 }
+
+/* ── Colour-management readout ─────────────────────────────────────────────
+   A quiet caption above the saturation surface, not a control: it names the
+   space a hex is being interpreted in. Muted weight so it reads as chrome and
+   never competes with the swatch strips below. */
+.cmReadout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border-subtle);
+  cursor: help;
+}
+
+.cmLabel {
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.cmValue {
+  font-size: var(--font-size-micro);
+  font-family: var(--font-family-mono);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

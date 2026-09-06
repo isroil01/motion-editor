@@ -67,9 +67,29 @@ import {
   type DeformPin,
   type DeformedMesh,
 } from './puppet';
-import { deformArap } from './arap';
+import { deformArap, deformArapWithHandles, resolvePinnedVertices } from './arap';
 
 const DEG_TO_RAD = Math.PI / 180;
+
+/**
+ * Harmonic weight at or above which a vertex belongs to a bend pin's rigid
+ * CORE — the part of the artwork this pin governs almost outright. Everything
+ * between the core and the drivers is left to ARAP, which is what makes the
+ * bend smooth.
+ *
+ * Measured on the 1080px reproduction character, one 60° shoulder bend
+ * (edge-length energy; lower = more rigid, flips = shattered triangles):
+ *   weight-blended rotation (old)       40705   0 flips
+ *   core at 0.5 (the pin's Voronoi cell) 9841   0 flips — but 2 flips on a
+ *                                               thin 12px arm, where the cell
+ *                                               reaches the wrist and leaves
+ *                                               one triangle row to fold 60°
+ *   core at 0.8                          1271   0 flips, both characters
+ * A tighter core hands ARAP a wider transition band, and rigidity is exactly
+ * what ARAP is good at spreading. 0.5 was the intuitive choice; 0.8 is the
+ * measured one.
+ */
+const BEND_REGION_WEIGHT = 0.8;
 
 /** A rig's pins split by kind. `null` when there is nothing to derive. */
 export interface BendSplit {
@@ -223,6 +243,95 @@ export function applyBendPins(
   }
 
   return out ?? base;
+}
+
+/**
+ * Apply the bend pins on top of the driver solve THROUGH ARAP — the path the
+ * default solver takes.
+ *
+ * ## Why not the blend above
+ *
+ * `applyBendPins` moves every vertex by `w · (R(v − c) + c − v)`: a linear
+ * blend of the rotation by the pin's harmonic weight. Harmonic weights fall off
+ * across the WHOLE mesh, so a 60° bend at a shoulder turns the hand by 60°, the
+ * elbow by ~40°, the chest by ~20° and the hip by ~5° — each about the same
+ * centre. Nothing stays rigid; every triangle between two vertices of different
+ * weight shears, and the character reads as smeared or torn (measured on the
+ * reproduction PNG: edge-length energy 40705 for one 60° bend, against 4568 for
+ * a 90° advanced-pin rotation solved by ARAP).
+ *
+ * After Effects' bend pin turns the REGION it governs rigidly and lets the mesh
+ * solver absorb the transition. That is what this does: the vertices where the
+ * pin's weight dominates (`BEND_REGION_WEIGHT`) are hard-constrained to their
+ * rigidly rotated / scaled positions about the derived centre, the drivers keep
+ * their own handles, and ARAP solves everything in between as-rigidly-as-
+ * possible. The elbow bends; the chest does not shear.
+ *
+ * Everything that defines a bend pin is preserved: the centre is still the
+ * driver-pass position of the pin's own vertex (it is in the rigid set, so it
+ * lands there exactly); identity still returns the driver array itself; bends
+ * still compose in list order, each reading its centre from the result of the
+ * ones before; `maxRotationDeg` still clamps them like every other pin. The
+ * blend result is used as the WARM START, so a case ARAP declines (fewer than
+ * two handles) degrades to exactly the old behaviour.
+ *
+ * `restMesh` supplies the bend columns and anchors; `driverMesh` (the view with
+ * the bend columns dropped) is what the driver pass solved on, so its topology
+ * and factor caches are the ones reused here.
+ */
+export function applyBendPinsArap(
+  base: Float32Array,
+  drivers: readonly DeformPin[],
+  bends: readonly DeformPin[],
+  restMesh: DeformedMesh,
+  driverMesh: DeformedMesh,
+  maxRotationDeg?: number,
+): Float32Array {
+  const clamped = clampPinRotations(bends as DeformPin[], maxRotationDeg);
+  const numVertices = restMesh.vertices.length / 4;
+  let out = base;
+
+  for (const pin of clamped) {
+    const rotDeg = pin.rotation ?? 0;
+    const scale = pin.scale ?? 1;
+    if (rotDeg === 0 && scale === 1) continue;
+    const col = restMesh.weights[pin.id];
+    const k = restMesh.pinVertexIndices[pin.id];
+    if (!col || k === undefined) continue;
+
+    // Derived centre: where the solve so far put this pin's own vertex.
+    const cx = out[k * 4 + 0]!;
+    const cy = out[k * 4 + 1]!;
+    const rad = rotDeg * DEG_TO_RAD;
+    const cos = Math.cos(rad) * scale;
+    const sin = Math.sin(rad) * scale;
+
+    // Drivers keep their handles; the bend's region joins them, rigidly moved.
+    const handles = resolvePinnedVertices(drivers as DeformPin[], driverMesh, numVertices);
+    const added: number[] = [];
+    for (let i = 0; i < numVertices; i++) {
+      if (handles.pinnedFlag[i]) continue;
+      if (i !== k && (col[i] ?? 0) < BEND_REGION_WEIGHT) continue;
+      const relX = out[i * 4 + 0]! - cx;
+      const relY = out[i * 4 + 1]! - cy;
+      handles.pinnedFlag[i] = 1;
+      handles.targetX[i] = cos * relX - sin * relY + cx;
+      handles.targetY[i] = sin * relX + cos * relY + cy;
+      handles.cos[i] = cos;
+      handles.sin[i] = sin;
+      added.push(i);
+    }
+    if (added.length === 0) continue;
+    handles.distinct += added.length;
+    // Stable factor-cache key: the driver set plus the (sorted) region.
+    handles.key = `${handles.key}|b:${added.join(',')}`;
+
+    // The blend is a good initial guess (and the exact fallback).
+    const warm = applyBendPins(out, [pin], restMesh, maxRotationDeg);
+    out = deformArapWithHandles(drivers as DeformPin[], driverMesh, handles, warm, maxRotationDeg);
+  }
+
+  return out;
 }
 
 /**

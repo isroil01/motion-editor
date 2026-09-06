@@ -120,9 +120,115 @@
   text-overflow: ellipsis;
 }
 
-.card .remove {
-  align-self: flex-end;
-  margin: 0 8px 8px 0;
+/* The card's two quiet verbs, pin and remove, in one row under the body. */
+.cardTools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.cardPinned {
+  border-color: var(--color-primary);
+}
+
+.pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pin:hover { color: var(--color-text-primary); }
+
+.pinOn {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* Templates: a strip of small tiles above the recents, one per shipped
+   template. Tiles, not a grid, because six is the whole set. */
+.templates {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+}
+
+.template {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  width: 120px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.template:hover { background: var(--color-surface-2); }
+
+.template:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.templateArt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-0);
+  color: var(--color-text-tertiary);
+}
+
+.templateName {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.templateMeta {
+  font-size: var(--font-size-micro);
+  color: var(--color-text-tertiary);
+}
+
+/* The Recent label with search and sort on its right. */
+.recentHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.recentTools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.emptyWrap {
+  grid-column: 1 / -1;
 }
 
 .row {

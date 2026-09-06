@@ -190,7 +190,7 @@ function Field({
 }
 
 /** The parameters for one row — a switch, so each kind names its own numbers. */
-function ModifierParams({
+export function ModifierParams({
   modifier,
   list,
   onPatch,

@@ -282,6 +282,24 @@ export function cornerPinData(
   });
 }
 
+/**
+ * The INVERSE homography Corner Pin samples through — destination pixel to
+ * unit-square (u, v) — as nine row-major numbers, or null when the quad is
+ * degenerate. Exported for the GPU port, which evaluates exactly the map
+ * `cornerPinData` does, per fragment, so the two cannot disagree about where a
+ * corner went. `w`/`h` are accepted for symmetry with `cornerPinData` — the
+ * inverse itself is a function of the corners alone.
+ */
+export function cornerPinInverse(
+  _w: number,
+  _h: number,
+  corners: readonly [number, number, number, number, number, number, number, number],
+): readonly number[] | null {
+  const [tlx, tly, trx, try_, brx, bry, blx, bly] = corners;
+  const forward = squareToQuad(tlx, tly, trx, try_, brx, bry, blx, bly);
+  return forward ? invert3(forward) : null;
+}
+
 /** Corner defaults in pixels for a `w`×`h` layer — the untransformed rectangle. */
 export function defaultCorners(w: number, h: number): [number, number, number, number, number, number, number, number] {
   return [0, 0, w, 0, w, h, 0, h];

@@ -45,7 +45,7 @@ function shapeNode(id: string): SceneNode {
         type: 'Transform',
         props: { [SCENE_KIND_PROP]: 'shape', x: 0, y: 0, rotation: 0, width: 200, height: 160 },
       },
-      { id: `${id}_s`, type: 'Style', props: { opacity: 100, fill: '#2b7eff' } },
+      { id: `${id}_s`, type: 'Style', props: { opacity: 100, fill: 'var(--color-overlay-rig-selected)' } },
     ],
   } as unknown as SceneNode;
 }
@@ -56,7 +56,7 @@ const TWO_BONES = [
 ];
 
 const skelOf = () => readNodeSkeleton(defaultSceneGraph.getNode('b1')!);
-const bonePolys = (c: HTMLElement) => c.querySelectorAll('polygon[stroke="#ffaa00"]');
+const bonePolys = (c: HTMLElement) => c.querySelectorAll('polygon[stroke="var(--color-overlay-rig-bone)"]');
 
 /** Select the first bone by pressing on its group. */
 function selectFirstBone(container: HTMLElement): void {
@@ -100,7 +100,7 @@ describe('gating and drawing', () => {
     act(() => useUIStore.getState().setBoneRigMode('weights'));
     const { container } = render(<BoneOverlay />);
     // density 6 ⇒ 72 mesh triangles, drawn with the mesh stroke.
-    expect(container.querySelectorAll('polygon[stroke="rgba(255, 170, 0, 0.22)"]')).toHaveLength(72);
+    expect(container.querySelectorAll('polygon[stroke="var(--color-overlay-rig-mesh-edge)"]')).toHaveLength(72);
   });
 
   it('shows the weight heatmap only once a bone is selected', () => {
@@ -190,15 +190,15 @@ describe('IK', () => {
 
   it('renders the IK target crosshair and the pole handle', () => {
     const { container } = render(<BoneOverlay />);
-    expect(container.querySelector('circle[stroke="#ff0055"]')).not.toBeNull();
-    expect(container.querySelector('polygon[fill="#a855f7"]')).not.toBeNull();
+    expect(container.querySelector('circle[stroke="var(--color-overlay-rig-ik)"]')).not.toBeNull();
+    expect(container.querySelector('polygon[fill="var(--color-overlay-rig-pole)"]')).not.toBeNull();
   });
 
   it('dragging the pole writes the keyframeable ikPole tracks', () => {
     act(() => usePreferenceStore.setState({ timelineAutoKeyframe: true }));
     const { container } = render(<BoneOverlay />);
     const svg = container.querySelector('svg')!;
-    const poleG = container.querySelector('polygon[fill="#a855f7"]')!.parentElement!;
+    const poleG = container.querySelector('polygon[fill="var(--color-overlay-rig-pole)"]')!.parentElement!;
     fireEvent.pointerDown(poleG, { clientX: 0, clientY: -80, pointerId: 1 });
     fireEvent.pointerMove(svg, { clientX: 5, clientY: 90, pointerId: 1 });
     fireEvent.pointerUp(svg, { clientX: 5, clientY: 90, pointerId: 1 });
@@ -209,7 +209,7 @@ describe('IK', () => {
 
   it('bones in an active IK chain are tinted differently', () => {
     const { container } = render(<BoneOverlay />);
-    expect(container.querySelector('polygon[stroke="#ff0055"]')).not.toBeNull();
+    expect(container.querySelector('polygon[stroke="var(--color-overlay-rig-ik)"]')).not.toBeNull();
   });
 });
 
@@ -221,9 +221,9 @@ describe('weight painting', () => {
 
   it('shows the mesh only in Weights mode', () => {
     const { container } = render(<BoneOverlay />);
-    expect(container.querySelectorAll('polygon[stroke="rgba(255, 170, 0, 0.22)"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('polygon[stroke="var(--color-overlay-rig-mesh-edge)"]').length).toBeGreaterThan(0);
     act(() => useUIStore.getState().setBoneRigMode('pose'));
-    expect(container.querySelectorAll('polygon[stroke="rgba(255, 170, 0, 0.22)"]')).toHaveLength(0);
+    expect(container.querySelectorAll('polygon[stroke="var(--color-overlay-rig-mesh-edge)"]')).toHaveLength(0);
   });
 
   it('a stroke writes a paint map, and only for the selected bone', () => {

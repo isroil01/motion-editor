@@ -1,0 +1,56 @@
+.body {
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--color-text-primary);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.body :is(h1, h2, h3, h4) {
+  margin: var(--space-4) 0 var(--space-2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.body h1 { font-size: var(--font-size-lg); }
+.body h2 { font-size: var(--font-size-md); }
+.body h3, .body h4 { font-size: var(--font-size-sm); }
+
+.body p { margin: 0 0 var(--space-3); }
+
+.body :is(ul, ol) { padding-left: var(--space-6); margin: 0 0 var(--space-3); }
+
+.body code {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 2px;
+  padding: 0 var(--space-1);
+}
+
+.body pre {
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  overflow-x: auto;
+}
+
+.body pre code { border: none; background: none; padding: 0; }
+
+.body table { border-collapse: collapse; margin: 0 0 var(--space-3); }
+.body :is(th, td) {
+  border: 1px solid var(--color-border);
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  vertical-align: top;
+}
+
+.source {
+  margin-top: var(--space-5);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}

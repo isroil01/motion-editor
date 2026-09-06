@@ -58,7 +58,10 @@ export const PANEL_DEFS: readonly PanelDef[] = [
   // button, unlike the Assets panel's, did not place the footage in the open
   // composition, which read as "my video didn't import". Comps are managed
   // from the Composition panel menu and the timeline's comp tabs.
-  { id: 'scene',       title: 'Scene',     icon: 'layers',      region: 'leftSidebar', weight: 10,  closable: false },
+  // Titled "Layers" (2026-09-03), id kept: the panel is the layer tree with
+  // the comp list above it, and "Scene" named the document, not the surface.
+  // Saved workspaces and persisted layouts hold the id, so it cannot move.
+  { id: 'scene',       title: 'Layers',    icon: 'layers',      region: 'leftSidebar', weight: 10,  closable: false },
   // AE's Effect Controls: the applied-effect stack for the selected layer.
   // Lives on the LEFT because the right inspector's Effects tab is the library
   // you add FROM — putting both in one tab buried the browser under every
@@ -166,6 +169,13 @@ export const PANEL_DEFS: readonly PanelDef[] = [
   // so PanelHeader drew no ✕ and the only way to dismiss it was F6 or the Window
   // menu — for a panel that opens on demand and is empty most of the time.
   { id: 'renderQueue', title: 'Render',    icon: 'queue',       region: 'rightInspector', weight: 0.7, closable: true, onDemand: true },
+  // The Export dialog's form, DOCKED — so a render can be queued while the
+  // timeline is still the thing on screen. Same form component and the same
+  // shared choices as the top-bar dialog (`exportFormStore`); the dialog stays
+  // for the button. On demand (Window ▸ Export, `window.exportPanel`) because
+  // the toolbar button is the discoverable route and a permanent tab would
+  // duplicate it in the rail.
+  { id: 'export',      title: 'Export',    icon: 'export',      region: 'rightInspector', weight: 0.65, closable: true, onDemand: true },
   // Third-party plugin UI — the SHARED host, for panels that did not ask for a
   // tab of their own (`placement: "shared"`, the default) or asked and found the
   // rail full. Panels that did get their own tab are registered dynamically from

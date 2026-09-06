@@ -172,6 +172,34 @@
   gap: var(--space-2);
 }
 
+/* The three clusters of the tool row: tools, project/comp/workspace, actions.
+   Left and right take what they need; the centre gets the rest and centres
+   its chips inside it, so the comp name sits under the window's middle
+   regardless of how many tool groups survived the width collapse. */
+.left {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+}
+
 .zoomGroup {
   display: flex;
   align-items: center;
@@ -240,6 +268,12 @@
 .toolDropdownTriggerActive:focus-visible {
   outline: 1px solid var(--color-focus-ring);
   outline-offset: 1px;
+}
+
+/* The disclosure chevron on a dropdown trigger, a step quieter than the glyph
+   beside it. A class rather than an inline opacity so the tokens rule holds. */
+.triggerChevron {
+  opacity: 0.6;
 }
 
 /* The only thing between two groups now, so it is drawn to be seen. It was

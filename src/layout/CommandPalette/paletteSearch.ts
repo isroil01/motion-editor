@@ -3,7 +3,15 @@
  * the mode parsing / fuzzy ranking / timecode parsing can be unit-tested.
  */
 
-export type PaletteMode = 'all' | 'commands' | 'layers' | 'compositions' | 'timecode' | 'effects' | 'presets';
+export type PaletteMode =
+  | 'all'
+  | 'commands'
+  | 'layers'
+  | 'compositions'
+  | 'timecode'
+  | 'effects'
+  | 'presets'
+  | 'help';
 
 export interface ParsedQuery {
   mode: PaletteMode;
@@ -14,11 +22,15 @@ export interface ParsedQuery {
 /**
  * Mode is chosen by the first character (VS Code / Linear convention):
  *   `>` commands · `@` layers · `#` compositions · `:` timecode
- *   `+` effects  · `*` presets · else search all.
+ *   `+` effects  · `*` presets · `?` help (docs) · else search all.
  *
  * `+` and `*` are AE's Quick Apply (26.2): type a few letters of an effect or
  * an animation preset, press Enter, and it lands on the selected layer. The
  * library had 174 effects and the only way to reach one was to browse.
+ *
+ * `?` searches the headings of every document under `docs/` — the same
+ * convention as VS Code's help quick-pick, and the first in-app door to the
+ * reference material.
  */
 export function parseQuery(raw: string): ParsedQuery {
   const first = raw[0];
@@ -28,6 +40,7 @@ export function parseQuery(raw: string): ParsedQuery {
   if (first === ':') return { mode: 'timecode', term: raw.slice(1).trim() };
   if (first === '+') return { mode: 'effects', term: raw.slice(1).trim() };
   if (first === '*') return { mode: 'presets', term: raw.slice(1).trim() };
+  if (first === '?') return { mode: 'help', term: raw.slice(1).trim() };
   return { mode: 'all', term: raw.trim() };
 }
 
@@ -88,4 +101,3 @@ export function parseTimecode(raw: string): number | null {
   }
   return seconds;
 }
-

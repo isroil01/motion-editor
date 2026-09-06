@@ -1,0 +1,143 @@
+/*
+ * The status bar's contents. These used to be inline styles in App.tsx —
+ * including a hover colour applied by mutating `e.currentTarget.style` — so
+ * none of it could respond to the theme or be found by a guard.
+ */
+
+.dot {
+  opacity: var(--opacity-muted, 0.4);
+  user-select: none;
+}
+
+.mono {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.bad {
+  color: var(--color-danger);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Save state: amber while unsaved, green when clean. */
+.stateDot {
+  color: var(--color-success);
+}
+
+.stateDotDirty {
+  color: var(--color-modified);
+}
+
+/* Centre: the composition chip. */
+.comp {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard),
+              background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.comp:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-3);
+}
+
+.comp:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.compIcon {
+  color: var(--color-text-tertiary);
+}
+
+.compName {
+  font-weight: var(--font-weight-medium);
+}
+
+.compMeta {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
+}
+
+.dirtyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-modified);
+}
+
+/* The palette button. */
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard),
+              color var(--motion-duration-fast) var(--motion-ease-standard),
+              border-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.search:hover {
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+/* Job tray: one compact chip per running job. */
+.tray {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.job {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 220px;
+  min-width: 0;
+  padding: 1px var(--space-2) 1px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: default;
+}
+
+.jobLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.jobBar {
+  width: 56px;
+  flex: none;
+}
+
+.jobPct {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-tertiary);
+  flex: none;
+}

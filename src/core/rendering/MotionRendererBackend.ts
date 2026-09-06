@@ -716,7 +716,7 @@ export class MotionRendererBackend implements RenderBackend {
                 // No fill fallback and no bake: these are DATA maps, not
                 // content. `premultipliedSource` false keeps the upload from
                 // multiplying a normal map by its own (opaque) alpha.
-                this.textures!.setImage(key, src, undefined, false);
+                if (!this.textures!.setImage(key, src, undefined, false)) this.frameMediaExact = false;
               };
               feedMap('n', modelMaps.normalSrc);
               feedMap('m', modelMaps.metallicRoughnessSrc);
@@ -774,7 +774,9 @@ export class MotionRendererBackend implements RenderBackend {
                       ...(layer.mask && layer.mask.paths.length > 0 ? { mask: layer.mask } : {}),
                     }
                   : undefined;
-                this.textures!.setImage(
+                // A decode / live-SVG raster / re-bake still in flight means
+                // this frame shows a stand-in — keep it out of the RAM preview.
+                const settledImg = this.textures!.setImage(
                   key,
                   layer.src,
                   layer.fill,
@@ -782,11 +784,14 @@ export class MotionRendererBackend implements RenderBackend {
                   bakeImg,
                   layer.liveSvgPlayback ? (layer.sourceTime ?? snapshot.time ?? 0) : undefined,
                 );
+                if (!settledImg) this.frameMediaExact = false;
               }
             } else if (layer.kind === 'video' && layer.contentAwareFillSrc) {
               const key = `asset:${layer.id}`;
               activeKeys.add(key);
-              this.textures!.setImage(key, layer.contentAwareFillSrc, layer.fill, layer.premultipliedSource);
+              if (!this.textures!.setImage(key, layer.contentAwareFillSrc, layer.fill, layer.premultipliedSource)) {
+                this.frameMediaExact = false;
+              }
             } else if (layer.kind === 'video' && layer.src) {
               const bakeVid = layerIsBaked(layer)
                 ? {
@@ -862,6 +867,14 @@ export class MotionRendererBackend implements RenderBackend {
                 lineHeight: layer.lineHeight,
                 paragraphSpacing: layer.paragraphSpacing,
                 strokeOverFill: layer.strokeOverFill,
+                textTransform: layer.textTransform,
+                fontVariant: layer.fontVariant,
+                verticalAlign: layer.verticalAlign,
+                verticalScale: layer.verticalScale,
+                horizontalScale: layer.horizontalScale,
+                baselineShift: layer.baselineShift,
+                textStroke: layer.textStroke,
+                textStrokeWidth: layer.textStrokeWidth,
                 runs: layer.runs,
                 // Per-glyph animator output and path placement. buildSnapshot
                 // resolves both; forwarding them is what makes text animators

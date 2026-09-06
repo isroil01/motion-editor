@@ -26,26 +26,62 @@
   width: 100%;
 }
 
-/* The Assets header's one NAMED action. `flex: none` so it keeps its label at
-   any panel width and the search box absorbs the rest — a button that shrinks
-   until only its glyph is left is the icon-only dock button again. */
-.importModelBtn {
+/* The Assets header's one NAMED action: Import, as a split button — the
+   label half opens the file picker, the ▾ half the menu with the other two
+   pickers. `flex: none` so it keeps its label at any panel width and the
+   search box absorbs the rest — a button that shrinks until only its glyph is
+   left is the icon-only dock button again. */
+.assetImportSplit {
   display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
+  align-items: stretch;
+  height: 24px;
   flex: none;
-  height: var(--control-height-sm);
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-family: inherit;
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-  cursor: pointer;
 }
 
-.importModelBtn:hover {
-  color: var(--color-text-primary);
+/* Both halves are system buttons; these join inner corners and unify height. */
+.assetImportMain {
+  height: 24px !important;
+  font-size: var(--font-size-xs) !important;
+  padding: 0 var(--space-3) 0 var(--space-2) !important;
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  white-space: nowrap;
+}
+
+.assetImportMore {
+  height: 24px !important;
+  width: 20px !important;
+  min-width: 20px !important;
+  padding: 0 !important;
+  margin-left: -1px;
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
+/* "Filters cleared to show the import" — one line under the filter row. */
+.assetNote {
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  flex: 0 0 auto;
+}
+
+/* OS files held over the list: the whole list is the drop target. */
+.assetListHostDrop {
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+/* The Project tab's empty state: what this list is, then the one action. */
+.emptyLead {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+.emptyNote {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-xs);
 }
 
 /* Properties: header + search stay put; the accordion is the only scroller.
@@ -665,29 +701,27 @@
  */
 .libTabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   align-items: stretch;
   gap: 2px;
-  /* A little vertical room once the tabs occupy more than one row; at a single
-     row this reads as the same strip it always was. */
-  row-gap: 0;
-  padding: 0 var(--space-3);
+  height: 34px;
+  padding: 0 var(--space-2);
   border-bottom: 1px solid var(--color-divider);
   background: var(--color-panel-header);
   flex: none;
+}
+.libTabs::-webkit-scrollbar {
+  display: none;
 }
 
 /**
  * Library tabs — underline, not folder tabs.
  *
- * The old shape was a browser-chrome tab: `border-radius: 4px 4px 0 0`, a
- * hairline on three sides, and an active fill of `--color-surface-0` — the
- * DARKEST surface in the theme, so the selected tab read as a hole punched in
- * the panel rather than as the raised one. Seven of them scroll horizontally,
- * and seven outlined folder tabs is most of why this panel looked busy.
- *
- * An underline carries the same information with no box at all, and it is what
- * the rest of the app's chrome does.
+ * Single-row horizontal scrolling tab bar with crisp icons and readable labels.
  */
 .libTab {
   display: inline-flex;
@@ -695,18 +729,20 @@
   gap: 5px;
   flex: 0 0 auto;
   white-space: nowrap;
-  height: 30px;
-  padding: 0 10px;
+  height: 34px;
+  padding: 0 8px;
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--color-text-tertiary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
   font-family: inherit;
   cursor: pointer;
   transition: color var(--motion-duration-fast) var(--motion-ease-standard),
     border-color var(--motion-duration-fast) var(--motion-ease-standard);
   user-select: none;
+  box-sizing: border-box;
 }
 .libTab:hover { color: var(--color-text-primary); }
 .libTab:focus-visible {
@@ -715,15 +751,135 @@
 }
 .libTabActive {
   composes: libTab;
-  color: var(--color-text-primary);
+  color: var(--color-primary);
   border-bottom-color: var(--color-primary);
   font-weight: var(--font-weight-semibold);
+}
+
+/* ── Library Category Strip & Filter Chips ────────────────────────── */
+
+.libCategoryStrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: none;
+  background: var(--color-surface-1);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.libCategoryStrip::-webkit-scrollbar {
+  display: none;
+}
+
+.libCategoryChip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-0);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--motion-duration-fast) var(--motion-ease-standard);
+  flex: 0 0 auto;
+}
+.libCategoryChip:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+.libCategoryChipActive {
+  composes: libCategoryChip;
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* ── Components, Shapes, and Text helpers ─────────────────────────── */
+
+.componentsActionRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.componentsSaveRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.componentCardWrap {
+  position: relative;
+}
+
+.componentThumbImg {
+  width: 48px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-0);
+}
+
+.componentDeleteBtn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-0);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all var(--motion-duration-fast) var(--motion-ease-standard);
+  opacity: 0;
+}
+.componentCardWrap:hover .componentDeleteBtn,
+.componentDeleteBtn:focus-visible {
+  opacity: 1;
+}
+.componentDeleteBtn:hover {
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.shapeSvgIcon {
+  color: var(--color-text-secondary);
+  transition: color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.libChip:hover .shapeSvgIcon {
+  color: var(--color-primary);
 }
 .libBody {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 8px;
   min-height: 0;
+}
+
+/* One quiet line above a borrowed section — what a click here will act on
+   (the selected layer, the selected keyframes). */
+.libSectionNote {
+  padding: 0 var(--space-1) var(--space-2);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
 }
 .libGrid {
   display: grid;
@@ -1357,20 +1513,24 @@
   color: var(--color-amber-500);
 }
 
-/* Media & file type colors */
-.assetGlyphImage { color: #10b981; }      /* Emerald green for raster images/photos */
-.assetGlyphSvg { color: #06b6d4; }        /* Vibrant cyan for vector SVG */
-.assetGlyphPsd { color: #3b82f6; }        /* Adobe blue for Photoshop / Illustrator */
-.assetGlyphRaw { color: #0ea5e9; }        /* Sky blue for RAW / HDR captures */
-.assetGlyphGif { color: #ec4899; }        /* Fuchsia for animated GIFs */
-.assetGlyphVideo { color: #8b5cf6; }      /* Cinema purple/violet for video footage */
-.assetGlyphVideoPro { color: #a855f7; }   /* Deep violet for pro footage (MXF/RAW) */
-.assetGlyphAudio { color: #f43f5e; }      /* Waveform rose/coral for audio tracks */
-.assetGlyphCode { color: #f97316; }       /* Warm orange for Lottie / JSON */
-.assetGlyphFont { color: #38bdf8; }       /* Sky blue for typography fonts */
-.assetGlyph3D { color: #fb923c; }         /* Mesh orange for 3D models */
-.assetGlyphComp { color: #6366f1; }       /* Indigo for compositions */
-.assetGlyphFile { color: #94a3b8; }       /* Cool slate for generic / unknown files */
+/* Media & file type colours — the `--color-filetype-*` families from
+   `tokens/domain.css`. Seven hues, not thirteen: PSD, RAW, SVG and GIF are
+   all IMAGES to the eye scanning a bin, and pro video is video. The theme
+   layer darkens each one a step on light grounds, which thirteen literal
+   hexes could never do. */
+.assetGlyphImage,
+.assetGlyphSvg,
+.assetGlyphPsd,
+.assetGlyphRaw,
+.assetGlyphGif { color: var(--color-filetype-image); }
+.assetGlyphVideo,
+.assetGlyphVideoPro { color: var(--color-filetype-video); }
+.assetGlyphAudio { color: var(--color-filetype-audio); }
+.assetGlyphCode { color: var(--color-filetype-data); }
+.assetGlyphFont { color: var(--color-filetype-font); }
+.assetGlyph3D { color: var(--color-filetype-other); }
+.assetGlyphComp { color: var(--color-filetype-comp); }
+.assetGlyphFile { color: var(--color-filetype-other); }
 
 .assetRowName {
   flex: 1 1 auto;
@@ -1434,8 +1594,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 8px 6px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 6px 8px;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 /* The star is a control INSIDE a card that is itself a button. It has to stay
@@ -1446,10 +1607,10 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
@@ -1457,13 +1618,15 @@
   opacity: 0;
   transition: opacity var(--motion-duration-fast) var(--motion-ease-standard),
     color var(--motion-duration-fast) var(--motion-ease-standard),
-    background var(--motion-duration-fast) var(--motion-ease-standard);
+    background var(--motion-duration-fast) var(--motion-ease-standard),
+    border-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 /* The filter lives in the toolbar, not on a card — always visible. */
 .libStarFilter {
   opacity: 1;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-1);
 }
 
 .libStarOn {
@@ -1475,7 +1638,7 @@
 .libStarFilterOn {
   composes: libStarFilter;
   color: var(--color-accent);
-  background: var(--color-selected);
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--color-surface-1));
   border-color: var(--color-accent);
 }
 
@@ -1650,3 +1813,526 @@
   color: var(--color-primary);
 }
 
+
+/* ── Assets: bin / browse tabs, search bar, toolbar, filter strip ───── */
+.assetSearchRow {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex: 0 0 auto;
+}
+
+.assetToolbarRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-1);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.assetToolbarGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.assetToolbarBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.assetToolbarBtn:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.assetToolbarBtn:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.assetTopRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.assetTopRow > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.assetFilterRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.assetFilterRow::-webkit-scrollbar {
+  display: none;
+}
+
+.assetFilterLabelBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.assetFilterLabelBtn:hover {
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+.assetFilterLabelBtn[aria-pressed='true'] {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.assetFilterLabelBtn:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+/* The column headings are BUTTONS now: click sorts, click again flips. */
+.assetHeadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assetHeadBtn:hover { color: var(--color-text-primary); }
+.assetHeadBtn:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+.assetHeadBtnActive { color: var(--color-text-primary); }
+.assetHeadDate { flex: 0 0 64px; }
+.assetHeadUsed { flex: 0 0 34px; text-align: right; }
+.assetRowDate {
+  flex: 0 0 64px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.assetRowUsed {
+  flex: 0 0 34px;
+  text-align: right;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Assets: thumbnails ─────────────────────────────────────────────── */
+/* A 16:9 well. The list row has a 32x18 one; the grid card fills its width. */
+.assetThumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
+}
+
+.assetThumbRow {
+  width: 32px;
+  height: 18px;
+}
+
+.assetThumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* The scrub video sits over the poster and only shows while hovered. */
+.assetThumbVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.assetThumbVideoOn { opacity: 1; }
+
+.assetDurationBadge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  background: var(--color-overlay-scrim);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.assetScrubBar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--color-primary);
+  pointer-events: none;
+}
+
+/* ── Assets: grid view ──────────────────────────────────────────────── */
+.assetGridRow {
+  display: grid;
+  grid-template-columns: repeat(var(--asset-grid-cols, 3), minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.assetCard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  min-width: 0;
+  cursor: default;
+  user-select: none;
+  position: relative;
+}
+
+.assetCard:hover { background: var(--color-hover); }
+
+.assetCardSelected,
+.assetCardSelected:hover {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+}
+
+.assetCardThumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.assetCardName {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.assetCardMeta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-micro);
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.assetCardMeta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A colour label reads as a stripe on the card edge and a dot on the list
+   row, the way Finder tags a file. The colour is data (what the user picked),
+   so it is the one inline style these rules allow. */
+.assetLabelDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.assetCardStripe {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+}
+
+.assetRowTags {
+  display: inline-flex;
+  gap: 3px;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Assets: metadata drawer ───────────────────────────────────────── */
+.assetDrawer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-1);
+  display: flex;
+  flex-direction: column;
+  max-height: 46%;
+  min-height: 0;
+}
+
+/* A button: click collapses the drawer. Reset so it reads as a strip. */
+.assetDrawerHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 4px var(--space-2) 4px var(--space-3);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--color-text-tertiary);
+  user-select: none;
+  cursor: pointer;
+}
+
+.assetDrawerHead:hover { color: var(--color-text-secondary); }
+.assetDrawerHead:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+/* The virtual list's box: measured, so the list can be given a pixel
+   height (a percentage of a flex item is not reliably definite). */
+.assetListHost {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  outline: none;
+}
+
+.assetListHost:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+/* The row keyboard traversal is on — distinct from selected, which it
+   usually also is, so a Shift-range still shows where the cursor sits. */
+.assetRow[data-focused],
+.assetCard[data-focused] {
+  box-shadow: inset 0 0 0 1px var(--color-focus-ring);
+}
+
+.assetDrawerHead > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assetDrawerBody {
+  overflow: auto;
+  min-height: 0;
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.assetDrawerGrid {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  column-gap: var(--space-2);
+  row-gap: 2px;
+  margin: 0;
+  font-size: var(--font-size-xs);
+}
+
+.assetDrawerKey {
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.assetDrawerVal {
+  margin: 0;
+  color: var(--color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.assetDrawerValWrap {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.assetDrawerUsage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.assetDrawerEmpty {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Assets: media browser (Browse tab) ───────────────────────────── */
+.mediaBrowserRoot {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mediaBrowserBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.mediaBrowserPath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.mediaBrowserEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.mediaRowLoading {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Layers panel: label swatch + filter bar ───────────────────────── */
+.labelSwatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: var(--space-2);
+  vertical-align: baseline;
+  flex: none;
+}
+
+.sceneFilterRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--space-2) var(--space-1);
+  flex: 0 0 auto;
+}
+
+.sceneFilterBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.sceneFilterBtn:hover { color: var(--color-text-primary); background: var(--color-hover); }
+.sceneFilterBtn[aria-pressed="true"] {
+  color: var(--color-primary);
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+}
+.sceneFilterBtn:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+.sceneFilterLabelDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}

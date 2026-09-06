@@ -45,9 +45,16 @@
   background: transparent;
   border: none;
   outline: none;
+  box-shadow: none;
   color: var(--color-text-primary);
   font-size: var(--font-size-md);
   font-family: var(--font-family-sans);
+}
+
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .input::placeholder {
@@ -119,6 +126,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The command's chord, as keycaps (`Kbd`); `.rowHint` is for prose notes. */
+.rowChord {
+  flex: none;
 }
 
 .rowHint {

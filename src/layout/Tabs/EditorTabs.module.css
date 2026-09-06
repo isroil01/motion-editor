@@ -18,6 +18,7 @@
 .strip {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   flex: 0 0 auto;
   height: 34px;
   background: var(--color-panel-header);
@@ -27,6 +28,24 @@
   gap: 3px;
 }
 
+/*
+ * The tab run — the strip's left column. It takes the row's spare width and
+ * clips; the tabs inside do NOT shrink, so a crowded strip overflows rather
+ * than crushing its labels, and the tabs past the edge stay reachable through
+ * the "All open tabs" chevron. The right column is only the lock and the
+ * panel menu now, so there is nothing left in this row to shed.
+ */
+.tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 .tab {
   display: inline-flex;
   align-items: center;
@@ -34,6 +53,7 @@
   padding: 0 9px;
   max-width: 220px;
   min-width: 0;
+  flex: 0 0 auto;
   height: 26px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -75,6 +95,16 @@
 /* A preview tab reads as provisional, which is exactly what it is. */
 .tabPreview { font-style: italic; }
 
+/* Unsaved-changes marker on the Composition tab — the same token and size as
+   the ProjectStatus dot in the top bar, so "dirty" looks like one thing. */
+.dirtyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-modified);
+  flex-shrink: 0;
+}
+
 .tabLabel {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -103,6 +133,8 @@
   margin-left: auto;
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
   gap: 2px;
   padding-right: 4px;
 }
@@ -123,6 +155,11 @@
 .panelActionBtn:hover {
   background: var(--color-hover);
   color: var(--color-text-primary);
+}
+
+/* The view-lock button while the view IS locked: the primary tint says "on". */
+.panelActionBtnOn {
+  color: var(--color-primary);
 }
 
 .overflow {

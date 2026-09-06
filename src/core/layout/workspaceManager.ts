@@ -172,6 +172,29 @@ export const BUILTIN_WORKSPACES: ReadonlyArray<WorkspaceSnapshot> = [
     activePanelByRegion: { leftSidebar: 'effectControls', rightInspector: 'effects' },
   },
   {
+    // Grading: the viewport with Scopes docked BESIDE it — leading the right
+    // dock so the waveform / vectorscope is on screen the moment the preset
+    // applies, not a tab away — and Properties one tab over for the layer
+    // being graded. The left dock is closed; a colour pass does not need the
+    // outliner, it needs the horizontal room. Distinct from "Color & VFX",
+    // which is an effects-tuning layout (Effect Controls left, library right).
+    id: 'color',
+    name: 'Color',
+    builtin: true,
+    regions: {
+      leftSidebar: { size: 300, collapsed: true },
+      rightInspector: { size: 460, collapsed: false },
+      bottomTimeline: { size: 220, collapsed: false },
+    },
+    panelOrder: {
+      leftSidebar: ['scene', 'assets', 'effectControls'],
+      rightInspector: ['scopes', 'properties', 'effects', 'swatches'],
+      centerWorkspace: [],
+      bottomTimeline: [],
+    },
+    activePanelByRegion: { leftSidebar: 'scene', rightInspector: 'scopes' },
+  },
+  {
     id: 'dual-monitor-studio',
     name: 'Dual Monitor Studio',
     builtin: true,

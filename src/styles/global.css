@@ -4,7 +4,22 @@
  * All component styles must live in *.module.css files.
  */
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+/* Self-hosted IBM Plex (was a Google Fonts @import — a network round-trip on
+   every cold start of a DESKTOP app, and no text at all offline until the
+   fallback kicked in). Each file declares `font-family: "IBM Plex Sans"` /
+   `"IBM Plex Mono"`, the exact names `--font-family-*` in typography.css
+   already use, so nothing downstream changes. Weights are the set the app
+   actually renders; add a file here before using a new one. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-sans/400-italic.css";
+@import "@fontsource/ibm-plex-sans/500-italic.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/ibm-plex-mono/400-italic.css";
 
 @import "../tokens/colors.css";
 @import "../tokens/spacing.css";
@@ -13,9 +28,13 @@
 @import "../tokens/shadows.css";
 @import "../tokens/motion.css";
 @import "../tokens/zindex.css";
+@import "../tokens/opacity.css";
+@import "../tokens/density.css";
 
 @import "../themes/dark.css";
 @import "../themes/light.css";
+/* An overlay on dark: must follow both so its attribute selector wins. */
+@import "../themes/high-contrast.css";
 
 /* Domain tokens depend on theme + primitive vars, so import last. */
 @import "../tokens/domain.css";
@@ -97,7 +116,7 @@ a:hover {
    soft ring; this is the calm fallback for everything else (keyboard only). */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-focus-ring);
+  box-shadow: var(--shadow-focus-ring);
 }
 
 /* ── Custom scrollbar — flat, consistent everywhere ──────────────
@@ -162,11 +181,12 @@ input[type="number"],
   }
 }
 
-/* Text controls indicate focus with their own border shift, so they opt out of
-   the generic ring. Buttons deliberately do NOT reset here: they fall back to
-   the soft :focus-visible ring above, so keyboard users always see focus.
-   (Plain :focus stays ringless via the `:focus { outline: none }` rule, so a
-   mouse click never draws a ring — only keyboard focus does.) */
+/* Text controls indicate focus with their own container / border styling, so
+   they opt out of the generic outer ring. In browsers, text inputs match
+   :focus-visible even on mouse click, so an un-reset :focus-visible ring draws
+   an unwanted inner outline inside composite fields (SearchField, Input,
+   Combobox). Interactive controls (buttons, tabs, chips, rows) continue to
+   receive the soft :focus-visible ring above. */
 input:focus,
 textarea:focus,
 select:focus,

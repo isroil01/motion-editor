@@ -140,6 +140,32 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  /*
+   * Pixel-aspect-ratio correction (View ▸ Pixel Aspect Ratio Correction).
+   *
+   * `--viewport-par` is 1 unless the toggle is on AND the composition's
+   * footage declares a non-square pixel aspect, in which case the PREVIEW is
+   * stretched horizontally so a 1.46 anamorphic plate is judged at the shape
+   * it will be shown at. All four canvases carry the SAME transform, so the
+   * picture, the RAM-preview blit, the onion ghosts and every guide the
+   * overlay painter draws stay registered with one another.
+   *
+   * It is a preview aid and nothing more — pointer coordinates and the SVG
+   * handle overlays stay in uncorrected space, exactly as After Effects warns
+   * ("for preview purposes only"). Correcting the INPUT would mean pushing the
+   * aspect into the camera projection, which is a renderer change.
+   */
+  transform: scaleX(var(--viewport-par, 1));
+  transform-origin: 50% 50%;
+}
+
+/*
+ * Wireframe / bounding-box display modes hide the shaded picture and let the
+ * overlay's line work stand alone. `visibility`, not `display`, so the WebGL
+ * context is never torn down and re-created by a mode switch.
+ */
+.canvasHidden {
+  visibility: hidden;
 }
 
 .canvas {
@@ -226,3 +252,53 @@
 }
 .infoBar span { white-space: nowrap; }
 .infoHighlight { color: var(--color-text-secondary); }
+
+/* ── Multi-view geometry ────────────────────────────────────────────
+ *
+ * 1-up / 2-up / 4-up used to be four inline style objects in Workspace.tsx,
+ * carrying a `QUAD_DIVIDER` border string and six `'50%'` literals. Every one
+ * of them was layout, which is this file's job — and the border string had to
+ * repeat `var(--color-border)` with a hardcoded fallback because it lived in
+ * JS, where a missing token cannot be caught by the `cssTokens` guard.
+ *
+ * The interactive stage yields space to the view-only panes; `useWorkspace`'s
+ * ResizeObserver on the stage re-fits the comp to the smaller rect on its own,
+ * so there is no matching change in the TSX beyond the class name.
+ */
+.stage2up {
+  right: 50%;
+}
+
+.stage4up {
+  right: 50%;
+  bottom: 50%;
+}
+
+/* Cells 1–3 of the 2×2 grid (the stage is cell 0, top-left). Dividers are
+ * borders on the right-column / bottom-row cells only, so no edge doubles. */
+.quadTopRight {
+  top: 0;
+  bottom: 50%;
+  left: 50%;
+  right: 0;
+  border-left: 1px solid var(--color-border);
+  border-bottom: none;
+}
+
+.quadBottomLeft {
+  top: 50%;
+  bottom: 0;
+  left: 0;
+  right: 50%;
+  border-left: none;
+  border-top: 1px solid var(--color-border);
+}
+
+.quadBottomRight {
+  top: 50%;
+  bottom: 0;
+  left: 50%;
+  right: 0;
+  border-left: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
+}

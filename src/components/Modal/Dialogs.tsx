@@ -1,28 +1,43 @@
+/**
+ * The three stock dialogs — `customConfirm`, `customAlert`, `customPrompt` —
+ * as promises over `openModal`.
+ *
+ * Their footers are the modal's own footer slot, built from `DialogFooter`
+ * (secondary left, destructive left in red, primary right), and Enter is the
+ * modal's Enter-to-confirm — nothing here hand-rolls button order or a key
+ * handler. The prompt registers its confirm with `useDialogPrimaryAction`
+ * because the value lives in its body.
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { openModal } from '@stores/modalStore';
 import { Button } from '@components/Button';
 import { Input } from '@components/Input';
-import { Icon } from '@components/Icon';
+import { Icon, type IconName } from '@components/Icon';
+import { cn } from '@utils/cn';
+import { useDialogPrimaryAction } from './Modal';
+// TODO(ds): DialogFooter is being added by the design-system pass; this file
+// consumes it with the `secondary` / `destructive` / `primary` slot API.
+import { DialogFooter } from './DialogFooter';
+import styles from './Dialogs.module.css';
+
+function DialogTitle({ icon, danger, children }: { icon: IconName; danger?: boolean; children: string }): JSX.Element {
+  return (
+    <div className={styles.titleRow}>
+      <Icon name={icon} size="sm" className={cn(styles.titleIcon, danger && styles.titleIconDanger)} />
+      <span>{children}</span>
+    </div>
+  );
+}
 
 interface PromptDialogContentProps {
   message: string;
   defaultValue: string;
   placeholder?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
   onSubmit: (value: string) => void;
-  onCancel: () => void;
 }
 
-function PromptDialogContent({
-  message,
-  defaultValue,
-  placeholder,
-  confirmLabel = 'OK',
-  cancelLabel = 'Cancel',
-  onSubmit,
-  onCancel,
-}: PromptDialogContentProps) {
+function PromptDialogContent({ message, defaultValue, placeholder, onSubmit }: PromptDialogContentProps): JSX.Element {
   const [val, setVal] = useState(defaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -33,31 +48,20 @@ function PromptDialogContent({
     }
   }, []);
 
+  // Enter in the field submits the CURRENT value — the modal's Enter handler
+  // reaches this through the registration rather than a keydown of its own.
+  useDialogPrimaryAction(() => onSubmit(val));
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)', margin: 0, lineHeight: 'var(--line-height-normal)' }}>
-        {message}
-      </p>
+    <div className={styles.stack}>
+      <p className={styles.message}>{message}</p>
       <Input
         ref={inputRef}
         fullWidth
         value={val}
         onChange={(e) => setVal(e.target.value)}
         placeholder={placeholder}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            onSubmit(val);
-          }
-        }}
       />
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '4px' }}>
-        <Button variant="ghost" onClick={onCancel}>
-          {cancelLabel}
-        </Button>
-        <Button variant="primary" onClick={() => onSubmit(val)}>
-          {confirmLabel}
-        </Button>
-      </div>
     </div>
   );
 }
@@ -70,14 +74,14 @@ export function customConfirm(
   const { confirmLabel = 'Confirm', cancelLabel = 'Cancel', isDanger = false } = options ?? {};
   return new Promise((resolve) => {
     let resolved = false;
+    const settle = (value: boolean, close: () => void): void => {
+      resolved = true;
+      close();
+      resolve(value);
+    };
 
     openModal({
-      title: (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Icon name={isDanger ? 'warning' : 'info'} size="sm" style={{ color: isDanger ? 'var(--color-danger)' : 'var(--color-primary)' }} />
-          <span>{title}</span>
-        </div>
-      ),
+      title: <DialogTitle icon={isDanger ? 'warning' : 'info'} danger={isDanger}>{title}</DialogTitle>,
       size: 'sm',
       persistent: true,
       onClose: () => {
@@ -86,35 +90,36 @@ export function customConfirm(
           resolve(false);
         }
       },
-      render: (close) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)', margin: 0, lineHeight: 'var(--line-height-normal)' }}>
-            {message}
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '4px' }}>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                resolved = true;
-                close();
-                resolve(false);
-              }}
-            >
-              {cancelLabel}
-            </Button>
-            <Button
-              variant={isDanger ? 'danger' : 'primary'}
-              onClick={() => {
-                resolved = true;
-                close();
-                resolve(true);
-              }}
-            >
-              {confirmLabel}
-            </Button>
-          </div>
+      render: () => (
+        <div className={styles.stack}>
+          <p className={styles.message}>{message}</p>
         </div>
       ),
+      footer: (close) => (
+        <DialogFooter
+          secondary={
+            <Button variant="ghost" onClick={() => settle(false, close)}>
+              {cancelLabel}
+            </Button>
+          }
+          {...(isDanger
+            ? {
+                destructive: (
+                  <Button variant="danger" onClick={() => settle(true, close)}>
+                    {confirmLabel}
+                  </Button>
+                ),
+              }
+            : {
+                primary: (
+                  <Button variant="primary" onClick={() => settle(true, close)}>
+                    {confirmLabel}
+                  </Button>
+                ),
+              })}
+        />
+      ),
+      primaryAction: (close) => settle(true, close),
     });
   });
 }
@@ -147,21 +152,18 @@ export function customAlert(
     };
 
     openModal({
-      title: (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Icon name={isDanger ? 'warning' : 'info'} size="sm" style={{ color: isDanger ? 'var(--color-danger)' : 'var(--color-primary)' }} />
-          <span>{title}</span>
-        </div>
-      ),
+      title: <DialogTitle icon={isDanger ? 'warning' : 'info'} danger={isDanger}>{title}</DialogTitle>,
       size: 'sm',
       persistent: true,
       onClose: done,
-      render: (close) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)', margin: 0, lineHeight: 'var(--line-height-normal)', whiteSpace: 'pre-wrap' }}>
-            {message}
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+      render: () => (
+        <div className={styles.stack}>
+          <p className={cn(styles.message, styles.preWrap)}>{message}</p>
+        </div>
+      ),
+      footer: (close) => (
+        <DialogFooter
+          primary={
             <Button
               variant="primary"
               onClick={() => {
@@ -171,9 +173,13 @@ export function customAlert(
             >
               {confirmLabel}
             </Button>
-          </div>
-        </div>
+          }
+        />
       ),
+      primaryAction: (close) => {
+        done();
+        close();
+      },
     });
   });
 }
@@ -187,14 +193,12 @@ export function customPrompt(
   const { placeholder = '', confirmLabel = 'OK', cancelLabel = 'Cancel' } = options ?? {};
   return new Promise((resolve) => {
     let resolved = false;
+    // The body owns the value, so the footer's OK reaches it through this
+    // latch rather than through props: the body registers its submit here.
+    let submit: (() => void) | null = null;
 
     openModal({
-      title: (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Icon name="pencil" size="sm" style={{ color: 'var(--color-primary)' }} />
-          <span>{title}</span>
-        </div>
-      ),
+      title: <DialogTitle icon="pencil">{title}</DialogTitle>,
       size: 'sm',
       persistent: true,
       onClose: () => {
@@ -204,28 +208,55 @@ export function customPrompt(
         }
       },
       render: (close) => {
-        const onSubmit = (val: string) => {
+        const onSubmit = (val: string): void => {
           resolved = true;
           close();
           resolve(val);
-        };
-        const onCancel = () => {
-          resolved = true;
-          close();
-          resolve(null);
         };
         return (
           <PromptDialogContent
             message={message}
             defaultValue={defaultValue}
             placeholder={placeholder}
-            confirmLabel={confirmLabel}
-            cancelLabel={cancelLabel}
-            onSubmit={onSubmit}
-            onCancel={onCancel}
+            onSubmit={(v) => {
+              submit = () => onSubmit(v);
+              onSubmit(v);
+            }}
           />
         );
       },
+      footer: (close) => (
+        <DialogFooter
+          secondary={
+            <Button
+              variant="ghost"
+              onClick={() => {
+                resolved = true;
+                close();
+                resolve(null);
+              }}
+            >
+              {cancelLabel}
+            </Button>
+          }
+          primary={
+            <Button variant="primary" onClick={() => submit?.() ?? clickBodySubmit()}>
+              {confirmLabel}
+            </Button>
+          }
+        />
+      ),
     });
   });
+}
+
+/**
+ * The prompt's OK button when nothing has been submitted yet: the body holds
+ * the value, so OK is the same as Enter — dispatch Enter to the focused field
+ * and let the modal's Enter-to-confirm route it to the registered action.
+ */
+function clickBodySubmit(): void {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return;
+  active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 }

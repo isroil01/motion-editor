@@ -136,10 +136,7 @@
 
 /* ── The rail ──────────────────────────────────────────────────────── */
 /*
- * The hairline sits on the rail's INNER edge, facing the pane. The active
- * tab's indicator bar overlaps it, which is what makes the tab read as
- * attached to the content it controls rather than as a button that happens
- * to be lit.
+ * The hairline sits on the rail's INNER edge, facing the pane.
  */
 .rail {
   display: flex;
@@ -216,27 +213,6 @@
 
 .railTabActive:hover {
   background: var(--color-surface-2);
-}
-
-/* The indicator: a 2px accent on the slot's inner edge, vertically centred on
-   the tab. Drawn on the SLOT, not the button, so it can sit flush against the
-   rail's hairline while the button keeps its own rounded box. */
-.railSlot:has(.railTabActive)::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 2px;
-  height: 16px;
-  transform: translateY(-50%);
-  background: var(--color-primary);
-  border-radius: 0 1px 1px 0;
-}
-
-.railLeft .railSlot:has(.railTabActive)::before {
-  left: auto;
-  right: 0;
-  border-radius: 1px 0 0 1px;
 }
 
 .railSpacer {
