@@ -36,6 +36,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { promises: fs, existsSync } = require('node:fs');
+const { CONTAINER_MIME, resolveEncode, wantsAlpha, encodeArgs } = require('./encode.cjs');
 
 // Deterministic software rendering, headless-safe — the same flag set the
 // golden-frame harness pins, and for the same reason: output must not depend on
@@ -183,22 +184,19 @@ function resolveFfmpeg() {
  * dimensions (yuv420p rejects odd ones), `+faststart` so the result streams
  * without a full download — which is what a social upload pipeline needs.
  */
-function encodeMp4(dir, ext, fps) {
+function encodeVideo(dir, ext, fps, output) {
   const input = path.join(dir, `frame_%04d.${ext}`);
-  const out = path.join(dir, 'out.mp4');
-  // Frames arrive already flattened onto the comp background (see
-  // `deliverableComp` in renderEntry), so there is no alpha to reconcile here
-  // and no filter beyond making the dimensions even — yuv420p rejects odd ones.
+  const { container } = resolveEncode(output);
+  const out = path.join(dir, `out.${container}`);
+  // The codec, pixel format, quality and container flags come from the same
+  // matrix motion-back uses for a frames upload (encode.cjs), so a server-side
+  // render and an editor export of one comp are the same file. Alpha rides
+  // through only when the frames are PNG — see `renderEntry`'s staging.
   const args = [
     '-y',
     '-framerate', String(fps),
     '-i', input,
-    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-    '-c:v', 'libx264',
-    '-preset', 'medium',
-    '-crf', '18',
-    '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart',
+    ...encodeArgs(output, { hasAudio: false, hasAlphaFrames: ext === 'png', fps }),
     out,
   ];
 
@@ -241,7 +239,7 @@ function cloudinaryConfig() {
  * must fail here rather than hand back something that fails validation there
  * with a less useful message.
  */
-async function uploadMp4(file, jobId) {
+async function uploadVideo(file, jobId, container) {
   const config = cloudinaryConfig();
   if (!config) {
     throw new Error('No upload target configured. Set CLOUDINARY_URL on the render worker.');
@@ -250,16 +248,19 @@ async function uploadMp4(file, jobId) {
   const publicId = `premation/automation-renders/${jobId}`;
   const toSign = `public_id=${publicId}&timestamp=${timestamp}`;
   const signature = crypto.createHash('sha1').update(toSign + config.apiSecret).digest('hex');
+  const mime = CONTAINER_MIME[container] ?? 'video/mp4';
+  // Cloudinary files animated GIF under `image`; everything else here is `video`.
+  const resourceType = container === 'gif' ? 'image' : 'video';
 
   const form = new FormData();
-  form.append('file', new Blob([await fs.readFile(file)], { type: 'video/mp4' }), 'out.mp4');
+  form.append('file', new Blob([await fs.readFile(file)], { type: mime }), `out.${container}`);
   form.append('public_id', publicId);
   form.append('timestamp', String(timestamp));
   form.append('api_key', config.apiKey);
   form.append('signature', signature);
 
   const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${config.cloudName}/video/upload`,
+    `https://api.cloudinary.com/v1_1/${config.cloudName}/${resourceType}/upload`,
     { method: 'POST', body: form },
   );
   const body = await response.json().catch(() => ({}));
@@ -281,16 +282,22 @@ async function runJob(payload) {
   const dir = path.join(os.tmpdir(), `premation-render-${jobId}-${crypto.randomUUID().slice(0, 8)}`);
   await fs.mkdir(dir, { recursive: true });
   try {
+    const output = payload.output ?? {};
+    // Refuse an impossible codec/container pair before spending a render on it.
+    const { container, codec, quality } = resolveEncode(output);
     const spec = {
       document: payload.document,
-      output: payload.output ?? {},
+      // `alpha` tells the renderer to keep the comp transparent and stage PNG.
+      // It is derived here, once, from the codec: the renderer must not have
+      // its own opinion about which containers carry alpha.
+      output: { ...output, container, codec, quality, alpha: wantsAlpha(output) },
       durationSeconds: payload.durationSeconds,
     };
     const staged = await renderToFrames(spec, dir);
     if (!staged || !staged.frames) throw new Error('The renderer staged no frames.');
-    const mp4 = await encodeMp4(dir, staged.ext, staged.fps);
-    const videoUrl = await uploadMp4(mp4, jobId);
-    return { videoUrl, renderDurationMs: Date.now() - startedAt };
+    const encoded = await encodeVideo(dir, staged.ext, staged.fps, spec.output);
+    const videoUrl = await uploadVideo(encoded, jobId, container);
+    return { videoUrl, container, codec, mime: CONTAINER_MIME[container], renderDurationMs: Date.now() - startedAt };
   } finally {
     // Frames are large and the job is over either way; a failed render that
     // leaves 900 frames behind fills the disk long before anyone reads the log.

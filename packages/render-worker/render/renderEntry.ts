@@ -72,12 +72,16 @@ function activeComp(): CompositionSettings {
  * semi-transparent pixels at full strength over black, which is not a
  * composite and does not match the preview.
  */
-function deliverableComp(comp: CompositionSettings): CompositionSettings {
+function deliverableComp(comp: CompositionSettings, alpha: boolean): CompositionSettings {
+  // When the output codec carries alpha (ProRes 4444, VP9, GIF — decided by
+  // the worker's encode matrix, never here), the comp stays transparent and
+  // the frames are staged as PNG so the channel survives to ffmpeg.
+  if (alpha) return comp.transparent ? comp : { ...comp, transparent: true };
   return comp.transparent ? { ...comp, transparent: false } : comp;
 }
 
-function encodeFrame(canvas: HTMLCanvasElement): string {
-  const url = canvas.toDataURL('image/jpeg', 0.94);
+function encodeFrame(canvas: HTMLCanvasElement, ext: 'jpg' | 'png'): string {
+  const url = ext === 'png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.94);
   const comma = url.indexOf(',');
   if (comma < 0) throw new Error('canvas.toDataURL produced no payload');
   return url.slice(comma + 1);
@@ -107,11 +111,13 @@ async function main(): Promise<void> {
       throw new Error(`Refusing to render a ${durationSec}s composition.`);
     }
 
+    const alpha = Boolean((spec.output as { alpha?: boolean } | undefined)?.alpha);
+    const ext: 'jpg' | 'png' = alpha ? 'png' : 'jpg';
     let staged = 0;
     const frames = await renderOffline(
-      { width, height, fps, durationSec, comp: deliverableComp(comp) },
+      { width, height, fps, durationSec, comp: deliverableComp(comp, alpha) },
       async (canvas, frame, total) => {
-        await window.renderBridge.frame(frame, encodeFrame(canvas), 'jpg');
+        await window.renderBridge.frame(frame, encodeFrame(canvas, ext), ext);
         staged += 1;
         window.renderBridge.progress(staged, total);
       },
@@ -123,7 +129,7 @@ async function main(): Promise<void> {
     if (staged !== frames) {
       throw new Error(`Staged ${staged} of ${frames} frames.`);
     }
-    await window.renderBridge.done({ frames, ext: 'jpg', fps });
+    await window.renderBridge.done({ frames, ext, fps });
   } catch (err) {
     await window.renderBridge.done(null, (err as Error)?.stack ?? String(err));
   }

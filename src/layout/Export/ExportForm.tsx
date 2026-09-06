@@ -35,6 +35,8 @@ import { compSizeOf } from '@core/composition/compSizes';
 import { openHelp } from '@layout/Help/openHelp';
 import { ExportPreview } from './ExportPreview';
 import { useExportFormStore } from './exportFormStore';
+import { loadRenderCapabilities, renderOnServer, serverEncodeFor, serverRenderAvailable } from './cloudRender';
+import type { RenderCapabilities } from '@core/api/client';
 import styles from './ExportDialog.module.css';
 import { useState } from 'react';
 
@@ -125,6 +127,13 @@ export interface ExportModel {
   /** Queue the current choices; returns true when a job was added. */
   queueJob: () => boolean;
   cancel: () => void;
+  /**
+   * Render on the server, when this deployment has a render worker and the
+   * project lives in the cloud. `null` when the option does not apply — the
+   * hosts render no button rather than a disabled one, because "why is this
+   * greyed out" has three different answers and none fits a tooltip.
+   */
+  serverRender: { label: string; run: () => Promise<void> } | null;
 }
 
 /**
@@ -296,7 +305,33 @@ export function useExportModel(duration: number, fps: number): ExportModel {
     useExportFormStore.getState().abort?.abort();
   }, []);
 
-  return { busy, progress, showQueue: QUEUEABLE.has(format), outputName, activePreset, doExport, queueJob, cancel };
+  // Server rendering: a deployment fact, read once. Nothing here blocks the
+  // form — the button simply appears when the answer comes back positive.
+  const [caps, setCaps] = useState<RenderCapabilities | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadRenderCapabilities().then((c) => { if (alive) setCaps(c); });
+    return () => { alive = false; };
+  }, []);
+  const serverEncode = serverEncodeFor(format, quality, proresProfile, caps);
+  const serverRender = useMemo(() => {
+    if (!serverRenderAvailable(caps) || !serverEncode) return null;
+    return {
+      label: `Render on server (${serverEncode.codec === 'prores4444' ? 'ProRes 4444' : serverEncode.codec.toUpperCase()})`,
+      run: () =>
+        renderOnServer({
+          encode: serverEncode,
+          width,
+          height,
+          fps,
+          duration,
+          transparent: alpha,
+          outputName,
+        }),
+    };
+  }, [caps, serverEncode, width, height, fps, duration, alpha, outputName]);
+
+  return { busy, progress, showQueue: QUEUEABLE.has(format), outputName, activePreset, doExport, queueJob, cancel, serverRender };
 }
 
 export interface ExportFormProps {

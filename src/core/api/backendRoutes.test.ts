@@ -46,7 +46,9 @@ function normalize(path: string): string {
 function backendPaths(): Set<string> {
   const text = readFileSync(join(__dirname, '__fixtures__', 'backend-routes.txt'), 'utf8');
   const out = new Set<string>();
-  for (const line of text.split('\n')) {
+  // Tolerate CRLF: git's autocrlf rewrites the fixture on a Windows checkout.
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
     const [, path] = line.split(' ');
     if (path) out.add(normalize(path.replace(/^\/api/, '')));
