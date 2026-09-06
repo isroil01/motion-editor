@@ -18,7 +18,7 @@
  *     extractSpatialEffects routes through the GPU effect passes.
  */
 
-import { Mat3, Color, depthEligible3D, squareToQuad, isConvexQuad, isIdentityQuad, type BlendMode, type FrameScene, type Renderable, type RenderableKind, type RenderableSdf, type Quad } from '@motion/renderer';
+import { Mat3, Color, depthEligible3D, squareToQuad, isConvexQuad, isIdentityQuad, type BlendMode, type FrameScene, type FxVec4, type Renderable, type RenderableKind, type RenderableSdf, type Quad } from '@motion/renderer';
 import { Matrix4Math } from '@motion/scene';
 import type { LayerBlendMode } from '@core/effects/blendMode';
 import { effectColorMatrix, applyColorMatrix, IDENTITY_COLOR_MATRIX } from '@core/effects/effectColorMatrix';
@@ -28,8 +28,15 @@ import { readMatte } from '@core/effects/matte';
 import { effectNumber, effectParam, paramsOf, withAlpha, isGpuOnlyEffect } from '@core/effects/effects';
 import { effectById, beginEffectDraw, endEffectDraw } from '@core/plugins/pluginEffects';
 import { layerParamNames, packParameters, effectSpreadFor } from '@core/plugins/effectSchema';
-import { layerIsBaked } from '@core/effects/effectBake';
+import { layerIsBaked, cpuBakeStats } from '@core/effects/effectBake';
+import { cornerPinInverse } from '@core/effects/distort';
+import { hueOf } from '@core/effects/keyingEffects';
+import { rgbToHsl as hslOf, luma as luma709 } from '@core/effects/colorSpace';
 import { parseHex } from '@core/effects/canvas2dEffects';
+import { polarConversion } from '@core/effects/distort';
+import { COLORAMA_PALETTES } from '@core/effects/colorEffects';
+import { defaultWarpPoints, isRestWarp } from '@core/effects/bezierWarp';
+import type { WarpPoints } from '@core/effects/bezierWarp';
 import { rgbToHsl } from '@core/effects/colorSpace';
 import { rasterPadding } from './raster/vectorDraw';
 import type { RenderSnapshot, RenderLayer, RenderView } from './RenderBackend';
@@ -764,6 +771,883 @@ export function extractSpatialEffects(
           sharp: effectParam(e, 'sharpColors') === true, lw, lh,
         });
       }
+      /*
+        Round seven: the footage set — the effects a video layer most often
+        carries, each of which forced a per-frame CPU bake of the whole frame.
+
+        Gaussian Blur and Fast Box Blur ride the existing separable Gaussian
+        pass. Their CPU kernels are iterated box blurs whose radius is spread
+        over the passes (`blurRgba`: perPass = r/sqrt(n)), so the total variance
+        is r^2/3 for any iteration count — the GPU sigma is r/sqrt(3) for both.
+        `dims` (0 both, 1 horizontal, 2 vertical) selects the passes.
+      */
+      if (e.type === 'gaussian-blur' || e.type === 'fast-box-blur') {
+        const r = Math.max(0, n(e.type === 'gaussian-blur' ? 'blurriness' : 'blurRadius'));
+        if (r > 0) {
+          const dimsRaw = Math.round(n('dimensions'));
+          spatial.push({ type: e.type, radiusPx: r / Math.sqrt(3), dims: dimsRaw === 1 ? 1 : dimsRaw === 2 ? 2 : 0 });
+        }
+      }
+      if (e.type === 'radial-blur') {
+        const amount = n('amount');
+        if (amount !== 0) {
+          spatial.push({
+            type: 'radial-blur',
+            cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'),
+            amount, zoom: Math.round(n('blurType')) === 1,
+            steps: Math.max(2, Math.min(64, Math.round(n('quality') || 16))), lw, lh,
+          });
+        }
+      }
+      if (e.type === 'corner-pin') {
+        const offs = [
+          n('topLeftX'), n('topLeftY'), n('topRightX'), n('topRightY'),
+          n('bottomRightX'), n('bottomRightY'), n('bottomLeftX'), n('bottomLeftY'),
+        ];
+        // All eight at rest is the identity — skipped, like the CPU pass, so a
+        // freshly applied Corner Pin costs nothing and loses no sharpness.
+        if (offs.some((v) => v !== 0)) {
+          const inv = cornerPinInverse(lw, lh, [
+            offs[0]!, offs[1]!, lw + offs[2]!, offs[3]!, lw + offs[4]!, lh + offs[5]!, offs[6]!, lh + offs[7]!,
+          ]);
+          // A degenerate quad has no inverse; the CPU draws nothing there, and
+          // an all-zero matrix makes the shader do the same (den = 0).
+          spatial.push({ type: 'corner-pin', m: inv ?? [0, 0, 0, 0, 0, 0, 0, 0, 0], lw, lh });
+        }
+      }
+      if (e.type === 'transform') {
+        const scale = Math.max(0, n('scale')) / 100;
+        const rot = (n('rotation') * Math.PI) / 180;
+        const px = n('positionX'); const py = n('positionY');
+        const opacity = Math.max(0, Math.min(1, n('opacity') / 100));
+        if (!(scale === 1 && rot === 0 && px === 0 && py === 0 && opacity === 1)) {
+          spatial.push({ type: 'transform', px, py, scale, rot, opacity, lw, lh });
+        }
+      }
+      /*
+        Round eight: the keying set. Colours are decoded once here (bytes →
+        display sRGB 0..1) and every derived constant the CPU kernel computes
+        per call — channel layout, reference screen amount, key hue and luma,
+        projected key — is computed once here too, so the fragment does only
+        the per-pixel half.
+      */
+      if (e.type === 'keylight') {
+        const key = parseHex(String(effectParam(e, 'screenColor') ?? '#00ff00'));
+        const [kr, kg, kb] = key;
+        // `channels()`: the dominant channel is the primary, the other two secondaries.
+        let p = 0, a = 1, b = 2;
+        if (kg >= kr && kg >= kb) { p = 1; a = 0; b = 2; }
+        else if (kb >= kr && kb >= kg) { p = 2; a = 0; b = 1; }
+        const balance = Math.max(0, Math.min(1, n('balance') / 100));
+        const kv = [kr / 255, kg / 255, kb / 255];
+        const sec = balance * Math.max(kv[a]!, kv[b]!) + (1 - balance) * Math.min(kv[a]!, kv[b]!);
+        const ref = kv[p]! - sec;
+        spatial.push({
+          type: 'keylight',
+          kr: kv[0]!, kg: kv[1]!, kb: kv[2]!, balance,
+          gain: Math.max(0, n('gain') / 100),
+          clipBlack: Math.max(0, Math.min(1, n('clipBlack') / 100)),
+          clipWhite: Math.max(0, Math.min(1, n('clipWhite') / 100)),
+          despill: Math.max(0, Math.min(1, n('despill') / 100)),
+          p, a, b, denom: Math.abs(ref) < 1e-4 ? 1 : ref,
+          chokePx: Math.sign(n('choke')) * Math.min(10, Math.round(Math.abs(n('choke')))),
+          softPx: Math.min(25, Math.round(Math.max(0, n('matteSoftness')))),
+          lw, lh,
+        });
+      }
+      if (e.type === 'linear-color-key') {
+        const key = parseHex(String(effectParam(e, 'keyColor') ?? '#00ff00'));
+        spatial.push({
+          type: 'linear-color-key',
+          kr: key[0] / 255, kg: key[1] / 255, kb: key[2] / 255,
+          mode: Math.round(n('matchOn')) === 1 ? 1 : Math.round(n('matchOn')) === 2 ? 2 : 0,
+          tol: Math.max(0, Math.min(1, n('tolerance') / 100)),
+          soft: Math.max(0, Math.min(1, n('softness') / 100)),
+          keep: effectParam(e, 'keepMatched') === true,
+          keyHue: hueOf(key[0], key[1], key[2]),
+          keyLum: (0.299 * key[0] + 0.587 * key[1] + 0.114 * key[2]) / 255,
+        });
+      }
+      if (e.type === 'luma-key') {
+        spatial.push({
+          type: 'luma-key',
+          keyType: Math.max(0, Math.min(3, Math.round(n('keyType')))),
+          cut: Math.max(0, Math.min(1, n('threshold') / 255)),
+          tol: Math.max(0, n('tolerance') / 255),
+          soft: Math.max(0, n('softness') / 255),
+        });
+      }
+      if (e.type === 'color-key') {
+        const key = parseHex(String(effectParam(e, 'keyColor') ?? '#00ff00'));
+        spatial.push({
+          type: 'color-key',
+          kr: key[0] / 255, kg: key[1] / 255, kb: key[2] / 255,
+          tol: Math.max(0, Math.min(1, n('tolerance') / 100)),
+          soft: Math.max(0, Math.min(1, n('edgeSoftness') / 100)),
+        });
+      }
+      if (e.type === 'color-range') {
+        const key = parseHex(String(effectParam(e, 'keyColor') ?? '#00ff00'));
+        const mode = Math.round(n('colorSpace'));
+        const y = luma709(key[0], key[1], key[2]);
+        const proj = mode === 2
+          ? [key[0], key[1], key[2]]
+          : mode === 1
+            ? [y, (key[2] - y) * 0.565, (key[0] - y) * 0.713]
+            : [y, (key[0] - key[1]) * 0.5, (key[1] - key[2]) * 0.5];
+        const lo = Math.max(0, Math.min(1, n('minTolerance') / 100)) * 255;
+        spatial.push({
+          type: 'color-range',
+          ky: proj[0]!, ku: proj[1]!, kv: proj[2]!, mode: mode === 1 ? 1 : mode === 2 ? 2 : 0,
+          lo, hi: Math.max(lo + 1e-6, Math.max(0, Math.min(1, n('maxTolerance') / 100)) * 255),
+          wl: Math.max(0, Math.min(1, n('lumaWeight') / 100)),
+        });
+      }
+      if (e.type === 'extract') {
+        spatial.push({
+          type: 'extract',
+          channel: Math.round(n('extractChannel')),
+          black: n('blackPoint'), white: n('whitePoint'),
+          blackSoft: n('blackSoftness'), whiteSoft: n('whiteSoftness'),
+          invert: effectParam(e, 'invertExtract') === true,
+        });
+      }
+      if (e.type === 'spill-suppressor') {
+        const strength = Math.max(0, Math.min(1, n('amount') / 100));
+        if (strength > 0) {
+          const key = parseHex(String(effectParam(e, 'keyColor') ?? '#00ff00'));
+          spatial.push({
+            type: 'spill-suppressor',
+            keyHue: hslOf(key[0], key[1], key[2])[0],
+            strength,
+            preserveLuma: effectParam(e, 'preserveLuma') !== false,
+          });
+        }
+      }
+      if (e.type === 'simple-choker') {
+        const choke = n('chokeAmount');
+        const radius = Math.round(Math.abs(choke));
+        if (radius > 0) spatial.push({ type: 'simple-choker', radius, erode: choke > 0, lw, lh });
+      }
+      if (e.type === 'matte-choker') {
+        const spread = Math.max(0, n('spread')); const choke = Math.max(0, n('choke')); const softness = Math.max(0, n('softness'));
+        if (spread > 0 || choke > 0 || softness > 0) {
+          spatial.push({
+            type: 'matte-choker', spread, choke, softness,
+            iterations: Math.max(1, Math.min(5, Math.round(n('iterations') || 1))), lw, lh,
+          });
+        }
+      }
+      if (e.type === 'wave-warp') {
+        const height = n('waveHeight');
+        const width = Math.max(2, n('waveWidth'));
+        if (height !== 0) {
+          const dir = (n('direction') * Math.PI) / 180;
+          spatial.push({
+            type: 'wave-warp',
+            dx: Math.cos(dir), dy: Math.sin(dir),
+            k: (Math.PI * 2) / width, phase: (n('phase') * Math.PI) / 180,
+            height, lw, lh,
+          });
+        }
+      }
+      /*
+        Round nine: the per-pixel colour, channel and transition set. Byte
+        params stay in bytes where the kernel compares bytes (Alpha Levels);
+        colours decode to 0..1; angles to radians; the HSL of every target
+        colour is taken here once, as the kernels take it once per call.
+      */
+      if (e.type === 'directional-blur') {
+        const length = Math.max(0, n('length'));
+        if (length >= 1) {
+          const rad = (n('direction') * Math.PI) / 180;
+          spatial.push({ type: 'directional-blur', dx: Math.cos(rad), dy: Math.sin(rad), length, steps: Math.max(1, Math.min(64, Math.round(length))), lw, lh });
+        }
+      }
+      if (e.type === 'linear-wipe') {
+        const completion = Math.max(0, Math.min(100, n('completion'))) / 100;
+        if (completion > 0) {
+          const rad = (n('wipeAngle') * Math.PI) / 180;
+          const span = Math.abs(lw * Math.cos(rad)) + Math.abs(lh * Math.sin(rad));
+          spatial.push({
+            type: 'linear-wipe', gx: Math.cos(rad), gy: Math.sin(rad),
+            pos: -span / 2 + completion * span, soft: Math.max(Math.max(0, n('feather')), 0.01),
+            full: completion >= 1, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'shift-channels') {
+        const src = (k: string): number => Math.max(0, Math.min(6, Math.round(n(k))));
+        spatial.push({ type: 'shift-channels', a: src('takeAlphaFrom'), r: src('takeRedFrom'), g: src('takeGreenFrom'), b: src('takeBlueFrom') });
+      }
+      if (e.type === 'alpha-levels') {
+        spatial.push({
+          type: 'alpha-levels', inBlack: n('inBlack'), span: Math.max(1e-6, n('inWhite') - n('inBlack')),
+          invGamma: 1 / Math.max(1e-3, n('gamma') || 1), outBlack: n('outBlack'), outWhite: n('outWhite'),
+        });
+      }
+      if (e.type === 'solid-composite') {
+        const col = parseHex(String(effectParam(e, 'solidColor') ?? '#000000'));
+        spatial.push({
+          type: 'solid-composite', cr: col[0] / 255, cg: col[1] / 255, cb: col[2] / 255,
+          so: Math.max(0, Math.min(1, n('sourceOpacity') / 100)), co: Math.max(0, Math.min(1, n('solidOpacity') / 100)),
+          mode: Math.round(n('compositeMode')),
+        });
+      }
+      if (e.type === 'channel-combiner') {
+        spatial.push({ type: 'channel-combiner', mode: Math.round(n('combinerMode')) });
+      }
+      if (e.type === 'remove-color-matting') {
+        const strength = Math.max(0, Math.min(1, n('amount') / 100));
+        if (strength > 0) {
+          const bgc = parseHex(String(effectParam(e, 'backgroundColor') ?? '#000000'));
+          spatial.push({ type: 'remove-color-matting', br: bgc[0] / 255, bg: bgc[1] / 255, bb: bgc[2] / 255, floor: Math.max(0, Math.min(1, n('threshold') / 100)), strength });
+        }
+      }
+      if (e.type === 'change-color') {
+        const tgt = parseHex(String(effectParam(e, 'targetColor') ?? '#ff0000'));
+        const [th, ts, tl] = hslOf(tgt[0], tgt[1], tgt[2]);
+        spatial.push({
+          type: 'change-color', th, ts, tl,
+          hT: Math.max(0, Math.min(1, n('hueTolerance') / 100)) * 0.5,
+          sT: Math.max(0, Math.min(1, n('satTolerance') / 100)), lT: Math.max(0, Math.min(1, n('lightTolerance') / 100)),
+          soft: Math.max(0, Math.min(1, n('softness') / 100)),
+          hueShift: n('hueShift') / 360, satScale: n('satScale') / 100, lightScale: n('lightScale') / 100,
+          invert: effectParam(e, 'invertSelection') === true,
+        });
+      }
+      if (e.type === 'change-to-color') {
+        const from = parseHex(String(effectParam(e, 'fromColor') ?? '#ff0000'));
+        const to = parseHex(String(effectParam(e, 'toColor') ?? '#0055ff'));
+        const [fh, fs, fl] = hslOf(from[0], from[1], from[2]);
+        const [dh, ds, dl] = hslOf(to[0], to[1], to[2]);
+        spatial.push({
+          type: 'change-to-color', fh, fs, fl,
+          hT: Math.max(0, Math.min(1, n('hueTolerance') / 100)) * 0.5,
+          sT: Math.max(0, Math.min(1, n('satTolerance') / 100)), lT: Math.max(0, Math.min(1, n('lightTolerance') / 100)),
+          soft: Math.max(0, Math.min(1, n('softness') / 100)),
+          preserve: effectParam(e, 'preserveLightness') !== false, dh, ds, dl,
+        });
+      }
+      if (e.type === 'leave-color') {
+        const strength = Math.max(0, Math.min(1, n('amount') / 100));
+        if (strength > 0) {
+          const tgt = parseHex(String(effectParam(e, 'targetColor') ?? '#ff0000'));
+          spatial.push({
+            type: 'leave-color', th: hslOf(tgt[0], tgt[1], tgt[2])[0],
+            tol: Math.max(0, Math.min(1, n('tolerance') / 100)) * 0.5, soft: Math.max(0, Math.min(1, n('softness') / 100)), strength,
+          });
+        }
+      }
+      if (e.type === 'toner') {
+        const k = Math.max(0, Math.min(1, 1 - n('blend') / 100));
+        if (k > 0) {
+          const stops: number[] = [];
+          for (const [key, dflt] of [['blackTone', '#000000'], ['shadowTone', '#2a2a45'], ['midTone', '#8a7a63'], ['highlightTone', '#e8d9b8'], ['whiteTone', '#ffffff']] as const) {
+            const c3 = parseHex(String(effectParam(e, key) ?? dflt));
+            stops.push(c3[0] / 255, c3[1] / 255, c3[2] / 255);
+          }
+          spatial.push({ type: 'toner', stops, k });
+        }
+      }
+      if (e.type === 'venetian-blinds') {
+        const t = Math.max(0, Math.min(1, n('completion') / 100));
+        if (t > 0) {
+          const rad = (n('direction') * Math.PI) / 180;
+          const pitch = Math.max(1, n('width'));
+          spatial.push({ type: 'venetian-blinds', cos: Math.cos(rad), sin: Math.sin(rad), pitch, half: (pitch * t) / 2, soft: Math.max(0, n('feather')), full: t >= 1, lw, lh });
+        }
+      }
+      if (e.type === 'radial-wipe') {
+        const t = Math.max(0, Math.min(1, n('completion') / 100));
+        if (t > 0) {
+          const TAU = Math.PI * 2;
+          const dirRaw = n('wipe');
+          const dir = dirRaw >= 2 ? 2 : dirRaw >= 1 ? 1 : 0;
+          spatial.push({
+            type: 'radial-wipe', cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'),
+            start: ((n('startAngle') * Math.PI) / 180) % TAU, swept: (dir === 2 ? t / 2 : t) * TAU,
+            dir, soft: Math.max(0, (n('feather') * Math.PI) / 180), lw, lh,
+          });
+        }
+      }
+      if (e.type === 'iris-wipe') {
+        const invert = effectParam(e, 'invertIris') === true;
+        const completion = n('completion');
+        if (completion > 0 || invert) {
+          const t = Math.max(0, Math.min(1, completion / 100));
+          const cx = lw / 2 + n('centerX'); const cy = lh / 2 + n('centerY');
+          const maxR = Math.hypot(Math.max(cx, lw - cx), Math.max(cy, lh - cy)) || 1;
+          const outer = t * maxR;
+          const useInner = effectParam(e, 'useInnerRadius') === true;
+          spatial.push({
+            type: 'iris-wipe', cx, cy, outer, inner: useInner ? Math.min(outer, n('innerRadius')) : 0,
+            points: Math.round(n('irisPoints')), rot: (n('rotation') * Math.PI) / 180,
+            feath: Math.max(1e-3, n('feather')), useInner, invert, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'line-sweep') {
+        const invert = effectParam(e, 'invertSweep') === true;
+        const completion = n('completion');
+        if (completion > 0 || invert) {
+          const a = (n('angle') * Math.PI) / 180;
+          spatial.push({
+            type: 'line-sweep', nx: Math.cos(a), ny: Math.sin(a),
+            n: Math.max(1, Math.min(512, Math.round(n('lineCount')))), stag: Math.max(0, Math.min(1, n('stagger') / 100)),
+            feath: Math.max(1e-3, n('feather') / 100), t: Math.max(0, Math.min(1, completion / 100)), invert, lw, lh,
+          });
+        }
+      }
+      /*
+        Round ten: separable neighbourhood passes and drawn generators.
+        Box radii become Gaussian sigmas where the GPU reuses the Gaussian
+        pass: one box pass of radius r has variance r(r+1)/3; three passes of
+        r/√3 sum to r²/3 (see round seven).
+      */
+      if (e.type === 'channel-blur') {
+        const rr = Math.max(0, Math.round(n('redBlurriness'))); const rg = Math.max(0, Math.round(n('greenBlurriness')));
+        const rb = Math.max(0, Math.round(n('blueBlurriness'))); const ra = Math.max(0, Math.round(n('alphaBlurriness')));
+        if (rr > 0 || rg > 0 || rb > 0 || ra > 0) {
+          const dimsRaw = Math.round(n('dimensions'));
+          spatial.push({ type: 'channel-blur', r: rr, g: rg, b: rb, a: ra, dims: dimsRaw === 1 ? 1 : dimsRaw === 2 ? 2 : 0, repeatEdge: effectParam(e, 'repeatEdge') === true, lw, lh });
+        }
+      }
+      if (e.type === 'minimax') {
+        const radius = Math.max(0, Math.round(n('radius')));
+        if (radius > 0) {
+          const ch = Math.round(n('channel'));
+          const dirRaw = n('direction');
+          spatial.push({
+            type: 'minimax', op: Math.max(0, Math.min(3, Math.round(n('operation')))), radius,
+            mask: ch === 1 ? 7 : ch === 2 ? 1 : ch === 3 ? 2 : ch === 4 ? 4 : 8,
+            dir: dirRaw >= 2 ? 2 : dirRaw >= 1 ? 1 : 0, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'unsharp-mask') {
+        const amount = n('amount'); const radius = n('radius');
+        if (amount > 0 && radius > 0) {
+          spatial.push({ type: 'unsharp-mask', amount: amount / 100, threshold: Math.max(0, n('threshold')) / 255, sigmaPx: radius / Math.sqrt(3) });
+        }
+      }
+      if (e.type === 'shadow-highlight') {
+        const sa = n('shadowAmount') / 100; const ha = n('highlightAmount') / 100;
+        if (sa !== 0 || ha !== 0) {
+          const r = Math.max(0, n('radius'));
+          spatial.push({ type: 'shadow-highlight', shadow: sa, highlight: ha, invWidth: 1 / Math.max(0.01, n('tonalWidth') / 100), sigmaPx: Math.sqrt((r * (r + 1)) / 3) });
+        }
+      }
+      if (e.type === 'checkerboard') {
+        const opacity = Math.min(1, n('opacity') / 100);
+        if (opacity > 0) {
+          const sizeW = Math.max(1, n('width')); const sizeH = Math.max(1, n('height'));
+          const ax = n('anchorX'); const ay = n('anchorY');
+          const unit = (c: readonly [number, number, number]): readonly [number, number, number] => [c[0] / 255, c[1] / 255, c[2] / 255];
+          spatial.push({
+            type: 'checkerboard', sizeW, sizeH,
+            startX: -sizeW + (((ax % sizeW) + sizeW) % sizeW), startY: -sizeH + (((ay % sizeH) + sizeH) % sizeH),
+            colA: unit(parseHex(String(effectParam(e, 'colorA') ?? '#000000'))), colB: unit(parseHex(String(effectParam(e, 'colorB') ?? '#ffffff'))),
+            opacity, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'grid') {
+        const thickness = Math.max(0, n('thickness')); const opacity = Math.min(1, n('opacity') / 100);
+        if (thickness > 0 && opacity > 0) {
+          const pitchX = Math.max(1, n('width')); const pitchY = Math.max(1, n('height'));
+          const gc = parseHex(String(effectParam(e, 'color') ?? '#ffffff'));
+          spatial.push({
+            type: 'grid', pitchX, pitchY,
+            offX: ((n('anchorX') % pitchX) + pitchX) % pitchX, offY: ((n('anchorY') % pitchY) + pitchY) % pitchY,
+            thickness, snap: Math.round(thickness) % 2 === 1 ? 0.5 : 0, opacity,
+            color: [gc[0] / 255, gc[1] / 255, gc[2] / 255], lw, lh,
+          });
+        }
+      }
+      if (e.type === 'four-color-gradient') {
+        const blend = Math.max(0, Math.min(1, n('blend') / 100));
+        if (blend > 0) {
+          const unit = (k: string, d: string): readonly [number, number, number] => { const c3 = parseHex(String(effectParam(e, k) ?? d)); return [c3[0] / 255, c3[1] / 255, c3[2] / 255]; };
+          spatial.push({ type: 'four-color-gradient', tl: unit('colorTL', '#ff0000'), tr: unit('colorTR', '#00ff00'), bl: unit('colorBL', '#0000ff'), br: unit('colorBR', '#ffff00'), blend, lw, lh });
+        }
+      }
+      if (e.type === 'circle') {
+        const radius = Math.max(0, n('radius')); const opacity = Math.max(0, Math.min(1, n('opacity') / 100));
+        if (radius > 0 && opacity > 0) {
+          const cc = parseHex(String(effectParam(e, 'color') ?? '#ffffff'));
+          spatial.push({
+            type: 'circle', cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), radius,
+            feather: Math.max(0, Math.min(radius, n('feather'))), thickness: Math.max(0, n('thickness')), opacity,
+            invert: effectParam(e, 'invertCircle') === true, composite: Math.round(n('composite')),
+            color: [cc[0] / 255, cc[1] / 255, cc[2] / 255], lw, lh,
+          });
+        }
+      }
+      if (e.type === 'ellipse') {
+        const rx = Math.max(0, n('ellipseWidth') / 2); const ry = Math.max(0, n('ellipseHeight') / 2);
+        const opacity = Math.max(0, Math.min(1, n('opacity') / 100));
+        if (rx > 0 && ry > 0 && opacity > 0) {
+          const ec = parseHex(String(effectParam(e, 'color') ?? '#ffffff'));
+          spatial.push({
+            type: 'ellipse', cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), rx, ry,
+            rot: (n('rotation') * Math.PI) / 180, thickness: Math.max(0.5, n('thickness')), softness: Math.max(0, n('softness')), opacity,
+            composite: Math.round(n('composite')), color: [ec[0] / 255, ec[1] / 255, ec[2] / 255], lw, lh,
+          });
+        }
+      }
+      /*
+        Round eleven: the advanced distort / transition / stylize set. Each
+        block mirrors its Canvas2D wrapper's early-outs and precomputes what
+        the kernel precomputes, so the shader receives the kernel's own
+        constants. A box radius r becomes a Gaussian sigma sqrt(r(r+1)/3).
+      */
+      const rad = (deg: number): number => (deg * Math.PI) / 180;
+      const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+      const boxSigma = (r: number): number => (r > 0 ? Math.sqrt((r * (r + 1)) / 3) : 0);
+      const unit3 = (k: string, d: string): readonly [number, number, number] => { const c3 = parseHex(String(effectParam(e, k) ?? d)); return [c3[0] / 255, c3[1] / 255, c3[2] / 255]; };
+      if (e.type === 'polar-coordinates') {
+        const interp = n('interpolation');
+        if (interp > 0) spatial.push({ type: 'polar-coordinates', t: clamp01(interp / 100), conv: polarConversion(n('conversion')) === 'polar-to-rect' ? 1 : 0, lw, lh });
+      }
+      if (e.type === 'optics-compensation') {
+        const fov = Math.max(0, Math.min(180, n('fieldOfView')));
+        if (fov > 0) {
+          spatial.push({
+            type: 'optics-compensation', k: Math.tan((fov * Math.PI) / 360) * 0.5, reverse: effectParam(e, 'reverse') === true,
+            cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), norm: Math.hypot(lw / 2, lh / 2) || 1, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'warp') {
+        const bend = n('bend') / 100; const h = n('horizontalDistortion'); const v = n('verticalDistortion');
+        if (bend !== 0 || h !== 0 || v !== 0) spatial.push({ type: 'warp', style: Math.round(n('style')), bend, h, v, vert: Math.round(n('warpAxis')) === 1, lw, lh });
+      }
+      if (e.type === 'page-turn') {
+        const amount = n('amount');
+        if (amount > 0) {
+          const t = clamp01(amount / 100); const a = rad(n('angle')); const nx = Math.cos(a); const ny = Math.sin(a);
+          const diag = Math.abs(lw * nx) + Math.abs(lh * ny);
+          spatial.push({
+            type: 'page-turn', nx, ny, foldAt: (1 - t) * diag - (lw * nx + lh * ny) / 2, rad: Math.max(1, n('curlRadius')),
+            backA: clamp01(n('backOpacity') / 100), shade: clamp01(n('shading') / 100), lw, lh,
+          });
+        }
+      }
+      if (e.type === 'split') {
+        const offset = n('splitOffset');
+        if (offset !== 0) {
+          const a = rad(n('angle'));
+          spatial.push({ type: 'split', nx: Math.cos(a), ny: Math.sin(a), cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), half: offset / 2, lw, lh });
+        }
+      }
+      if (e.type === 'slant') {
+        const slant = n('slant');
+        if (slant !== 0) spatial.push({ type: 'slant', slant, vert: Math.round(n('slantAxis')) === 1, anchor: clamp01(n('floor')), lw, lh });
+      }
+      if (e.type === 'smear') {
+        const vx = n('toX') - n('fromX'); const vy = n('toY') - n('fromY'); const radius = n('radius');
+        if ((vx !== 0 || vy !== 0) && radius > 0) {
+          spatial.push({ type: 'smear', fx: lw / 2 + n('fromX'), fy: lh / 2 + n('fromY'), vx, vy, radius, el: Math.max(0.1, n('elasticity') / 100), lw, lh });
+        }
+      }
+      if (e.type === 'rolling-shutter') {
+        const sweep = n('sweep'); const wobble = n('wobble');
+        if (sweep !== 0 || wobble !== 0) {
+          spatial.push({ type: 'rolling-shutter', sweep, wobble, flip: Math.round(n('scanDirection')) === 1, vertical: effectParam(e, 'verticalScan') === true, lw, lh });
+        }
+      }
+      if (e.type === 'radial-shadow') {
+        const op = n('shadowOpacity');
+        if (op > 0) {
+          const softness = n('softness');
+          spatial.push({
+            type: 'radial-shadow', lx: lw / 2 + n('lightX'), ly: lh / 2 + n('lightY'), proj: 1 + Math.max(0, n('projection')) / 100,
+            color: unit3('shadowColor', '#000000'), op: clamp01(op / 100), sigmaPx: softness > 0 ? boxSigma(Math.max(1, Math.round(softness))) : 0,
+            shadowOnly: Math.round(n('renderMode')) === 1, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'flo-motion') {
+        const k1a = n('knot1Amount') / 100; const k2a = n('knot2Amount') / 100;
+        if (k1a !== 0 || k2a !== 0) {
+          const sigma = Math.max(4, (n('falloff') / 100) * Math.min(lw, lh));
+          spatial.push({
+            type: 'flo-motion', k1x: lw / 2 + n('knot1X'), k1y: lh / 2 + n('knot1Y'), k1a, k2x: lw / 2 + n('knot2X'), k2y: lh / 2 + n('knot2Y'), k2a,
+            twoSigma2: 2 * sigma * sigma, reachOverSigma: 1.2, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'lens') {
+        const ballR = Math.max(4, (n('size') / 100) * (Math.min(lw, lh) / 2));
+        const halfDiag = Math.hypot(lw, lh) / 2;
+        spatial.push({ type: 'lens', cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), ballR, pull: ballR + (halfDiag - ballR) * clamp01(n('convergence') / 100), lw, lh });
+      }
+      if (e.type === 'griddler') {
+        const r = rad(n('rotation'));
+        spatial.push({ type: 'griddler', tile: Math.max(4, n('tileSize')), sx: Math.max(0.01, n('horizontalScale') / 100), sy: Math.max(0.01, n('verticalScale') / 100), cosR: Math.cos(r), sinR: Math.sin(r), lw, lh });
+      }
+      if (e.type === 'ball-action') {
+        const g = Math.max(4, n('grid'));
+        spatial.push({ type: 'ball-action', g, R: Math.max(0.01, (g / 2) * clamp01(n('ballSize') / 100)), jit: (n('scatter') / 100) * g * 0.5, seed: Math.floor(n('seed')), lw, lh });
+      }
+      if (e.type === 'drizzle') {
+        const count = Math.round(clamp01(n('dripRate') / 100) * 30); const amp = n('rippleHeight');
+        if (n('dripRate') > 0 && count > 0 && amp > 0) {
+          const spread = Math.max(8, n('spreading')); const bandW = Math.max(3, spread * 0.08);
+          spatial.push({ type: 'drizzle', n: count, spread, bandW, freq: Math.PI / (bandW * 0.6), evolution: n('evolution'), seed: Math.floor(n('seed')), amp, lw, lh });
+        }
+      }
+      if (e.type === 'jaws') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          const a = rad(n('direction')); const ux = Math.cos(a); const uy = Math.sin(a);
+          const extent = Math.abs(-uy * lw) / 2 + Math.abs(ux * lh) / 2;
+          const th = n('teethHeight');
+          spatial.push({ type: 'jaws', ux, uy, sep: t >= 1 ? 1e6 : t * (extent + th), tw: Math.max(2, n('teethWidth')), th: Math.max(1, th), lw, lh });
+        }
+      }
+      if (e.type === 'pixel-polly') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          const cell = Math.max(4, n('cellSize'));
+          spatial.push({
+            type: 'pixel-polly', t, cell, fx: lw / 2 + n('centerX'), fy: lh / 2 + n('centerY'), maxFly: Math.hypot(lw, lh) * 0.7,
+            grav: (n('gravity') / 100) * lh * 0.8, spin: rad(n('spin')), seed: Math.floor(n('seed')), fade: t < 0.6 ? 1 : Math.max(0, 1 - (t - 0.6) / 0.4),
+            cols: Math.ceil(lw / cell), lw, lh,
+          });
+        }
+      }
+      if (e.type === 'twister') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) spatial.push({ type: 'twister', t, axisY: lh / 2 + n('centerY'), twist: rad(n('twist')), lw, lh });
+      }
+      if (e.type === 'card-dance') {
+        const amt = clamp01(n('amount') / 100);
+        if (amt > 0) {
+          spatial.push({
+            type: 'card-dance', rows: Math.max(1, Math.round(n('rows'))), cols: Math.max(1, Math.round(n('columns'))), amt,
+            rot: rad(n('cardRotation')), phase: n('phase'), maxOff: Math.min(lw, lh) * 0.4, lw, lh,
+          });
+        }
+      }
+      if (e.type === 'unmult') {
+        spatial.push({ type: 'unmult', thresh: Math.max(0, Math.min(0.99, n('threshold') / 100)), boost: Math.max(0.1, n('boost') / 100) });
+      }
+      if (e.type === 'cc-composite') {
+        const op = n('opacity');
+        if (op > 0) spatial.push({ type: 'cc-composite', mix: clamp01(op / 100), mode: Math.max(0, Math.min(10, Math.round(n('blendMode')))), rgbOnly: effectParam(e, 'rgbOnly') === true });
+      }
+      if (e.type === 'cc-scatterize') {
+        const amount = n('amount');
+        if (amount > 0.001) spatial.push({ type: 'cc-scatterize', amt: amount * 0.5, twist: rad(n('twist')), windX: n('windX'), windY: n('windY'), seed: Math.floor(n('seed')), lw, lh });
+      }
+      if (e.type === 'radial-fast-blur') {
+        const amount = n('amount');
+        if (amount > 0.01) spatial.push({ type: 'radial-fast-blur', cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), amt: (amount / 100) * 0.8, mode: Math.max(0, Math.min(2, Math.round(n('zoomMode')))), lw, lh });
+      }
+      if (e.type === 'cross-blur') {
+        const rx = Math.max(0, Math.round(n('radiusX'))); const ry = Math.max(0, Math.round(n('radiusY')));
+        if (rx > 0 || ry > 0) {
+          const rep = effectParam(e, 'repeatEdges');
+          spatial.push({ type: 'cross-blur', rx, ry, repeatEdge: rep === undefined ? true : rep === true, lw, lh });
+        }
+      }
+      if (e.type === 'scale-wipe') {
+        const comp = clamp01(n('completion') / 100);
+        if (comp > 0.001) {
+          const a = rad(n('direction')); const maxDist = Math.hypot(lw, lh);
+          spatial.push({ type: 'scale-wipe', cx: lw / 2 + n('centerX'), cy: lh / 2 + n('centerY'), ux: Math.cos(a), uy: Math.sin(a), wipeEdge: comp * maxDist, stretch: n('stretch'), maxDist, lw, lh });
+        }
+      }
+      if (e.type === 'plastic') {
+        const la = rad(n('lightAngle')); const lx = Math.cos(la); const ly = -Math.sin(la); const lz = 0.8;
+        const len = Math.hypot(lx, ly, lz) || 1;
+        spatial.push({
+          type: 'plastic', bump: (n('surfaceBump') / 100) * 8, gain: n('lightIntensity') / 100, l: [lx / len, ly / len, lz / len],
+          specGain: (n('specular') / 100) * 1.5, sigmaPx: boxSigma(Math.max(0, Math.round(n('softness')))), lw, lh,
+        });
+      }
+      if (e.type === 'glass') {
+        const la = rad(n('lightAngle')); const hgt = n('height') / 100;
+        spatial.push({
+          type: 'glass', dispK: hgt * n('displacement'), hgt, lx: Math.cos(la), ly: -Math.sin(la), gain: n('lightIntensity') / 100,
+          shine: clamp01(n('shininess') / 100), sigmaPx: boxSigma(Math.max(0, Math.round(n('bumpSoftness')))), lw, lh,
+        });
+      }
+      if (e.type === 'texturize') {
+        const gain = n('contrast') / 100;
+        if (gain > 0) {
+          const la = rad(n('lightAngle'));
+          spatial.push({ type: 'texturize', pattern: Math.round(n('pattern')), gain, lx: Math.cos(la), ly: -Math.sin(la), s: 100 / Math.max(10, n('scale')), lw, lh });
+        }
+      }
+      if (e.type === 'threads') {
+        const th = Math.max(2, Math.round(n('thickness')));
+        spatial.push({ type: 'threads', th, period: th + Math.max(0, Math.round(n('spacing'))), dk: clamp01(n('depth') / 100), lw, lh });
+      }
+      if (e.type === 'hex-tile') {
+        spatial.push({ type: 'hex-tile', R: Math.max(2, n('radius')), bd: clamp01(n('border') / 100), lw, lh });
+      }
+      if (e.type === 'vector-blur') {
+        const amount = n('amount');
+        if (amount > 0) {
+          const K = Math.max(2, Math.min(24, Math.round(amount))); const r = rad(n('angleOffset'));
+          spatial.push({ type: 'vector-blur', amount, K, cosR: Math.cos(r), sinR: Math.sin(r), step: amount / K, sigmaPx: boxSigma(Math.max(0, Math.round(n('smoothness')))), lw, lh });
+        }
+      }
+      /*
+        Rounds twelve + thirteen: noise, transitions, windowed blurs, grid
+        warps, the interior layer styles and the particle generators. Each
+        block mirrors its Canvas2D wrapper's early-outs and packs the shader's
+        vec4 slots (documented in fxRoundTwelve.ts / fxRoundThirteen.ts).
+      */
+      const lin01 = (c: number): number => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+      const lin3 = (k: string, d: string): readonly [number, number, number] => { const u = unit3(k, d); return [lin01(u[0]), lin01(u[1]), lin01(u[2])]; };
+      const flag = (k: string, d: boolean): number => { const v = effectParam(e, k); return (v === undefined ? d : v === true) ? 1 : 0; };
+      const stride = (r: number): number => Math.max(1, Math.ceil(r / 6));
+      if (e.type === 'turbulent-displace' || e.type === 'curl-noise') {
+        const amount = n('amount');
+        if (amount !== 0) {
+          const size = Math.max(4, n('size'));
+          const oct = Math.max(1, Math.min(6, Math.floor(n('complexity'))));
+          const k = e.type === 'curl-noise' ? amount * size * 0.5 : amount;
+          spatial.push({ type: e.type, p: [[lw, lh, k, 1 / size], [n('evolution') * 0.01, oct, 0, 0]] });
+        }
+      }
+      if (e.type === 'roughen-edges') {
+        const border = Math.max(0, n('border'));
+        if (border > 0) {
+          spatial.push({ type: 'roughen-edges', p: [[lw, lh, border, 1 / Math.max(1, (n('scale') / 100) * 20)], [n('evolution') / 60, n('seed'), Math.max(1, Math.min(6, Math.round(n('complexity')))), Math.max(0, n('edgeSharpness'))]] });
+        }
+      }
+      if (e.type === 'scatter') {
+        const amount = n('amount');
+        if (amount > 0) spatial.push({ type: 'scatter', p: [[lw, lh, amount, n('grain')], [n('seed'), n('evolution'), 0, 0]] });
+      }
+      if (e.type === 'colorama') {
+        const pal = COLORAMA_PALETTES[Math.max(0, Math.min(COLORAMA_PALETTES.length - 1, Math.round(n('palette'))))]!;
+        const stops: FxVec4[] = [];
+        for (let i = 0; i < 7; i++) {
+          const st = pal.stops[Math.min(i, pal.stops.length - 1)]!;
+          stops.push([st.rgb[0] / 255, st.rgb[1] / 255, st.rgb[2] / 255, st.at]);
+        }
+        spatial.push({ type: 'colorama', p: [...stops, [n('phaseShift') / 360, Math.max(0.01, n('cycleRepetitions')), Math.max(0, Math.min(100, n('blendWithOriginal'))) / 100, pal.stops.length]] });
+      }
+      if (e.type === 'selective-color') {
+        const cyan = n('cyan'); const magenta = n('magenta'); const yellow = n('yellow'); const black = n('black');
+        if (cyan !== 0 || magenta !== 0 || yellow !== 0 || black !== 0) {
+          spatial.push({ type: 'selective-color', p: [[Math.max(0, Math.min(8, Math.round(n('range')))), cyan / 100, magenta / 100, yellow / 100], [black / 100, effectParam(e, 'absolute') === true ? 0 : 1, 0, 0]] });
+        }
+      }
+      if (e.type === 'turbulent-noise') {
+        spatial.push({ type: 'turbulent-noise', p: [[lw, lh, Math.max(1, n('scale')), Math.max(1, Math.min(8, Math.round(n('complexity'))))], [n('evolution'), n('contrast') / 100, n('brightness') / 100, flag('invert', false)]] });
+      }
+      if (e.type === 'add-grain') {
+        const intensity = n('intensity');
+        if (intensity !== 0) spatial.push({ type: 'add-grain', p: [[lw, lh, intensity / 100, Math.max(0.1, n('size'))], [clamp01(n('saturation') / 100), n('seed'), 0, 0]] });
+      }
+      if (e.type === 'median') {
+        const r = Math.max(0, Math.min(8, Math.round(n('radius'))));
+        if (r > 0) spatial.push({ type: 'median', p: [[lw, lh, r, 0], [0, 0, 0, 0]] });
+      }
+      if (e.type === 'dust-scratches') {
+        spatial.push({ type: 'dust-scratches', p: [[lw, lh, Math.max(1, Math.min(8, Math.round(n('radius')))), 1], [Math.max(0, n('threshold')) / 255, 0, 0, 0]] });
+      }
+      if (e.type === 'block-dissolve') {
+        const completion = n('completion');
+        if (completion > 0) {
+          const t = clamp01(completion / 100);
+          spatial.push({ type: 'block-dissolve', p: [[lw, lh, t, Math.max(1, Math.round(n('blockWidth')))], [Math.max(1, Math.round(n('blockHeight'))), t >= 1 ? 0 : Math.max(0, n('feather')), n('seed'), 0]] });
+        }
+      }
+      if (e.type === 'gradient-wipe') {
+        const completion = n('completion');
+        if (completion > 0) spatial.push({ type: 'gradient-wipe', p: [[clamp01(completion / 100), Math.max(0.0001, n('softness') / 100), flag('invertGradient', false), 0]] });
+      }
+      if (e.type === 'card-wipe') {
+        const completion = n('completion');
+        if (completion > 0) {
+          spatial.push({ type: 'card-wipe', p: [[lw, lh, clamp01(completion / 100), Math.max(1, Math.round(n('rows')))], [Math.max(1, Math.round(n('columns'))), Math.max(0, Math.min(4, Math.round(n('flipOrder')))), 0, 0]] });
+        }
+      }
+      if (e.type === 'strobe-light') {
+        const period = Math.max(0.001, n('strobePeriod'));
+        const time = n('time');
+        const phase = (((time % period) + period) % period) / period;
+        const k = clamp01(n('intensity') / 100);
+        if (phase < clamp01(n('strobeDuty') / 100) && k > 0) {
+          const col = unit3('strobeColor', '#ffffff');
+          spatial.push({ type: 'strobe-light', p: [[k, Math.round(n('strobeOperation')), 0, 0], [col[0], col[1], col[2], 0]] });
+        }
+      }
+      if (e.type === 'burn-film') {
+        const burn = n('burn');
+        if (burn > 0) {
+          const t = clamp01(burn / 100); const cx = lw / 2 + n('centerX'); const cy = lh / 2 + n('centerY');
+          const maxR = Math.hypot(Math.max(cx, lw - cx), Math.max(cy, lh - cy)) || 1;
+          const bc = unit3('burnColor', '#fff6e0'); const ch = unit3('charColor', '#3d1f0a');
+          spatial.push({ type: 'burn-film', p: [[lw, lh, t, cx], [cy, maxR, t * maxR * 1.15, clamp01(n('randomness') / 100)], [bc[0], bc[1], bc[2], Math.round(n('seed'))], [ch[0], ch[1], ch[2], 0]] });
+        }
+      }
+      if (e.type === 'light-wipe') {
+        const completion = n('completion');
+        if (completion > 0) {
+          const t = clamp01(completion / 100); const radial = Math.round(n('wipeShape')) === 1;
+          const cx = lw / 2 + n('centerX'); const cy = lh / 2 + n('centerY');
+          const a = rad(n('angle')); const nx = Math.cos(a); const ny = Math.sin(a);
+          const span = radial ? (Math.hypot(Math.max(cx, lw - cx), Math.max(cy, lh - cy)) || 1) : Math.abs(lw * nx) + Math.abs(lh * ny);
+          const width = n('lightWidth'); const col = unit3('lightColor', '#ffffff');
+          spatial.push({ type: 'light-wipe', p: [[lw, lh, radial ? 1 : 0, cx], [cy, nx, ny, span], [t * (span + width), Math.max(0.001, width), clamp01(n('intensity') / 100), Math.max(0.001, n('feather'))], [col[0], col[1], col[2], 0]] });
+        }
+      }
+      if (e.type === 'grid-wipe') {
+        const completion = n('completion'); const invert = flag('invertGrid', false);
+        if (completion > 0 || invert > 0) {
+          spatial.push({ type: 'grid-wipe', p: [[lw, lh, clamp01(completion / 100), Math.max(1, Math.min(256, Math.round(n('columns'))))], [Math.max(1, Math.min(256, Math.round(n('rows')))), Math.round(n('tileShape')), clamp01(n('randomSeed') / 100), Math.max(0.001, n('feather') / 100)], [invert, 0, 0, 0]] });
+        }
+      }
+      if (e.type === 'noise-alpha') {
+        const amount = n('amount');
+        if (amount > 0) spatial.push({ type: 'noise-alpha', p: [[lw, lh, clamp01(amount / 100), flag('uniformNoise', true)], [Math.round(n('seed')), Math.round(n('noisePhase')), flag('clipResult', true), 0]] });
+      }
+      if (e.type === 'brush-strokes') {
+        const density = n('density');
+        if (density > 0) {
+          spatial.push({ type: 'brush-strokes', p: [[lw, lh, Math.max(1, Math.min(32, Math.round(n('strokeLength')))), Math.max(1, Math.round(n('cellSize')))], [clamp01(n('randomness') / 100) * Math.PI, clamp01(density / 100), rad(n('strokeAngle')), 0]] });
+        }
+      }
+      if (e.type === 'bilateral-blur' || e.type === 'smart-blur' || e.type === 'camera-lens-blur') {
+        const r = Math.max(0, Math.min(24, Math.round(n('radius'))));
+        if (n('radius') > 0 && r > 0) {
+          if (e.type === 'bilateral-blur') {
+            const ss = Math.max(0.5, r / 2); const sr = Math.max(1, n('colorSigma'));
+            spatial.push({ type: 'bilateral-blur', p: [[lw, lh, r, 1 / (2 * ss * ss)], [1 / (2 * sr * sr), flag('preserveAlpha', true), stride(r), 0]] });
+          } else if (e.type === 'smart-blur') {
+            spatial.push({ type: 'smart-blur', p: [[lw, lh, r, Math.max(0, n('threshold'))], [Math.round(n('mode')), stride(r), 0, 0]] });
+          } else {
+            spatial.push({ type: 'camera-lens-blur', p: [[lw, lh, r, Math.round(n('blades'))], [rad(n('irisRotation')), Math.max(1, n('gain')), clamp01(n('highlightThreshold') / 100), stride(r)]] });
+          }
+        }
+      }
+      if (e.type === 'mesh-warp') {
+        const offs: number[] = [];
+        for (let i = 0; i < 16; i++) offs.push(n(`v${i}X`), n(`v${i}Y`));
+        if (offs.some((v) => v !== 0)) {
+          const p: FxVec4[] = [[lw, lh, 0, 0]];
+          for (let i = 0; i < 32; i += 4) p.push([offs[i]!, offs[i + 1]!, offs[i + 2]!, offs[i + 3]!]);
+          spatial.push({ type: 'mesh-warp', p });
+        }
+      }
+      if (e.type === 'liquify') {
+        const radius = n('brushSize'); const pushX = n('pushX'); const pushY = n('pushY'); const twirl = rad(n('twirl')); const pinch = n('pinch') / 100;
+        if (radius > 0 && (pushX !== 0 || pushY !== 0 || twirl !== 0 || pinch !== 0)) {
+          spatial.push({ type: 'liquify', p: [[lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')], [radius, pushX, pushY, twirl], [pinch, 0, 0, 0]] });
+        }
+      }
+      if (e.type === 'bezier-warp') {
+        const rest = defaultWarpPoints(lw, lh);
+        const keys = ['topLeft', 'top1', 'top2', 'topRight', 'right1', 'right2', 'bottomRight', 'bottom1', 'bottom2', 'bottomLeft', 'left1', 'left2'];
+        const pts = keys.map((k, i) => ({ x: rest[i]!.x + n(`${k}X`), y: rest[i]!.y + n(`${k}Y`) })) as unknown as WarpPoints;
+        if (!isRestWarp(pts, lw, lh)) {
+          const p: FxVec4[] = [[lw, lh, 0, 0]];
+          for (let i = 0; i < 12; i += 2) p.push([pts[i]!.x, pts[i]!.y, pts[i + 1]!.x, pts[i + 1]!.y]);
+          spatial.push({ type: 'bezier-warp', p });
+        }
+      }
+      if (e.type === 'cell-pattern') {
+        spatial.push({ type: 'cell-pattern', p: [[lw, lh, Math.max(2, n('size')), Math.max(0.01, n('contrast') / 100)], [n('evolution'), flag('invert', false), flag('membrane', false), 0]] });
+      }
+      if (e.type === 'radio-waves') {
+        const a = clamp01(n('opacity') / 100);
+        if (a > 0) {
+          const maxRadius = n('maxRadius'); const col = lin3('color', '#7dd3fc');
+          spatial.push({ type: 'radio-waves', p: [[lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')], [Math.max(1, Math.min(64, Math.round(n('waveCount')))), maxRadius > 0 ? maxRadius : Math.hypot(lw, lh) / 2, n('phase') / 360, Math.max(0.5, n('thickness'))], [col[0], col[1], col[2], a], [clamp01(n('fadeOut') / 100), Math.round(n('composite')), 0, 0]] });
+        }
+      }
+      if (e.type === 'light-burst') {
+        const gain = Math.max(0, n('intensity') / 100); const reach = clamp01(n('rayLength') / 100);
+        if (n('intensity') > 0 && gain > 0 && reach > 0) spatial.push({ type: 'light-burst', p: [[lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')], [gain, reach, 0, 0]] });
+      }
+      if (e.type === 'write-on') {
+        const t1 = clamp01(n('completion') / 100);
+        const sx = lw / 2 + n('startX'); const sy = lh / 2 + n('startY');
+        const dx = n('endX') - n('startX'); const dy = n('endY') - n('startY'); const len = Math.hypot(dx, dy);
+        if (t1 > 0 && len >= 0.001) {
+          const radius = Math.max(0.5, n('brushSize') / 2); const taper = n('taper'); const col = lin3('brushColor', '#ffffff');
+          spatial.push({ type: 'write-on', p: [[lw, lh, sx, sy], [dx, dy, t1, (n('wobble') / 100) * len * 0.12], [radius, Math.max(0.000001, (taper / 100) * t1), taper > 0 ? 1 : 0, Math.max(2, Math.min(256, Math.ceil((len * t1) / Math.max(1, radius * 0.5))))], [col[0], col[1], col[2], -dy / len], [dx / len, 0, 0, 0]] });
+        }
+      }
+      if (e.type === 'star-burst') {
+        const col = unit3('starColor', '#ffffff');
+        spatial.push({ type: 'star-burst', p: [[lw, lh, Math.round(clamp01(n('amount') / 100) * 400), n('phase')], [n('size'), clamp01(n('blend') / 100), Math.floor(n('seed')), Math.hypot(lw / 2, lh / 2)], [col[0], col[1], col[2], 0]] });
+      }
+      if (e.type === 'snowfall') {
+        const amount = n('amount');
+        if (amount > 0) {
+          const amt = Math.max(0.01, clamp01(amount / 100));
+          const cell = Math.max(12, Math.sqrt(1200 / amt), lh / 64); const col = lin3('flakeColor', '#ffffff');
+          spatial.push({ type: 'snowfall', p: [[lw, lh, cell, n('size')], [n('evolution'), n('wind'), clamp01(n('opacity') / 100), Math.floor(n('seed'))], [col[0], col[1], col[2], Math.ceil(lw / cell)]] });
+        }
+      }
+      if (e.type === 'rainfall') {
+        const amount = n('amount');
+        if (amount > 0) {
+          const amt = Math.max(0.01, clamp01(amount / 100)); const len = Math.max(2, n('length'));
+          const cell = Math.max(16, Math.sqrt(2500 / amt), lh / 64, lw / 64, len / 5); const a = rad(n('angle')); const col = lin3('rainColor', '#cfe6ff');
+          spatial.push({ type: 'rainfall', p: [[lw, lh, cell, len], [n('evolution'), clamp01(n('opacity') / 100), Math.floor(n('seed')), Math.sin(a)], [col[0], col[1], col[2], Math.cos(a)], [Math.ceil(lw / cell), Math.ceil(lh / cell), 0, 0]] });
+        }
+      }
+      if (e.type === 'cartoon') {
+        const blurR = Math.max(0, Math.min(12, Math.round(n('smoothness'))));
+        const levels = Math.max(2, Math.min(64, Math.round(n('levels'))));
+        spatial.push({ type: 'cartoon', p: [[lw, lh, 255 / (levels - 1), Math.max(0, n('edgeThreshold'))], [Math.max(1, Math.round(n('edgeWidth'))), clamp01(n('edgeOpacity') / 100), blurR > 0 ? 1 : 0, 0]], sigmaPx: boxSigma(blurR) });
+      }
+      if (e.type === 'inner-shadow' || e.type === 'inner-glow') {
+        const opacity = clamp01(n('opacity') / 100);
+        if (opacity > 0) {
+          const glow = e.type === 'inner-glow';
+          const size = Math.max(0, glow ? n('size') : n('softness'));
+          const dist = glow ? 0 : Math.max(0, n('distance')); const a = rad(glow ? 0 : n('angle'));
+          const col = lin3('color', glow ? '#ffd070' : '#000000');
+          spatial.push({ type: e.type, p: [[Math.cos(a) * dist, Math.sin(a) * dist, opacity, glow ? 1 : 0], [col[0], col[1], col[2], 0], [lw, lh, 0, 0]], sigmaPx: size });
+        }
+      }
+      if (e.type === 'satin') {
+        const opacity = clamp01(n('opacity') / 100); const size = Math.max(0, n('size')); const dist = Math.max(0, n('distance'));
+        if (opacity > 0 && (size > 0 || dist > 0)) {
+          const a = rad(n('angle')); const col = lin3('color', '#000000');
+          spatial.push({ type: 'satin', p: [[Math.cos(a) * dist, Math.sin(a) * dist, opacity, flag('invert', false)], [col[0], col[1], col[2], 0], [lw, lh, 0, 0]], sigmaPx: size });
+        }
+      }
+      if (e.type === 'bevel') {
+        const size = Math.max(1, n('size')); const depth = Math.max(0, n('depth')) / 100;
+        const hiOp = clamp01(n('highlightOpacity') / 100); const loOp = clamp01(n('shadowOpacity') / 100);
+        if (depth > 0 && (hiOp > 0 || loOp > 0)) {
+          const down = effectParam(e, 'direction') === 'down';
+          const a = rad(n('angle') + (down ? 180 : 0)); const alt = rad(Math.max(0, Math.min(90, n('altitude'))));
+          const hi = lin3('highlightColor', '#ffffff'); const lo = lin3('shadowColor', '#000000');
+          spatial.push({ type: 'bevel', p: [[Math.cos(a) * Math.cos(alt), Math.sin(a) * Math.cos(alt), Math.sin(alt), depth * 8], [hi[0], hi[1], hi[2], hiOp], [lo[0], lo[1], lo[2], loOp], [lw, lh, 0, 0]], sigmaPx: Math.max(0.5, size) });
+        }
+      }
+      /*
+        Round fourteen: the histogram colour autos. `applyTables` is a no-op at
+        blend 100 (keep 0), and Equalize skips at amount 0 — both early-outs
+        mirrored here. Slots: mode, amount-or-black-clip, 1 − white-clip, snap;
+        blend keep.
+      */
+      if (e.type === 'equalize' || e.type === 'auto-levels' || e.type === 'auto-contrast' || e.type === 'auto-color') {
+        const keep = clamp01(1 - n('blend') / 100);
+        if (keep > 0 && (e.type !== 'equalize' || n('amount') > 0)) {
+          const lo = clamp01(n('blackClip') / 100); const hi = 1 - clamp01(n('whiteClip') / 100);
+          const p: FxVec4[] = e.type === 'equalize'
+            ? [[Math.round(n('equalizeMode')) === 1 ? 1 : 0, clamp01(n('amount') / 100), 0, 0], [keep, 0, 0, 0]]
+            : e.type === 'auto-levels' ? [[2, lo, hi, 0], [keep, 0, 0, 0]]
+              : e.type === 'auto-contrast' ? [[3, lo, hi, 0], [keep, 0, 0, 0]]
+                : [[4, lo, hi, clamp01(n('snapNeutral') / 100)], [keep, 0, 0, 0]];
+          spatial.push({ type: e.type, p, lw, lh });
+        }
+      }
       if (e.type === 'find-edges') {
         spatial.push({
           type: 'find-edges',
@@ -1340,6 +2224,7 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
   // any LUT, AND the mask — the mask first, so interior styles shape themselves
   // from the masked silhouette — so none of the three may run again here.
   const baked = layerIsBaked(layer);
+  if (baked) cpuBakeStats.noteBakedLayer(layer.effects);
   // Per-quad Lambert gain (Accepts Lights): folded into the draw tint on the
   // affine fallback. Renderables that take the depth-tested group path get the
   // gain UNfolded and carry per-fragment shade data instead (decided after
@@ -1934,6 +2819,8 @@ function dropMeshesEverywhere(renderables: Renderable[]): void {
 }
 
 export function snapshotToFrameScene(snapshot: RenderSnapshot): FrameScene {
+  // Closes the previous frame's CPU-bake tally; the layer walk below fills the next.
+  cpuBakeStats.beginFrame();
   const renderables = flattenLayers(snapshot.layers, Mat3.identity(), 1);
   enforceExtrusionPathAgreement(renderables);
   // Gradient background sits behind everything (solids stay on the flat

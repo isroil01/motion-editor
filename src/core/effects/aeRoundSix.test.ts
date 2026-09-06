@@ -8,7 +8,7 @@ import {
   scaleWipeData,
   plasticData,
 } from './aeRoundSix';
-import { applyCanvas2dEffect, isCanvas2dOnlyEffect } from './canvas2dEffects';
+import { applyCanvas2dEffect, hasCanvas2dImplementation } from './canvas2dEffects';
 import type { Effect } from './effects';
 
 function makeGradBuffer(w = 16, h = 16): Uint8ClampedArray {
@@ -150,8 +150,11 @@ describe('Visual effects, round six', () => {
       'plastic',
     ] as const;
 
-    it.each(ALL_ROUND_SIX)('registers %s as Canvas2D only', (type) => {
-      expect(isCanvas2dOnlyEffect(type)).toBe(true);
+    // Round eleven (2026-09-06) gave every one of these a shader (cc-repetile
+    // simply stopped forcing a bake — its visible result is the identity), so
+    // the pinned fact is now the RETAINED Canvas2D pass, not exclusivity.
+    it.each(ALL_ROUND_SIX)('keeps its Canvas2D pass for layers baked anyway', (type) => {
+      expect(hasCanvas2dImplementation(type)).toBe(true);
     });
 
     it.each(ALL_ROUND_SIX)('runs %s cleanly through applyCanvas2dEffect', (type) => {

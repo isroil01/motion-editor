@@ -330,6 +330,131 @@ export const FIND_EDGES_MATERIAL = perspectiveMaterial('find-edges');
 export const EMBOSS_MATERIAL = perspectiveMaterial('emboss');
 export const COLOR_EMBOSS_MATERIAL = perspectiveMaterial('color-emboss');
 export const HALFTONE_MATERIAL = perspectiveMaterial('halftone');
+// Round seven: the footage set (fxRoundSix.ts, second block).
+export const RADIAL_BLUR_MATERIAL = perspectiveMaterial('radial-blur');
+export const CORNER_PIN_MATERIAL = perspectiveMaterial('corner-pin');
+export const TRANSFORM_FX_MATERIAL = perspectiveMaterial('transform-fx');
+// Round eight: the keying set (fxRoundEight.ts).
+export const KEYLIGHT_MATERIAL = perspectiveMaterial('keylight');
+export const LINEAR_COLOR_KEY_MATERIAL = perspectiveMaterial('linear-color-key');
+export const LUMA_KEY_MATERIAL = perspectiveMaterial('luma-key');
+export const COLOR_KEY_MATERIAL = perspectiveMaterial('color-key');
+export const COLOR_RANGE_MATERIAL = perspectiveMaterial('color-range');
+export const EXTRACT_MATERIAL = perspectiveMaterial('extract');
+export const SPILL_SUPPRESSOR_MATERIAL = perspectiveMaterial('spill-suppressor');
+export const WAVE_WARP_MATERIAL = perspectiveMaterial('wave-warp');
+export const ALPHA_MORPH_MATERIAL = perspectiveMaterial('alpha-morph');
+export const ALPHA_BOX_MATERIAL = perspectiveMaterial('alpha-box');
+// Round nine: per-pixel colour / channel / transition set (fxRoundNine.ts).
+export const DIRECTIONAL_BLUR_MATERIAL = perspectiveMaterial('directional-blur');
+export const LINEAR_WIPE_MATERIAL = perspectiveMaterial('linear-wipe');
+export const SHIFT_CHANNELS_MATERIAL = perspectiveMaterial('shift-channels');
+export const ALPHA_LEVELS_MATERIAL = perspectiveMaterial('alpha-levels');
+export const SOLID_COMPOSITE_MATERIAL = perspectiveMaterial('solid-composite');
+export const CHANNEL_COMBINER_MATERIAL = perspectiveMaterial('channel-combiner');
+export const REMOVE_COLOR_MATTING_MATERIAL = perspectiveMaterial('remove-color-matting');
+export const CHANGE_COLOR_MATERIAL = perspectiveMaterial('change-color');
+export const CHANGE_TO_COLOR_MATERIAL = perspectiveMaterial('change-to-color');
+export const LEAVE_COLOR_MATERIAL = perspectiveMaterial('leave-color');
+export const TONER_MATERIAL = perspectiveMaterial('toner');
+export const VENETIAN_BLINDS_MATERIAL = perspectiveMaterial('venetian-blinds');
+export const RADIAL_WIPE_MATERIAL = perspectiveMaterial('radial-wipe');
+export const IRIS_WIPE_MATERIAL = perspectiveMaterial('iris-wipe');
+export const LINE_SWEEP_MATERIAL = perspectiveMaterial('line-sweep');
+// Round ten: separable neighbourhood passes + drawn generators (fxRoundTen.ts).
+export const CHANNEL_BOX_MATERIAL = perspectiveMaterial('channel-box');
+export const MINMAX_MATERIAL = perspectiveMaterial('minmax');
+export const CHECKERBOARD_MATERIAL = perspectiveMaterial('checkerboard');
+export const GRID_MATERIAL = perspectiveMaterial('grid');
+export const FOUR_COLOR_GRADIENT_MATERIAL = perspectiveMaterial('four-color-gradient');
+export const CIRCLE_MATERIAL = perspectiveMaterial('circle');
+export const ELLIPSE_MATERIAL = perspectiveMaterial('ellipse');
+/** Two-texture combines: the chain's current texture plus a blurred copy in binding 3. */
+const twoTextureMaterial = (shader: string): MaterialDescriptor => ({
+  shader,
+  topology: 'triangle-list',
+  layout: [
+    { binding: 0, type: 'uniform-buffer', stages: ['vertex', 'fragment'] },
+    { binding: 1, type: 'texture', stages: ['fragment'] },
+    { binding: 2, type: 'sampler', stages: ['fragment'] },
+    { binding: 3, type: 'texture', stages: ['fragment'] },
+  ],
+});
+export const UNSHARP_MASK_MATERIAL = twoTextureMaterial('unsharp-mask');
+export const SHADOW_HIGHLIGHT_MATERIAL = twoTextureMaterial('shadow-highlight');
+// Round eleven: advanced distort / transition / stylize set (fxRoundEleven.ts). `_FX_` keeps
+// them clear of the layer-glass and shadow materials above.
+export const POLAR_COORDINATES_FX_MATERIAL = perspectiveMaterial('polar-coordinates');
+export const OPTICS_COMPENSATION_FX_MATERIAL = perspectiveMaterial('optics-compensation');
+export const WARP_FX_MATERIAL = perspectiveMaterial('warp');
+export const PAGE_TURN_FX_MATERIAL = perspectiveMaterial('page-turn');
+export const SPLIT_FX_MATERIAL = perspectiveMaterial('split');
+export const SLANT_FX_MATERIAL = perspectiveMaterial('slant');
+export const SMEAR_FX_MATERIAL = perspectiveMaterial('smear');
+export const ROLLING_SHUTTER_FX_MATERIAL = perspectiveMaterial('rolling-shutter');
+export const RADIAL_SHADOW_PROJECT_FX_MATERIAL = perspectiveMaterial('radial-shadow-project');
+export const FLO_MOTION_FX_MATERIAL = perspectiveMaterial('flo-motion');
+export const LENS_FX_MATERIAL = perspectiveMaterial('lens');
+export const GRIDDLER_FX_MATERIAL = perspectiveMaterial('griddler');
+export const BALL_ACTION_FX_MATERIAL = perspectiveMaterial('ball-action');
+export const DRIZZLE_FX_MATERIAL = perspectiveMaterial('drizzle');
+export const JAWS_FX_MATERIAL = perspectiveMaterial('jaws');
+export const PIXEL_POLLY_FX_MATERIAL = perspectiveMaterial('pixel-polly');
+export const TWISTER_FX_MATERIAL = perspectiveMaterial('twister');
+export const CARD_DANCE_FX_MATERIAL = perspectiveMaterial('card-dance');
+export const UNMULT_FX_MATERIAL = perspectiveMaterial('unmult');
+export const CC_COMPOSITE_FX_MATERIAL = perspectiveMaterial('cc-composite');
+export const CC_SCATTERIZE_FX_MATERIAL = perspectiveMaterial('cc-scatterize');
+export const RADIAL_FAST_BLUR_FX_MATERIAL = perspectiveMaterial('radial-fast-blur');
+export const SCALE_WIPE_FX_MATERIAL = perspectiveMaterial('scale-wipe');
+export const TEXTURIZE_FX_MATERIAL = perspectiveMaterial('texturize');
+export const THREADS_FX_MATERIAL = perspectiveMaterial('threads');
+export const HEX_TILE_FX_MATERIAL = perspectiveMaterial('hex-tile');
+/** Two-texture combines: tex = layer, binding 3 = the blurred field / projected shadow. */
+export const RADIAL_SHADOW_FX_MATERIAL = twoTextureMaterial('radial-shadow');
+export const PLASTIC_FX_MATERIAL = twoTextureMaterial('plastic');
+export const GLASS_FX_MATERIAL = twoTextureMaterial('glass-fx');
+export const VECTOR_BLUR_FX_MATERIAL = twoTextureMaterial('vector-blur');
+// Rounds twelve + thirteen (fxRoundTwelve.ts / fxRoundThirteen.ts).
+export const TURBULENT_DISPLACE_FX_MATERIAL = perspectiveMaterial('turbulent-displace');
+export const CURL_NOISE_FX_MATERIAL = perspectiveMaterial('curl-noise');
+export const ROUGHEN_EDGES_FX_MATERIAL = perspectiveMaterial('roughen-edges');
+export const SCATTER_FX_MATERIAL = perspectiveMaterial('scatter');
+export const COLORAMA_FX_MATERIAL = perspectiveMaterial('colorama');
+export const SELECTIVE_COLOR_FX_MATERIAL = perspectiveMaterial('selective-color');
+export const TURBULENT_NOISE_FX_MATERIAL = perspectiveMaterial('turbulent-noise');
+export const ADD_GRAIN_FX_MATERIAL = perspectiveMaterial('add-grain');
+export const MEDIAN_FX_MATERIAL = perspectiveMaterial('median');
+export const BLOCK_DISSOLVE_FX_MATERIAL = perspectiveMaterial('block-dissolve');
+export const GRADIENT_WIPE_FX_MATERIAL = perspectiveMaterial('gradient-wipe');
+export const CARD_WIPE_FX_MATERIAL = perspectiveMaterial('card-wipe');
+export const STROBE_LIGHT_FX_MATERIAL = perspectiveMaterial('strobe-light');
+export const BURN_FILM_FX_MATERIAL = perspectiveMaterial('burn-film');
+export const LIGHT_WIPE_FX_MATERIAL = perspectiveMaterial('light-wipe');
+export const GRID_WIPE_FX_MATERIAL = perspectiveMaterial('grid-wipe');
+export const NOISE_ALPHA_FX_MATERIAL = perspectiveMaterial('noise-alpha');
+export const BRUSH_STROKES_FX_MATERIAL = perspectiveMaterial('brush-strokes');
+export const BILATERAL_BLUR_FX_MATERIAL = perspectiveMaterial('bilateral-blur');
+export const SMART_BLUR_FX_MATERIAL = perspectiveMaterial('smart-blur');
+export const CAMERA_LENS_BLUR_FX_MATERIAL = perspectiveMaterial('camera-lens-blur');
+export const MESH_WARP_FX_MATERIAL = perspectiveMaterial('mesh-warp');
+export const LIQUIFY_FX_MATERIAL = perspectiveMaterial('liquify');
+export const BEZIER_WARP_FX_MATERIAL = perspectiveMaterial('bezier-warp');
+export const CELL_PATTERN_FX_MATERIAL = perspectiveMaterial('cell-pattern');
+export const RADIO_WAVES_FX_MATERIAL = perspectiveMaterial('radio-waves');
+export const LIGHT_BURST_FX_MATERIAL = perspectiveMaterial('light-burst');
+export const WRITE_ON_FX_MATERIAL = perspectiveMaterial('write-on');
+export const STAR_BURST_FX_MATERIAL = perspectiveMaterial('star-burst');
+export const SNOWFALL_FX_MATERIAL = perspectiveMaterial('snowfall');
+export const RAINFALL_FX_MATERIAL = perspectiveMaterial('rainfall');
+export const CARTOON_FX_MATERIAL = twoTextureMaterial('cartoon');
+export const INTERIOR_STYLE_FX_MATERIAL = twoTextureMaterial('interior-style');
+export const SATIN_FX_MATERIAL = twoTextureMaterial('satin');
+export const BEVEL_FX_MATERIAL = twoTextureMaterial('bevel');
+// Round fourteen: histogram colour autos (fxRoundFourteen.ts) — reduce, table, apply.
+export const FX_HISTOGRAM_FX_MATERIAL = perspectiveMaterial('fx-histogram');
+export const FX_AUTO_TABLE_FX_MATERIAL = perspectiveMaterial('fx-auto-table');
+export const FX_AUTO_APPLY_FX_MATERIAL = twoTextureMaterial('fx-auto-apply');
 
 /** Same binding shape as motion-tile: one source texture, warped in place. */
 export const BEND_MATERIAL: MaterialDescriptor = {

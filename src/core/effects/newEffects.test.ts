@@ -16,9 +16,9 @@ describe('the four missing effects are registered', () => {
     expect(def(type).params.length).toBeGreaterThan(0);
   });
 
-  it('the three PIXEL passes are CPU-baked — none has a GPU shader', () => {
+  it('all three pixel passes have shaders now (rounds seven and nine) and no longer force a bake', () => {
     for (const t of ['directional-blur', 'linear-wipe', 'transform']) {
-      expect(isCanvas2dOnlyEffect(t)).toBe(true);
+      expect(isCanvas2dOnlyEffect(t)).toBe(false);
     }
   });
 

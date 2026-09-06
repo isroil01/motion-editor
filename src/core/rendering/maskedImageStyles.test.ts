@@ -19,7 +19,9 @@ import { imageNeedsCpuBake } from '@core/effects/effectBake';
 import type { Effect } from '@core/effects/effects';
 import { snapshotToFrameScene } from './snapshotToFrameScene';
 
-const innerShadow = [{ id: 'layerstyle:innerShadow', type: 'inner-shadow', params: { size: 8 } }] as unknown as Effect[];
+// vegas: still Canvas2D-only (it traces contours) after rounds thirteen and
+// fourteen (2026-09-06) ported the interior styles and the histogram autos.
+const innerShadow = [{ id: 'cpuOnly', type: 'vegas', params: {} }] as unknown as Effect[];
 const gpuOnly = [{ id: 'e', type: 'blur', params: { amount: 4 } }] as unknown as Effect[];
 
 describe('imageNeedsCpuBake', () => {

@@ -12,7 +12,8 @@ import type { Effect } from './effects';
 
 const blur: Effect = { id: 'e1', type: 'blur', params: { amount: 4 } };
 const fill: Effect = { id: 'e2', type: 'fill', params: { color: '#f00', opacity: 100 } };
-const satin: Effect = { id: 'e3', type: 'satin', params: { distance: 14, angle: 135, size: 16, color: '#000', opacity: 45 } };
+// vegas is CPU-only (contour tracing); satin held this role until round thirteen gave it a shader.
+const satin: Effect = { id: 'e3', type: 'vegas', params: {} };
 
 describe('routing — one implementation, both backends', () => {
   it('a layer using fill opacity takes the CPU-bake path', () => {

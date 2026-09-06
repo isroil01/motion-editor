@@ -111,13 +111,16 @@ describe('addNoiseData', () => {
 
 describe('classification', () => {
   test('pixel-pass generators without GPU shaders are Canvas2D-only', () => {
-    for (const t of ['four-color-gradient', 'keylight', 'bevel', 'inner-shadow']) {
+    // keylight left this list in round eight (2026-09-06) when it gained a shader.
+    // four-color-gradient left in round ten (2026-09-06) when it gained a shader.
+    // bevel / inner-shadow left in round thirteen (2026-09-06) when the interior styles gained shaders.
+    for (const t of ['numbers', 'vegas']) {
       expect(isCanvas2dOnlyEffect(t)).toBe(true);
     }
   });
 
   test('effects with CompositionPass GPU materials are not Canvas2D-only', () => {
-    for (const t of ['blur', 'glow', 'levels', 'tint', 'gradient-ramp', 'displacement-map', 'fill', 'stroke', 'sharpen', 'noise', 'beam']) {
+    for (const t of ['blur', 'glow', 'levels', 'tint', 'gradient-ramp', 'displacement-map', 'fill', 'stroke', 'sharpen', 'noise', 'beam', 'keylight']) {
       expect(isCanvas2dOnlyEffect(t)).toBe(false);
     }
   });

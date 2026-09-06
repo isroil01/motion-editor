@@ -95,7 +95,7 @@ float lum601(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 vec4 encodeOut(vec3 c, float a) { return vec4(srgbToLinearRgb(clamp(c, vec3(0.0), vec3(1.0))) * a, a); }
 `;
 
-const fxShader = (name: string, vec4s: number, wgslFs: string, glslFs: string): ShaderSource => ({
+export const fxShader = (name: string, vec4s: number, wgslFs: string, glslFs: string): ShaderSource => ({
   name,
   wgsl: `${fxWgslProlog(vec4s)}
 @fragment fn fs(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
@@ -579,8 +579,139 @@ export const HALFTONE_FX = fxShader('halftone', 4,
   vec3 outC = mix(src.rgb, tgt, p2.w);
   frag = encodeOut(outC, src.a);`);
 
+// ── Round seven: the footage set ─────────────────────────────────────────────
+//
+// Radial Blur, Corner Pin and Transform were the three Canvas2D-only effects
+// most often put on FOOTAGE (Corner Pin is what Track Motion's corner mode
+// writes), and each one forced the whole video frame through a per-frame CPU
+// bake. All three are inverse maps: every fragment asks where its pixel came
+// from and samples there, exactly as the CPU kernels do.
+
+/**
+ * Radial Blur — spin (degrees of sweep) or zoom (percent of scale travel)
+ * about a centre, averaged over `steps` samples along the arc / ray. Mirrors
+ * `radialBlurData`: t runs 0→1 so the destination is one END of the trail,
+ * samples off the layer are skipped (not zero-weighted), and the average is
+ * premultiplied — the chain's textures already are. Bilinear taps instead of
+ * the kernel's nearest, which reads as a slightly smoother trail.
+ */
+export const RADIAL_BLUR_FX = fxShader('radial-blur', 2,
+  `  let lwh = obj.p1.xy;
+  let pp = (fieldQ(uv) - obj.fxBox.xy) / max(obj.fxBox.zw, vec2<f32>(0.000001, 0.000001)) * lwh;
+  if (pp.x < 0.0 || pp.y < 0.0 || pp.x > lwh.x || pp.y > lwh.y) { return textureSampleLevel(tex, smp, uv, 0.0); }
+  let c = obj.p0.xy;
+  let amount = obj.p0.z;
+  let zoom = obj.p0.w > 0.5;
+  let steps = i32(obj.p1.z + 0.5);
+  let d = pp - c;
+  var acc = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  var n = 0.0;
+  for (var s = 0; s < 64; s = s + 1) {
+    if (s >= steps) { break; }
+    let t = f32(s) / f32(max(steps - 1, 1));
+    var sp = pp;
+    if (zoom) {
+      let sc = 1.0 + (amount / 100.0) * t;
+      sp = c + d / sc;
+    } else {
+      let ang = amount * 0.017453292519943295 * t;
+      let cs = cos(ang); let sn = sin(ang);
+      sp = c + vec2<f32>(d.x * cs - d.y * sn, d.x * sn + d.y * cs);
+    }
+    if (sp.x < 0.0 || sp.y < 0.0 || sp.x > lwh.x || sp.y > lwh.y) { continue; }
+    acc = acc + textureSampleLevel(tex, smp, layerUv(sp, lwh), 0.0);
+    n = n + 1.0;
+  }
+  if (n <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+  return acc / n;`,
+  `  vec2 lwh = p1.xy;
+  vec2 pp = (fieldQ(vUv) - fxBox.xy) / max(fxBox.zw, vec2(0.000001)) * lwh;
+  if (pp.x < 0.0 || pp.y < 0.0 || pp.x > lwh.x || pp.y > lwh.y) { frag = textureLod(uTex, vUv, 0.0); return; }
+  vec2 c = p0.xy;
+  float amount = p0.z;
+  bool zoom = p0.w > 0.5;
+  int steps = int(p1.z + 0.5);
+  vec2 d = pp - c;
+  vec4 acc = vec4(0.0);
+  float n = 0.0;
+  for (int s = 0; s < 64; s++) {
+    if (s >= steps) break;
+    float t = float(s) / float(max(steps - 1, 1));
+    vec2 sp;
+    if (zoom) {
+      float sc = 1.0 + (amount / 100.0) * t;
+      sp = c + d / sc;
+    } else {
+      float ang = amount * 0.017453292519943295 * t;
+      float cs = cos(ang); float sn = sin(ang);
+      sp = c + vec2(d.x * cs - d.y * sn, d.x * sn + d.y * cs);
+    }
+    if (sp.x < 0.0 || sp.y < 0.0 || sp.x > lwh.x || sp.y > lwh.y) continue;
+    acc += textureLod(uTex, layerUv(sp, lwh), 0.0);
+    n += 1.0;
+  }
+  frag = (n <= 0.0) ? vec4(0.0) : acc / n;`);
+
+/**
+ * Corner Pin — the inverse homography (p0 = a b c d, p1 = e f g h, p2.x = i,
+ * p2.yz = lw lh) takes a destination pixel to unit-square (u, v); outside the
+ * quad there is no source, so transparent — never clamped — like the kernel.
+ * An all-zero matrix (degenerate quad) makes every denominator zero and draws
+ * nothing, which is what `cornerPinData` returns for it.
+ */
+export const CORNER_PIN_FX = fxShader('corner-pin', 3,
+  `  let lwh = obj.p2.yz;
+  let pp = (fieldQ(uv) - obj.fxBox.xy) / max(obj.fxBox.zw, vec2<f32>(0.000001, 0.000001)) * lwh;
+  if (pp.x < 0.0 || pp.y < 0.0 || pp.x > lwh.x || pp.y > lwh.y) { return textureSampleLevel(tex, smp, uv, 0.0); }
+  let den = obj.p1.z * pp.x + obj.p1.w * pp.y + obj.p2.x;
+  if (abs(den) < 0.000000001) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+  let u = (obj.p0.x * pp.x + obj.p0.y * pp.y + obj.p0.z) / den;
+  let v = (obj.p0.w * pp.x + obj.p1.x * pp.y + obj.p1.y) / den;
+  if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+  return samplePx(vec2<f32>(u * lwh.x, v * lwh.y), lwh);`,
+  `  vec2 lwh = p2.yz;
+  vec2 pp = (fieldQ(vUv) - fxBox.xy) / max(fxBox.zw, vec2(0.000001)) * lwh;
+  if (pp.x < 0.0 || pp.y < 0.0 || pp.x > lwh.x || pp.y > lwh.y) { frag = textureLod(uTex, vUv, 0.0); return; }
+  float den = p1.z * pp.x + p1.w * pp.y + p2.x;
+  if (abs(den) < 0.000000001) { frag = vec4(0.0); return; }
+  float u = (p0.x * pp.x + p0.y * pp.y + p0.z) / den;
+  float v = (p0.w * pp.x + p1.x * pp.y + p1.y) / den;
+  if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) { frag = vec4(0.0); return; }
+  frag = samplePx(vec2(u * lwh.x, v * lwh.y), lwh);`);
+
+/**
+ * Transform effect — an affine move of the layer's pixels about its centre
+ * (p0 = position x y, scale, rotation rad; p1 = opacity, lw, lh), clipped to
+ * the layer's own box like the CPU pass. Inverse map: un-translate, un-rotate,
+ * un-scale, then sample; opacity scales the premultiplied sample whole.
+ */
+export const TRANSFORM_FX = fxShader('transform-fx', 2,
+  `  let lwh = obj.p1.yz;
+  let pp = (fieldQ(uv) - obj.fxBox.xy) / max(obj.fxBox.zw, vec2<f32>(0.000001, 0.000001)) * lwh;
+  if (pp.x < 0.0 || pp.y < 0.0 || pp.x > lwh.x || pp.y > lwh.y) { return textureSampleLevel(tex, smp, uv, 0.0); }
+  let c = lwh * 0.5;
+  let sc = max(obj.p0.z, 0.000001);
+  let q = pp - (c + obj.p0.xy);
+  let cs = cos(-obj.p0.w); let sn = sin(-obj.p0.w);
+  let r = vec2<f32>(q.x * cs - q.y * sn, q.x * sn + q.y * cs) / sc;
+  let sp = r + c;
+  if (sp.x < 0.0 || sp.y < 0.0 || sp.x > lwh.x || sp.y > lwh.y) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+  return samplePx(sp, lwh) * obj.p1.x;`,
+  `  vec2 lwh = p1.yz;
+  vec2 pp = (fieldQ(vUv) - fxBox.xy) / max(fxBox.zw, vec2(0.000001)) * lwh;
+  if (pp.x < 0.0 || pp.y < 0.0 || pp.x > lwh.x || pp.y > lwh.y) { frag = textureLod(uTex, vUv, 0.0); return; }
+  vec2 c = lwh * 0.5;
+  float sc = max(p0.z, 0.000001);
+  vec2 q = pp - (c + p0.xy);
+  float cs = cos(-p0.w); float sn = sin(-p0.w);
+  vec2 r = vec2(q.x * cs - q.y * sn, q.x * sn + q.y * cs) / sc;
+  vec2 sp = r + c;
+  if (sp.x < 0.0 || sp.y < 0.0 || sp.x > lwh.x || sp.y > lwh.y) { frag = vec4(0.0); return; }
+  frag = samplePx(sp, lwh) * p1.x;`);
+
 export const FX_ROUND_SIX_SHADERS: readonly ShaderSource[] = [
   MIRROR_FX, OFFSET_FX, BULGE_FX, TWIRL_FX, SPHERIZE_FX, KALEIDOSCOPE_FX,
   RIPPLE_FX, CHROMATIC_ABERRATION_FX, MAGNIFY_FX,
   MOSAIC_FX, FIND_EDGES_FX, EMBOSS_FX, COLOR_EMBOSS_FX, HALFTONE_FX,
+  RADIAL_BLUR_FX, CORNER_PIN_FX, TRANSFORM_FX,
 ];

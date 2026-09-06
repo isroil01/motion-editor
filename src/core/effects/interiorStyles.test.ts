@@ -11,7 +11,7 @@
  */
 
 import { layerStylesToEffects, DEFAULT_INNER_SHADOW, DEFAULT_INNER_GLOW, DEFAULT_SATIN, DEFAULT_BEVEL } from './layerStyles';
-import { isCanvas2dOnlyEffect, applyCanvas2dEffect } from './canvas2dEffects';
+import { hasCanvas2dImplementation, applyCanvas2dEffect } from './canvas2dEffects';
 import { EFFECT_DEFS, defaultParams, type Effect } from './effects';
 
 describe('inner shadow / inner glow — style → effect mapping', () => {
@@ -88,9 +88,9 @@ describe('inner shadow / inner glow — style → effect mapping', () => {
   it('all four interior styles are registered as real effects too', () => {
     for (const type of ['inner-shadow', 'inner-glow', 'satin', 'bevel']) {
       expect(EFFECT_DEFS.some((d) => d.type === type)).toBe(true);
-      // No CSS form and no GPU shader — the chain must CPU-bake them, or they
-      // would silently no-op on the GPU backend.
-      expect(isCanvas2dOnlyEffect(type)).toBe(true);
+      // Round thirteen (2026-09-06) gave all four a shader; the pinned fact is
+      // now the RETAINED Canvas2D pass, for layers baked for another reason.
+      expect(hasCanvas2dImplementation(type)).toBe(true);
     }
   });
 });

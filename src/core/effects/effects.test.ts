@@ -232,6 +232,22 @@ describe('EFFECT_DEFS', () => {
     // Waves 2-3 (2026-08-15): warps + neighbourhood passes.
     'mirror', 'offset', 'bulge', 'twirl', 'spherize', 'kaleidoscope', 'ripple',
     'chromatic-aberration', 'magnify', 'mosaic', 'find-edges', 'emboss', 'color-emboss', 'halftone',
+    // Round seven (2026-09-06): the footage set.
+    'gaussian-blur', 'fast-box-blur', 'radial-blur', 'corner-pin', 'transform',
+    // Round fourteen (2026-09-06): histogram colour autos.
+    'equalize', 'auto-levels', 'auto-contrast', 'auto-color',
+    // Rounds twelve + thirteen (2026-09-06).
+    'turbulent-displace', 'curl-noise', 'roughen-edges', 'scatter', 'colorama', 'selective-color', 'turbulent-noise', 'add-grain', 'median', 'dust-scratches', 'block-dissolve', 'gradient-wipe', 'card-wipe', 'strobe-light', 'burn-film', 'light-wipe', 'grid-wipe', 'noise-alpha', 'brush-strokes', 'bilateral-blur', 'smart-blur', 'camera-lens-blur', 'mesh-warp', 'liquify', 'bezier-warp', 'cell-pattern', 'radio-waves', 'light-burst', 'write-on', 'star-burst', 'snowfall', 'rainfall', 'cartoon', 'inner-shadow', 'inner-glow', 'satin', 'bevel',
+    // Round eleven (2026-09-06): advanced distort / transition / stylize.
+    // cc-repetile has no shader (its CPU pass is a visible no-op) but no CSS
+    // form either; it sits here for the same reason.
+    'polar-coordinates', 'optics-compensation', 'warp', 'page-turn', 'split', 'slant', 'smear', 'rolling-shutter', 'flo-motion', 'lens', 'griddler', 'ball-action', 'drizzle', 'jaws', 'pixel-polly', 'twister', 'card-dance', 'unmult', 'cc-composite', 'cc-scatterize', 'radial-fast-blur', 'scale-wipe', 'texturize', 'threads', 'hex-tile', 'radial-shadow', 'cross-blur', 'plastic', 'glass', 'vector-blur', 'cc-repetile',
+    // Round ten (2026-09-06): neighbourhood passes + drawn generators.
+    'channel-blur', 'minimax', 'unsharp-mask', 'shadow-highlight', 'checkerboard', 'grid', 'four-color-gradient', 'circle', 'ellipse',
+    // Round nine (2026-09-06): per-pixel colour / channel / transitions.
+    'directional-blur', 'linear-wipe', 'shift-channels', 'alpha-levels', 'solid-composite', 'channel-combiner', 'remove-color-matting', 'change-color', 'change-to-color', 'leave-color', 'toner', 'venetian-blinds', 'radial-wipe', 'iris-wipe', 'line-sweep',
+    // Round eight (2026-09-06): the keying set.
+    'keylight', 'wave-warp', 'linear-color-key', 'luma-key', 'color-key', 'color-range', 'extract', 'spill-suppressor', 'simple-choker', 'matte-choker',
   ]);
   // Temporal effects (Echo, Posterize Time) are resolved in buildSnapshot's
   // time plumbing, not as a per-layer pass. Read the REAL predicate — this was

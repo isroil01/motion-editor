@@ -117,58 +117,56 @@ import {
  *  (Distinct from `isCanvas2dProcedural`, whose two members ALSO have GPU
  *  shaders — gradient-ramp / fractal-noise render on both backends.) */
 const CANVAS2D_ONLY = new Set<string>([
-  'four-color-gradient',
+  // Round seven (2026-09-06) PORTED the footage set — gaussian-blur,
+  // fast-box-blur, radial-blur, corner-pin, transform — to shaders; their
+  // Canvas2D passes stay in CANVAS2D_IMPLEMENTED below. Round eight (same
+  // day) did the same for the keying set: keylight, linear-color-key,
+  // luma-key, color-key, color-range, extract, spill-suppressor,
+  // simple-choker, matte-choker, and wave-warp. Round nine: the per-pixel colour /
+  // channel / transition set and directional-blur. Round ten: channel-blur,
+  // minimax, unsharp-mask, shadow-highlight and the drawn generators
+  // checkerboard, grid, four-color-gradient, circle, ellipse.
+  // Round eleven: the advanced distort / transition / stylize set (polar-
+  // coordinates … vector-blur, see fxRoundEleven.ts). cc-repetile left with
+  // them WITHOUT a shader: its CPU pass expands the buffer and crops it back,
+  // so the visible result is the identity and there is nothing to draw.
+  // Rounds twelve + thirteen: noise / transitions / windowed blurs / grid
+  // warps, the interior layer styles, Cartoon and the particle generators.
+  //
+  // What REMAINS below is exactly the set a fragment shader cannot express
+  // without infrastructure the renderer does not have: the histogram
+  // Round fourteen gave the histogram autos (Equalize, Auto Levels/Contrast/
+  // Color) a three-pass reduce → table → apply chain. Vegas traces contours; Numbers and Timecode rasterise text;
+  // Audio Spectrum / Waveform draw an arbitrary-length sample array; and
+  // Lightning strokes a recursive random polyline.
   // 'beam' PORTED 2026-08-12 — it has a shader (builtin.ts BEAM), so it no
   // longer forces a bake. Its Canvas2D pass stays below and stays in
   // CANVAS2D_IMPLEMENTED, for layers baked for other reasons: that is the
   // position `apply-color-lut` and Fill/Stroke/Sharpen/Noise are in, and it is
   // what keeps the CPU version as the reference the GPU one is diffed against.
-  'keylight',
-  'wave-warp',
-  'turbulent-displace',
-  'curl-noise',
-  'inner-shadow',
-  'inner-glow',
-  'satin',
-  'bevel',
-  'directional-blur',
-  'linear-wipe',
-  'transform',
   // Blur family. The generic `blur` is a CSS filter and stays OFF this list —
   // it needs no bake and should keep the cheap path. These three each express
   // something a CSS filter cannot (per-axis dimensions, an iteration count, a
   // centre of rotation), so they are real pixel passes and force the bake.
-  'gaussian-blur',
-  'fast-box-blur',
-  'radial-blur',
   // Stylize family — all three are per-pixel passes with no shader form.
   // 'mosaic' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'find-edges' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
-  'roughen-edges',
   // Colour family. `exposure` is deliberately ABSENT: it is a per-channel
   // transfer function, so it lives in LUT_EFFECTS and renders on both backends
   // with no bake. `vibrance` PORTED 2026-08-14 (round six) — GPU shader, its
   // Canvas2D pass stays in CANVAS2D_IMPLEMENTED as the parity reference.
-  'colorama',
   // Both for the same reason as the two above, one step further. `lumetri` is
   // deliberately ABSENT beside `exposure` — all eight of its controls are
   // channel-independent, so it is a LUT.
-  'selective-color',
   // And this one is the strongest case of all: it reads the pixel's NEIGHBOURS,
   // so it is spatial and could not be a transfer function of any kind.
-  'shadow-highlight',
   // Distort family — inverse-map resamples, no shader form. `transform` and
   // `wave-warp` above are the same class.
   // 'bulge' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'twirl' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'spherize' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
-  'corner-pin',
   // Same class as the four above: an inverse-map resample with no shader form.
-  'bezier-warp',
   // Generate family, round two — these DRAW, like `beam` and `lens-flare`.
-  'checkerboard',
-  'grid',
-  'cell-pattern',
   // Vegas READS the layer's alpha per pixel to find its contour, so there is
   // no shader form for it any more than there is for Median. It also DRAWS,
   // like the three above.
@@ -176,19 +174,10 @@ const CANVAS2D_ONLY = new Set<string>([
   // Noise family. Turbulent Noise generates a field, Add Grain disturbs the
   // pixels, Median is a rank filter over the neighbourhood — no shader form for
   // any of the three.
-  'turbulent-noise',
-  'add-grain',
-  'median',
   // Keying family. `set-matte` is deliberately ABSENT: it reads another layer's
   // pixels, which this chain's per-layer signature cannot express, so it lives
   // on the GPU path beside displacement-map instead.
-  'simple-choker',
-  'linear-color-key',
-  'shift-channels',
   // Transition family — alpha-only reveals, like the existing `linear-wipe`.
-  'venetian-blinds',
-  'gradient-wipe',
-  'card-wipe',
   // Generate / Text — these DRAW rather than transform, like `beam` above.
   // 'lens-flare' PORTED 2026-08-14 — GPU shader; Canvas2D retained in IMPLEMENTED.
   'numbers',
@@ -207,31 +196,20 @@ const CANVAS2D_ONLY = new Set<string>([
   // tritone, threshold now have GPU shaders and no longer force a bake.
   // Their Canvas2D passes stay in CANVAS2D_IMPLEMENTED below.
   // Distort — inverse-map resamples, like the five above.
-  'polar-coordinates',
   // Optics Compensation is one too. It has no GPU shader, so without this entry
   // it would not force a bake and `extractSpatialEffects` would drop it — the
   // effect would be addable, keyframeable and completely inert, which is the
   // failure `effectRegistryComplete.test.ts` was written after.
-  'optics-compensation',
   // Mesh Warp is a resample too, and has no GPU form.
-  'mesh-warp',
-  'liquify',
   // 'mirror' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'offset' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // Stylize — a directional derivative and a randomised resample.
   // 'emboss' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
-  'scatter',
   // Transition — alpha-only reveals, like the three above.
-  'radial-wipe',
-  'block-dissolve',
   // Keying / Matte. Minimax reads a whole neighbourhood per pixel, so it is
   // spatial in the same sense Median is.
-  'luma-key',
-  'minimax',
   // Blur family — per-channel radii and a scale-aware sharpen, neither of which
   // a CSS filter can express, exactly like the three blurs above.
-  'channel-blur',
-  'unsharp-mask',
   // ── Round four ──
   //
   // All fifty. None is a LUT candidate and none has a GPU material, so each one
@@ -241,99 +219,32 @@ const CANVAS2D_ONLY = new Set<string>([
   // pays for the whole CPU round trip and nothing is drawn.
   //
   // Blur — non-separable, so no shader form. See `aeBlurAdvanced.ts`.
-  'bilateral-blur',
-  'smart-blur',
-  'camera-lens-blur',
   // Distort — inverse-map resamples, like every other member of the family.
   // 'ripple' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'magnify' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
-  'warp',
-  'page-turn',
-  'split',
-  'slant',
-  'smear',
-  'rolling-shutter',
   // Perspective — projects a silhouette, then blurs and composites it.
-  'radial-shadow',
   // Generate — these DRAW, like Beam, Lens Flare and Checkerboard.
-  'circle',
-  'ellipse',
-  'radio-waves',
   'lightning',
   // 'light-rays' PORTED 2026-08-14 — GPU shader; Canvas2D retained below.
   // 'light-sweep' PORTED 2026-08-14 — GPU shader; Canvas2D retained below.
   'audio-waveform',
   // Stylize — neighbourhood and cell operations, none expressible as a filter.
-  'cartoon',
-  'brush-strokes',
-  'strobe-light',
   // 'color-emboss' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'halftone' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'kaleidoscope' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // 'vignette' PORTED 2026-08-14 (round six) — GPU shader; Canvas2D retained below.
-  'burn-film',
   // Colour — the eight that need the HISTOGRAM or read all three channels.
   // Deliberately NOT in `LUT_BUILDERS`: a table is built from params alone and
   // cannot see the image, so none of these could be expressed there.
-  'equalize',
-  'auto-levels',
-  'auto-contrast',
-  'auto-color',
-  'change-color',
-  'change-to-color',
-  'leave-color',
-  'toner',
   // Keying & Matte, and the four Channel effects that work on coverage.
-  'color-key',
-  'color-range',
-  'extract',
-  'spill-suppressor',
-  'matte-choker',
-  'alpha-levels',
-  'solid-composite',
-  'channel-combiner',
-  'remove-color-matting',
   // Transition — alpha-only reveals, like the wipes above.
-  'iris-wipe',
-  'light-wipe',
-  'line-sweep',
-  'grid-wipe',
   // Noise — a thresholded median, and noise in coverage rather than colour.
-  'dust-scratches',
-  'noise-alpha',
   // ── Round five ──
   //
   // All twenty. None is a LUT candidate (every one is spatial) and none has a
   // GPU material, so each forces a bake and needs a `case` below.
-  'star-burst',
-  'snowfall',
-  'rainfall',
-  'write-on',
-  'light-burst',
-  'glass',
-  'texturize',
-  'threads',
   // 'chromatic-aberration' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
-  'hex-tile',
-  'vector-blur',
-  'flo-motion',
-  'lens',
-  'griddler',
-  'ball-action',
-  'drizzle',
-  'jaws',
-  'pixel-polly',
-  'twister',
-  'card-dance',
   // ── Round six ──
-  'unmult',
-  'cc-composite',
-  'cc-repetile',
-  'cc-scatterize',
-  'radial-fast-blur',
-  'cross-blur',
-  'scale-wipe',
-  'plastic',
 ]);
 
 export function isCanvas2dOnlyEffect(type: string): boolean {
@@ -360,6 +271,25 @@ const CANVAS2D_IMPLEMENTED: ReadonlySet<string> = new Set<string>([
   // beam from this list would make it vanish on exactly those layers. Named
   // here for the same reason the four above are.
   'beam',
+  // Round seven, the footage set — ported to shaders; retained here for the
+  // layers that bake for another reason, exactly like beam above.
+  'gaussian-blur',
+  'fast-box-blur',
+  'radial-blur',
+  'corner-pin',
+  'transform',
+  // Round fourteen, histogram autos — same position.
+  'equalize', 'auto-levels', 'auto-contrast', 'auto-color',
+  // Rounds twelve + thirteen — same position.
+  'turbulent-displace', 'curl-noise', 'roughen-edges', 'scatter', 'colorama', 'selective-color', 'turbulent-noise', 'add-grain', 'median', 'dust-scratches', 'block-dissolve', 'gradient-wipe', 'card-wipe', 'strobe-light', 'burn-film', 'light-wipe', 'grid-wipe', 'noise-alpha', 'brush-strokes', 'bilateral-blur', 'smart-blur', 'camera-lens-blur', 'mesh-warp', 'liquify', 'bezier-warp', 'cell-pattern', 'radio-waves', 'light-burst', 'write-on', 'star-burst', 'snowfall', 'rainfall', 'cartoon', 'inner-shadow', 'inner-glow', 'satin', 'bevel',
+  // Round eleven, advanced distort / transition / stylize — same position.
+  'polar-coordinates', 'optics-compensation', 'warp', 'page-turn', 'split', 'slant', 'smear', 'rolling-shutter', 'flo-motion', 'lens', 'griddler', 'ball-action', 'drizzle', 'jaws', 'pixel-polly', 'twister', 'card-dance', 'unmult', 'cc-composite', 'cc-scatterize', 'radial-fast-blur', 'scale-wipe', 'texturize', 'threads', 'hex-tile', 'radial-shadow', 'cross-blur', 'plastic', 'glass', 'vector-blur', 'cc-repetile',
+  // Round ten, neighbourhood passes + drawn generators — same position.
+  'channel-blur', 'minimax', 'unsharp-mask', 'shadow-highlight', 'checkerboard', 'grid', 'four-color-gradient', 'circle', 'ellipse',
+  // Round nine, per-pixel colour / channel / transitions — same position.
+  'directional-blur', 'linear-wipe', 'shift-channels', 'alpha-levels', 'solid-composite', 'channel-combiner', 'remove-color-matting', 'change-color', 'change-to-color', 'leave-color', 'toner', 'venetian-blinds', 'radial-wipe', 'iris-wipe', 'line-sweep',
+  // Round eight, the keying set — same position.
+  'keylight', 'wave-warp', 'linear-color-key', 'luma-key', 'color-key', 'color-range', 'extract', 'spill-suppressor', 'simple-choker', 'matte-choker',
   'light-sweep',
   'lens-flare',
   'light-rays',

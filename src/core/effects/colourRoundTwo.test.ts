@@ -26,7 +26,7 @@
 
 import { buildChannelLut, isLutEffect, applyChannelLut } from './colorLut';
 import { EFFECT_DEFS, defaultParams, type Effect, type EffectParams, type EffectType } from './effects';
-import { applyCanvas2dEffect, isCanvas2dOnlyEffect } from './canvas2dEffects';
+import { applyCanvas2dEffect, hasCanvas2dImplementation } from './canvas2dEffects';
 import { selectiveColorData, shadowHighlightData, rangeWeight } from './toneEffects';
 
 function fx(type: EffectType, params: Record<string, unknown> = {}): Effect {
@@ -301,7 +301,9 @@ describe('the new pixel passes reach the bake chain', () => {
   // proves the case DRAWS — the same distinction that let Fill and Stroke sit in
   // the switch and render nothing.
   it.each(['selective-color', 'shadow-highlight'] as const)('%s changes pixels through applyCanvas2dEffect', (type) => {
-    expect(isCanvas2dOnlyEffect(type)).toBe(true);
+    // Round ten (2026-09-06) gave shadow-highlight a shader; the Canvas2D pass is
+    // RETAINED for layers baked for other reasons, which is what this exercises.
+    expect(hasCanvas2dImplementation(type)).toBe(true);
     const canvas = document.createElement('canvas');
     canvas.width = 8; canvas.height = 8;
     const ctx = canvas.getContext('2d')!;
