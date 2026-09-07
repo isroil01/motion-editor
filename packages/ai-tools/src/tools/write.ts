@@ -520,6 +520,13 @@ export const addEffectDef: AiToolDef = {
           // Round six — Iconic AE & CC effects
           'unmult', 'cc-composite', 'cc-repetile', 'cc-scatterize',
           'radial-fast-blur', 'cross-blur', 'scale-wipe', 'plastic',
+          // Round seven — Distort / Transition
+          'cc-tiler', 'ripple-pulse', 'radial-scale-wipe', 'glass-wipe', 'image-wipe',
+          // Round seven — Keying / Colour (incl. the three LUT effects)
+          'color-difference-key', 'wire-removal', 'broadcast-colors', 'noise-hls',
+          'color-offset', 'threshold-rgb', 'cineon-converter',
+          // Round seven — Stylize / Perspective / Generate / Simulation
+          'block-load', 'kernel', '3d-glasses', 'fractal', 'particle-systems', 'cc-bubbles',
         ],
       },
       amount: { type: 'number', description: 'Initial value for the primary param. Omit for the effect default.' },

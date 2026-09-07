@@ -3,6 +3,32 @@
 Newest first. Each entry is what a person opening the app after an update
 would want to know; the engine-level detail is in `ROADMAP.md`.
 
+## Unreleased
+
+- **Eighteen more After Effects effects** (201 in the browser, every one a
+  GPU shader with a CPU reference, except the three lookup-table colour
+  effects that render free on both backends):
+  - *Simulation*: **CC Particle Systems II** — a point / ellipse emitter on the
+    comp clock with Explosive, Direction Axis and Fountain physics, gravity,
+    resistance, birth→death size and colour, Add or Normal compositing; and
+    **CC Bubbles**, keyframed like Snowfall.
+  - *Generate / Perspective*: **Fractal** (Mandelbrot and Julia, smooth
+    escape colouring) and **3D Glasses** (red-cyan / red-green / red-blue /
+    balanced anaglyph, stereo pair, interlace).
+  - *Stylize*: **CC Kernel** (3×3 convolution), **CC Block Load** (progressive
+    block loading) and **CC Threshold RGB**.
+  - *Keying*: **Color Difference Key** and **CC Simple Wire Removal**.
+  - *Colour*: **Broadcast Colors** (NTSC / PAL legaliser), **Noise HLS**,
+    **CC Color Offset** and **Cineon Converter** (log ↔ linear for DPX/EXR).
+  - *Distort / Transition*: **CC Tiler**, **CC Ripple Pulse**, **CC Radial
+    ScaleWipe**, **CC Glass Wipe** and **CC Image Wipe**.
+- **Twenty more effect presets** in the Effects & Presets panel (forty in
+  all): Particle Sparks, Fountain, Rising Bubbles, Anaglyph 3D, Mandelbrot
+  Backdrop, Julia Swirl, Sharpen / Edge Detect Kernel, Broadcast Safe, Log
+  Footage Linearize, Psychedelic Offset, Three-Tone Threshold, Loading Blocks,
+  Ripple Splash, Glass Reveal, Radial Collapse, Tile Wall, Green Screen
+  Difference Key, HLS Film Grain and Wire Removal.
+
 ## 0.7.0 — 2026-09-06
 
 - **Effects run on the GPU**: 177 of 183 effects now render as shaders — every

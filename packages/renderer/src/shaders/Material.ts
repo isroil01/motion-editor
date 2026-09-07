@@ -410,6 +410,23 @@ export const SCALE_WIPE_FX_MATERIAL = perspectiveMaterial('scale-wipe');
 export const TEXTURIZE_FX_MATERIAL = perspectiveMaterial('texturize');
 export const THREADS_FX_MATERIAL = perspectiveMaterial('threads');
 export const HEX_TILE_FX_MATERIAL = perspectiveMaterial('hex-tile');
+/* Round seven (fxRoundFifteen.ts). One texture each -- none of the fifteen
+   needs a blurred reference copy, so none is a two-texture material. */
+export const CC_TILER_FX_MATERIAL = perspectiveMaterial('cc-tiler');
+export const RIPPLE_PULSE_FX_MATERIAL = perspectiveMaterial('ripple-pulse');
+export const RADIAL_SCALE_WIPE_FX_MATERIAL = perspectiveMaterial('radial-scale-wipe');
+export const GLASS_WIPE_FX_MATERIAL = perspectiveMaterial('glass-wipe');
+export const IMAGE_WIPE_FX_MATERIAL = perspectiveMaterial('image-wipe');
+export const COLOR_DIFFERENCE_KEY_FX_MATERIAL = perspectiveMaterial('color-difference-key');
+export const WIRE_REMOVAL_FX_MATERIAL = perspectiveMaterial('wire-removal');
+export const BROADCAST_COLORS_FX_MATERIAL = perspectiveMaterial('broadcast-colors');
+export const NOISE_HLS_FX_MATERIAL = perspectiveMaterial('noise-hls');
+export const BLOCK_LOAD_FX_MATERIAL = perspectiveMaterial('block-load');
+export const KERNEL_FX_MATERIAL = perspectiveMaterial('kernel');
+export const GLASSES_3D_FX_MATERIAL = perspectiveMaterial('3d-glasses');
+export const FRACTAL_FX_MATERIAL = perspectiveMaterial('fractal');
+export const PARTICLE_SYSTEMS_FX_MATERIAL = perspectiveMaterial('particle-systems');
+export const BUBBLES_FX_MATERIAL = perspectiveMaterial('cc-bubbles');
 /** Two-texture combines: tex = layer, binding 3 = the blurred field / projected shadow. */
 export const RADIAL_SHADOW_FX_MATERIAL = twoTextureMaterial('radial-shadow');
 export const PLASTIC_FX_MATERIAL = twoTextureMaterial('plastic');

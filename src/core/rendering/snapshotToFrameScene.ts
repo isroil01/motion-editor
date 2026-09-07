@@ -1389,6 +1389,255 @@ export function extractSpatialEffects(
       if (e.type === 'hex-tile') {
         spatial.push({ type: 'hex-tile', R: Math.max(2, n('radius')), bd: clamp01(n('border') / 100), lw, lh });
       }
+      /*
+        Effects round seven. Each pushes its shader's vec4 slots verbatim as
+        `p` — what every slot holds is documented on the shader in
+        `fxRoundFifteen.ts`, which is the only place that documentation can be
+        checked against the code that reads it.
+
+        Every one of these skips the push at its NEUTRAL setting, under exactly
+        the condition the Canvas2D handler returns early on. That pairing is
+        the contract: if the two disagreed, a layer sitting at an effect's
+        default would render one way on the GPU and another through a bake.
+      */
+      if (e.type === 'cc-tiler') {
+        const scale = n('scale');
+        if (scale < 100 || n('centerX') !== 0 || n('centerY') !== 0) {
+          spatial.push({
+            type: 'cc-tiler',
+            p: [
+              [lw, lh, Math.max(0.01, scale / 100), clamp01(n('blendWithOriginal') / 100)],
+              [lw / 2 + n('centerX'), lh / 2 + n('centerY'), 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'ripple-pulse') {
+        const amplitude = n('amplitude');
+        if (amplitude !== 0) {
+          spatial.push({
+            type: 'ripple-pulse',
+            p: [
+              [lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')],
+              [n('pulseRadius'), amplitude, Math.max(1, n('width')), effectParam(e, 'renderBump') === false ? 0 : 1],
+            ],
+          });
+        }
+      }
+      if (e.type === 'radial-scale-wipe') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          // The forward map reads FURTHER out as completion rises, so the
+          // picture shrinks; reversed it reads nearer and the picture blows up.
+          const reverse = effectParam(e, 'reverse') === true;
+          const k = t >= 1 ? 0 : (reverse ? 1 - t : 1 / (1 - t));
+          spatial.push({
+            type: 'radial-scale-wipe',
+            p: [
+              [lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')],
+              [k, 1 - t, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'glass-wipe') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          spatial.push({
+            type: 'glass-wipe',
+            p: [
+              [lw, lh, t, Math.max(0.02, clamp01(n('softness') / 100))],
+              [n('displacement'), 0, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'image-wipe') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          const band = Math.max(0.001, clamp01(n('borderSoftness') / 100));
+          spatial.push({
+            type: 'image-wipe',
+            p: [
+              [lw, lh, t * (1 + 2 * band) - band, band],
+              [Math.max(0, Math.min(4, Math.round(n('gradientChannel')))), effectParam(e, 'invertGradient') === true ? 1 : 0, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'color-difference-key') {
+        const key = c('keyColor');
+        const len = Math.hypot(key.r, key.g, key.b) || 1;
+        // Which channel the key LEADS on decides partial B — see the kernel.
+        const keyIdx = key.r >= key.g && key.r >= key.b ? 0 : key.g >= key.b ? 1 : 2;
+        const black = clamp01(n('matteInBlack') / 255);
+        const white = clamp01(n('matteInWhite') / 255);
+        spatial.push({
+          type: 'color-difference-key',
+          p: [
+            [key.r / len, key.g / len, key.b / len, keyIdx],
+            [black, 1 / Math.max(0.0001, white - black), 1 / Math.max(0.01, n('matteGamma')), Math.round(n('viewMode'))],
+          ],
+        });
+      }
+      if (e.type === 'wire-removal') {
+        const ax = lw / 2 + n('pointAX');
+        const ay = lh / 2 + n('pointAY');
+        const dx = (lw / 2 + n('pointBX')) - ax;
+        const dy = (lh / 2 + n('pointBY')) - ay;
+        const len = Math.hypot(dx, dy);
+        const thickness = n('thickness');
+        if (len >= 0.0001 && thickness > 0) {
+          const half = thickness / 2;
+          spatial.push({
+            type: 'wire-removal',
+            p: [
+              [lw, lh, ax, ay],
+              [dx / len, dy / len, len, half],
+              [half + clamp01(n('slope') / 100) * thickness + 1, thickness, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'broadcast-colors') {
+        // NTSC carries a 7.5 IRE setup pedestal and PAL does not, so black sits
+        // at a different place on the scale and the gain differs with it.
+        const pedestal = Math.round(n('standard')) === 0 ? 7.5 : 0;
+        spatial.push({
+          type: 'broadcast-colors',
+          p: [[pedestal, 100 - pedestal, Math.max(90, Math.min(120, n('maxSignalAmplitude'))), Math.round(n('howToMakeColorSafe'))]],
+        });
+      }
+      if (e.type === 'noise-hls') {
+        const hue = clamp01(n('hue') / 100);
+        const lightness = clamp01(n('lightness') / 100);
+        const saturation = clamp01(n('saturation') / 100);
+        if (hue > 0 || lightness > 0 || saturation > 0) {
+          spatial.push({
+            type: 'noise-hls',
+            p: [
+              [lw, lh, Math.max(0.5, n('grainSize')), Math.floor(n('noisePhase'))],
+              [hue, lightness, saturation, Math.round(n('noiseType'))],
+            ],
+          });
+        }
+      }
+      if (e.type === 'block-load') {
+        const completion = n('completion');
+        if (completion < 100) {
+          spatial.push({
+            type: 'block-load',
+            p: [
+              [lw, lh, clamp01(completion / 100), Math.max(1, Math.min(8, Math.round(n('scans'))))],
+              [Math.max(1, Math.round(n('blockSize'))), 0, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'kernel') {
+        const k = [
+          n('k00'), n('k01'), n('k02'),
+          n('k10'), n('k11'), n('k12'),
+          n('k20'), n('k21'), n('k22'),
+        ];
+        const divisor = n('divisor');
+        const offset = n('offset');
+        const isIdentity = divisor === 1 && offset === 0
+          && k.every((v, i) => v === (i === 4 ? 1 : 0));
+        if (!isIdentity) {
+          spatial.push({
+            type: 'kernel',
+            p: [
+              [k[0]!, k[1]!, k[2]!, k[3]!],
+              [k[4]!, k[5]!, k[6]!, k[7]!],
+              [k[8]!, Math.abs(divisor) < 0.0001 ? 1 : divisor, offset / 255, 0],
+              [lw, lh, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === '3d-glasses') {
+        const shift = effectParam(e, 'swapLeftRight') === true
+          ? -n('convergenceOffset')
+          : n('convergenceOffset');
+        spatial.push({
+          type: '3d-glasses',
+          p: [
+            [lw, lh, shift, Math.round(n('view'))],
+            [clamp01(n('balance') / 100), 0, 0, 0],
+          ],
+        });
+      }
+      if (e.type === 'fractal') {
+        const inside = c('insideColor');
+        // The classic window is +-2 on the SHORTER side, so the framing holds
+        // when the layer's aspect changes.
+        const scale = 4 / (Math.min(lw, lh) * Math.max(0.1, n('magnification')));
+        spatial.push({
+          type: 'fractal',
+          p: [
+            [lw, lh, Math.round(n('setType')), Math.max(1, Math.min(256, Math.round(n('iterations'))))],
+            [n('centerX'), n('centerY'), scale, 0],
+            [n('juliaX'), n('juliaY'), n('colorPhase') / 360, Math.max(0.1, n('colorCycles'))],
+            [inside.r, inside.g, inside.b, 0],
+          ],
+        });
+      }
+      if (e.type === 'particle-systems') {
+        const birthRate = n('birthRate');
+        // `time` is RESOLVED from the clock — see `TIME_DEPENDENT`.
+        const time = n('time');
+        if (birthRate > 0 && time >= 0) {
+          const longevity = Math.max(0.0001, n('longevity'));
+          const rate = Math.max(0.0001, birthRate);
+          // The alive window, computed HERE so the shader never iterates past
+          // it: births are ordered by index, so the live set is a contiguous
+          // range. Widened by one either side to cover the birth jitter, and
+          // capped at the shader's own 512-iteration loop bound.
+          const first = Math.max(0, Math.floor((time - longevity) * rate) - 1);
+          const last = Math.min(Math.floor(time * rate) + 1, first + 511);
+          const animation = Math.round(n('animation'));
+          // A fountain aims UP: screen y grows downward, so 270 degrees is up,
+          // and a fountain left at 0 would spray sideways.
+          const direction = animation === 2 && n('direction') === 0 ? 270 : n('direction');
+          const birth = c('birthColor');
+          const death = c('deathColor');
+          spatial.push({
+            type: 'particle-systems',
+            p: [
+              [lw, lh, time, rate],
+              [longevity, n('producerX'), n('producerY'), n('producerRadiusX')],
+              [n('producerRadiusY'), animation === 0 ? 0 : 1, rad(direction), rad(n('spread'))],
+              [n('velocity'), clamp01(n('velocityVariation') / 100), n('gravity'), n('resistance')],
+              [n('birthSize'), n('deathSize'), clamp01(n('sizeVariation') / 100), clamp01(n('opacity') / 100)],
+              [birth.r, birth.g, birth.b, Math.round(n('blend'))],
+              [death.r, death.g, death.b, Math.floor(n('seed'))],
+              [first, last, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'cc-bubbles') {
+        const count = Math.max(0, Math.round(n('bubbleAmount')));
+        const opacity = n('opacity');
+        if (count > 0 && opacity > 0) {
+          const size = n('bubbleSize');
+          const cell = Math.max(4, Math.sqrt((lw * lh) / Math.max(1, count)));
+          const col = c('color');
+          spatial.push({
+            type: 'cc-bubbles',
+            p: [
+              [lw, lh, cell, Math.max(1, Math.ceil(lw / cell))],
+              [Math.max(1, Math.ceil(lh / cell)), count, n('bubbleSpeed'), n('wobbleAmplitude')],
+              [n('wobbleFrequency'), size, clamp01(n('sizeVariation') / 100), Math.round(n('shading'))],
+              [col.r, col.g, col.b, clamp01(opacity / 100)],
+              // The wrap span is one bubble taller than the layer, so a bubble
+              // leaving the top is not seen re-entering at the bottom.
+              [n('evolution'), Math.floor(n('seed')), lh + size * 2, 0],
+            ],
+          });
+        }
+      }
       if (e.type === 'vector-blur') {
         const amount = n('amount');
         if (amount > 0) {
@@ -2318,9 +2567,13 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
               // Solid ranges are uniform colour, so the layer's colour effects
               // grade them here on the CPU — the mesh equivalent of
               // gradedSolidColor, and what makes an Invert reach the walls.
-              color: r.textured ? Color.fromHex(r.fill) : gradeFillByEffects(layer, r.fill),
+              color: r.textured || r.paintTextured ? Color.fromHex(r.fill) : gradeFillByEffects(layer, r.fill),
               gain: r.gain,
               ...(r.textured ? { textured: true } : {}),
+              // A gradient wall: textured off the paint plate, not the layer.
+              ...(r.paintTextured && layer.extrudedMesh!.paint
+                ? { textured: true, textureKey: layer.extrudedMesh!.paint.key }
+                : {}),
             })),
             // Texture KEYS, matching what MotionRendererBackend feeds under
             // `pbrmap:<layerId>:*` — the same contract every other textureKey

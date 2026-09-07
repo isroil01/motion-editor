@@ -278,6 +278,24 @@ const PACKERS: ReadonlyArray<{ shader: string; pack: () => Float32Array }> = [
   // here or the pass reads a radius where it expects a far plane.
   { shader: 'ssao', pack: () => packSsao(MVP, RECT, MVP4, 40, 1, 1000, 1, 512, 512, 16) },
   { shader: 'ssao-blur', pack: () => packSsaoBlur(MVP, RECT, 1 / 512, 1 / 512, 1000, 40) },
+  // Effects round seven (packFxBlock, per-shader vec4 counts). Every one is
+  // covered rather than added to the exemption below: the exemption exists
+  // for shaders that predate this table, not as a place to put new ones.
+  { shader: 'cc-tiler', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'ripple-pulse', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'radial-scale-wipe', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'glass-wipe', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'image-wipe', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'color-difference-key', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'wire-removal', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'broadcast-colors', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0]], RECT) },
+  { shader: 'noise-hls', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'block-load', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'kernel', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: '3d-glasses', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'fractal', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'particle-systems', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'cc-bubbles', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
   { shader: 'scene-blit', pack: () => packTextured(MVP, RECT, COLOR, 1) },
   { shader: 'bokeh', pack: () => packBokeh(MVP, RECT, 0.001, 0.001, 8, 6, 0.5, 1) },
   { shader: 'coc-blur', pack: () => packCocBlur(MVP, RECT, RECT, 0.001, 0.001, [1, 2, 3, 4], 6, 0.5, 1) },

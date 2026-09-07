@@ -37,9 +37,30 @@ const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
  * apostrophe bug below, that a comment does NOT move it.
  */
 function unionMembersIn(src, typeName, where = 'source') {
-  const m = src.match(new RegExp(`export type ${typeName}\\s*=([\\s\\S]*?);`, 'm'));
+  /*
+    Comments come out FIRST, before the union is even located.
+
+    The terminating `;` is found by a non-greedy match, so a semicolon anywhere
+    inside the union — including inside a `//` comment between two members —
+    ends the match early and every member after it silently disappears. That is
+    exactly what happened when round seven landed: eighteen members were added,
+    one explanatory comment contained a semicolon, and this script kept
+    reporting the OLD count as though nothing had been added. A wrong number
+    from the counter is worse than no counter, because `docFeatureCounts` then
+    holds the docs to it.
+
+    Stripping first also subsumes the apostrophe bug this function was already
+    carrying a note about: an apostrophe in prose — "AE's Apply Color LUT" —
+    reads as an opening quote, pairs with the next real member's quote, and
+    invents one member while eating another. Adding a single effect moved the
+    count by TWO, which is how that one was found.
+  */
+  const clean = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  const m = clean.match(new RegExp(`export type ${typeName}\\s*=([\\s\\S]*?);`, 'm'));
   if (!m) throw new Error(`featureCounts: no union \`${typeName}\` in ${where}`);
-  // Strip comments BEFORE matching quoted members. An apostrophe in prose —
+  // Kept for the wrapper below, which still hands raw source in. An apostrophe —
   // "AE's Apply Color LUT" — is an opening quote to this regex, so it pairs
   // with the next real member's quote, inventing one member and eating another.
   // Adding a single effect moved the count by TWO, which is how this was

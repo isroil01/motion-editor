@@ -245,4 +245,26 @@ export const EFFECT_CATEGORY: Record<EffectType, string> = {
   'cross-blur': 'Blur & Sharpen',
   'scale-wipe': 'Transition',
   plastic: 'Stylize',
+  // ── Round seven ──
+  'cc-tiler': 'Distort',
+  'ripple-pulse': 'Distort',
+  'radial-scale-wipe': 'Transition',
+  'glass-wipe': 'Transition',
+  'image-wipe': 'Transition',
+  'color-difference-key': 'Keying',
+  'wire-removal': 'Keying',
+  'broadcast-colors': 'Color Correction',
+  // Noise HLS files beside Add Grain, which is where AE's Noise & Grain family
+  // already lives here.
+  'noise-hls': 'Stylize',
+  'color-offset': 'Color Correction',
+  'threshold-rgb': 'Stylize',
+  'cineon-converter': 'Color Correction',
+  'block-load': 'Stylize',
+  kernel: 'Stylize',
+  '3d-glasses': 'Perspective',
+  fractal: 'Generate',
+  // The two simulations file with the weather generators (Snowfall, Rainfall).
+  'particle-systems': 'Generate',
+  'cc-bubbles': 'Generate',
 };

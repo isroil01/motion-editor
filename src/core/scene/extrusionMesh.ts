@@ -12,9 +12,10 @@
  *   • shape rect (incl. per-corner radii) — exact rounded-rect polygon;
  *   • shape ellipse — a ring whose segment count follows the size;
  *   • shape path — the layer's own closed Bézier runs, flattened;
- *   • text — the glyphs TRACED from a 4× raster (`traceTextRuns`), which is
- *     what Create Shapes From Text uses when the font cannot be read, so the
- *     silhouette matches the drawn text to ~0.4 px;
+ *   • text — the glyphs TRACED from a 4× raster (`traceTextSpec`) painted by
+ *     the SAME painter as the layer's texture, in the same box, so the
+ *     silhouette matches the drawn text to ~0.4 px — case, stroke, scale,
+ *     baseline shift, per-run styles and text-on-path included;
  *   • anything else (image, video, precomp…) — the layer rect.
  *
  * Two caches: outlines keyed by what shapes them (text content + style, path
@@ -26,8 +27,8 @@
 import { extrudeOutline, rectOutline, ellipseOutline, bezierRunsToRings, type ExtrudedMesh, type BevelProfile } from '@core/geometry/extrudeMesh';
 import type { Ring } from '@core/geometry/polygonTriangulate';
 import { layerSubpaths } from '@core/rendering/raster/subpaths';
-import { traceTextRuns } from '@core/scene/shapesFromText';
-import { readMeasuredTextStyle } from '@core/text/measureText';
+import { traceTextSpec } from '@core/scene/shapesFromText';
+import type { TextPaintSpec } from '@core/rendering/raster/textPaint';
 import type { RenderLayer } from '@core/rendering/RenderBackend';
 import type { SceneNode } from '@core/types';
 
@@ -62,10 +63,19 @@ class Lru<V> {
 const outlines = new Lru<{ rings: Ring[] } | null>(OUTLINE_CACHE_MAX);
 const meshes = new Lru<ExtrudedMesh | null>(MESH_CACHE_MAX);
 
-/** Test seam. */
+/** Test seam — and the webfont hook below. */
 export function clearExtrusionMeshCaches(): void {
   outlines.clear();
   meshes.clear();
+}
+
+// A text outline traced before its webfont arrived is the FALLBACK face's
+// silhouette, and its key (content + style) does not change when the real face
+// lands — so the body stayed in the wrong font for the session while the front
+// face swapped. measureText.ts drops its measurements on the same events.
+if (typeof document !== 'undefined' && typeof document.fonts !== 'undefined') {
+  void document.fonts.ready.then(clearExtrusionMeshCaches);
+  document.fonts.addEventListener?.('loadingdone', clearExtrusionMeshCaches);
 }
 
 let meshPathEnabled = true;
@@ -106,13 +116,92 @@ function hashPoints(pts: ReadonlyArray<{ x: number; y: number; inX: number; inY:
 }
 
 /**
+ * The paint spec for a text RENDER LAYER — the same field set
+ * MotionRendererBackend hands the texture provider for the front face, so the
+ * silhouette and the texture are the same drawing. Box = the layer box the
+ * snapshot measured (`width`/`height` here), the mesh's uvBox.
+ */
+function textPaintSpecFromLayer(layer: RenderLayer, width: number, height: number): TextPaintSpec | null {
+  const text = layer.text ?? 'Text';
+  if (!text.trim()) return null;
+  return {
+    text,
+    fontSize: layer.fontSize ?? 48,
+    color: '#ffffff',
+    width,
+    height,
+    fontFamily: layer.fontFamily,
+    fontWeight: layer.fontWeight,
+    fontWidth: layer.fontWidth,
+    fontSlant: layer.fontSlant,
+    fontStyle: layer.fontStyle,
+    align: layer.align,
+    letterSpacing: layer.letterSpacing,
+    lineHeight: layer.lineHeight,
+    paragraphSpacing: layer.paragraphSpacing,
+    strokeOverFill: layer.strokeOverFill,
+    textTransform: layer.textTransform,
+    fontVariant: layer.fontVariant,
+    verticalAlign: layer.verticalAlign,
+    verticalScale: layer.verticalScale,
+    horizontalScale: layer.horizontalScale,
+    baselineShift: layer.baselineShift,
+    textStroke: layer.textStroke,
+    textStrokeWidth: layer.textStrokeWidth,
+    runs: layer.runs,
+    glyphs: layer.glyphs,
+    textPath: layer.textPath,
+  };
+}
+
+/** Compact hash of the animator output, quantised to 1/4 px / 1/4 unit - the trace cannot see finer. */
+function hashGlyphs(glyphs: NonNullable<RenderLayer['glyphs']>): string {
+  let h = 2166136261;
+  const mix = (v: number): void => {
+    const r = Math.round(v * 4);
+    h ^= r & 0xffff;
+    h = Math.imul(h, 16777619);
+    h ^= (r >> 16) & 0xffff;
+    h = Math.imul(h, 16777619);
+  };
+  for (const g of glyphs) {
+    mix(g.dx); mix(g.dy); mix(g.scale * 100); mix(g.scaleY * 100); mix(g.rotation);
+    mix(g.opacity * 100); mix(g.fillOpacity * 100); mix(g.tracking); mix(g.lineSpacing);
+    mix(g.blur); mix(g.skew); mix(g.strokeWidth ?? 0);
+    if (g.displayChar) for (let i = 0; i < g.displayChar.length; i++) mix(g.displayChar.charCodeAt(i));
+  }
+  return `${glyphs.length}:${(h >>> 0).toString(36)}`;
+}
+
+/**
+ * Everything that shapes the silhouette, so the cache turns over exactly when
+ * the pixels would. The old key (content + eight style fields) missed the
+ * variable axes, case, scale, baseline shift, stroke, runs, path AND the box
+ * size — toggling uppercase or animating `wdth` reused the stale body.
+ */
+function textSpecKey(s: TextPaintSpec): string {
+  const runsKey = s.runs && s.runs.length > 0 ? JSON.stringify(s.runs) : '';
+  const pathKey = s.textPath
+    ? `${hashPoints(s.textPath.points.map((p) => ({ x: p.x, y: p.y, inX: p.x, inY: p.y, outX: p.x, outY: p.y })))}|${s.textPath.closed ? 1 : 0}|${s.textPath.firstMargin}|${s.textPath.reversed ? 1 : 0}|${s.textPath.perpendicular ? 1 : 0}`
+    : '';
+  return JSON.stringify([
+    s.text, s.fontSize, s.width, s.height,
+    s.fontFamily, s.fontWeight, s.fontWidth, s.fontSlant, s.fontStyle,
+    s.align, s.letterSpacing, s.lineHeight, s.paragraphSpacing,
+    s.textTransform, s.fontVariant, s.verticalAlign, s.verticalScale, s.horizontalScale, s.baselineShift,
+    s.textStrokeWidth ?? 0,
+    runsKey, pathKey,
+  ]);
+}
+
+/**
  * The outline key and rings for a layer. `null` when the kind cannot be
  * outlined right now (e.g. text without a canvas) — the caller falls back to
  * the quad synthesis.
  */
 export function extrusionOutlineFor(
   layer: RenderLayer,
-  node: SceneNode | undefined,
+  _node: SceneNode | undefined,
   width: number,
   height: number,
 ): { key: string; rings: Ring[] } | null {
@@ -144,18 +233,23 @@ export function extrusionOutlineFor(
   }
 
   if (layer.kind === 'text') {
-    if (!node) return null;
-    // Text animators that move glyphs individually are not in the trace.
-    if (layer.glyphs && layer.glyphs.length > 0) return null;
-    const style = readMeasuredTextStyle(node);
-    if (!style || !style.content.trim()) return null;
-    const key = `text:${JSON.stringify([
-      style.content, style.fontFamily, style.fontSize, style.fontWeight, style.fontStyle,
-      style.letterSpacing, style.lineHeight, style.paragraphSpacing,
-    ])}`;
+    const spec = textPaintSpecFromLayer(layer, W, H);
+    if (!spec) return null;
+    /*
+      Text ANIMATORS move glyphs per frame, so an animated layer re-traces on
+      every frame its glyphs change (the key carries them). That used to be
+      refused outright: animated text fell to the 400-slice stack, which
+      rasterises the whole string per slice per frame and is no cheaper. The
+      trace runs at 2x instead of 4x for animated text: a quarter of the
+      pixels, ~0.8 px silhouette accuracy against a moving target nobody can
+      read to the pixel. Still text drawn by the SAME painter, so a glyph an
+      animator fades out leaves the solid, and one it moves takes its wall.
+    */
+    const animated = !!(layer.glyphs && layer.glyphs.length > 0);
+    const key = `text:${textSpecKey(spec)}${animated ? `|g${hashGlyphs(layer.glyphs!)}` : ''}`;
     let hit = outlines.get(key);
     if (hit === undefined) {
-      const runs = traceTextRuns(node);
+      const runs = traceTextSpec(spec, animated ? 2 : 4);
       const rings = runs ? bezierRunsToRings(runs, 0.5) : [];
       hit = rings.length > 0 ? { rings } : null;
       outlines.set(key, hit);

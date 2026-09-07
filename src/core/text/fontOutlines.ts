@@ -82,7 +82,7 @@ export interface OutlineRun {
  */
 export function outlineRuns(
   style: MeasuredTextStyle,
-  boxes: MeasuredText,
+  _boxes: MeasuredText,
   font: ParsedFont,
   measure: CanvasRenderingContext2D,
 ): OutlineRun[] {
@@ -90,7 +90,12 @@ export function outlineRuns(
   const lines = style.content.split('\n');
   const n = lines.length;
   const gap = style.fontSize * style.lineHeight + style.paragraphSpacing;
-  const originY = -boxes.ink.offsetY;
+  // The draw origin IS the layer centre: the rasteriser draws every line on
+  // the `middle` baseline about the box centre, and the layer box is
+  // symmetric about that origin (measureTextSize). Centring on the INK box
+  // instead (`-boxes.ink.offsetY`) put the outlines a descender's worth high
+  // on the text they were meant to coincide with.
+  const originY = 0;
   const runs: OutlineRun[] = [];
 
   for (let li = 0; li < n; li++) {

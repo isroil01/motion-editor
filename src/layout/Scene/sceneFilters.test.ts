@@ -2,10 +2,12 @@ import type { TreeNode } from '@components/TreeView';
 import type { SceneKind } from '@core/scene/seedDefaultScene';
 import {
   EMPTY_SCENE_FILTER,
+  countSceneMatches,
   filterSceneTree,
   isSceneFilterActive,
   nodeMatches,
   toggleKind,
+  withRevealed,
   type SceneFilter,
   type SceneNodeFacts,
 } from './sceneFilters';
@@ -55,6 +57,28 @@ describe('sceneFilters', () => {
   it('drops a branch with no match anywhere in it', () => {
     const f: SceneFilter = { ...EMPTY_SCENE_FILTER, query: 'zzz' };
     expect(filterSceneTree(TREE, f, factsOf)).toEqual([]);
+  });
+
+  it('counts the rows that match on their own facts, not the rows on screen', () => {
+    // 'cam' is the one camera; the comp root is kept only as its path.
+    const cam: SceneFilter = { ...EMPTY_SCENE_FILTER, kinds: new Set<SceneKind>(['camera']) };
+    const camTree = filterSceneTree(TREE, cam, factsOf);
+    expect(ids(camTree)).toHaveLength(2);
+    expect(countSceneMatches(camTree, cam, factsOf)).toBe(1);
+    // The coral group matches and drags both children along; only the group
+    // and the coral child are matches.
+    const coral: SceneFilter = { ...EMPTY_SCENE_FILTER, label: 'coral' };
+    const coralTree = filterSceneTree(TREE, coral, factsOf);
+    expect(ids(coralTree)).toHaveLength(4);
+    expect(countSceneMatches(coralTree, coral, factsOf)).toBe(2);
+    expect(countSceneMatches([], coral, factsOf)).toBe(0);
+  });
+
+  it('withRevealed adds only the missing ids and keeps identity when none are', () => {
+    const expanded = ['comp', 'titles'];
+    expect(withRevealed(expanded, ['titles', 'comp'])).toBe(expanded);
+    expect(withRevealed(expanded, [])).toBe(expanded);
+    expect(withRevealed(expanded, ['cam', 'titles'])).toEqual(['comp', 'titles', 'cam']);
   });
 
   it('toggleKind adds, removes and collapses to "any"', () => {

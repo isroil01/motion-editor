@@ -1,8 +1,8 @@
 .root {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   background: var(--color-panel);
   color: var(--color-text-primary);
   font-family: var(--font-family-sans);
@@ -15,135 +15,127 @@
   overflow-y: auto;
 }
 
-.sectionTitle {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 2px;
-}
-
-.subhead {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-top: 4px;
-}
-
-.row {
+/* ── Panel Header / Target Status ── */
+.panelHead {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-secondary);
 }
 
-.col {
+.panelHeadLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.panelHeadTitle {
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-uppercase);
+  color: var(--color-text-primary);
+}
+
+.targetBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targetBadgeActive {
+  background: var(--color-primary-subtle);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  color: var(--color-primary);
+}
+
+/* ── Section Cards ── */
+.sectionCard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex: 1;
+  gap: var(--space-2);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
 }
 
-/* ── Content & Source Text Row ── */
-.contentBox {
+.sectionHeader {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-uppercase);
 }
 
+/* ── Ranged Selection Banner ── */
+.rangeNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-primary-subtle);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-micro);
+  color: var(--color-selection);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── Text Content & Keyframing ── */
 .contentHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.sourceStopwatch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: var(--control-height-sm);
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-field-border);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 100ms ease;
-}
-
-.sourceStopwatch:hover {
-  background: var(--color-surface-3);
-  color: var(--color-text-primary);
-}
-
-.sourceStopwatchActive {
-  background: var(--color-primary);
-  color: var(--color-primary-foreground);
-  border-color: var(--color-primary);
+  gap: var(--space-2);
 }
 
 .contentTextarea {
   width: 100%;
   box-sizing: border-box;
-  min-height: 52px;
-  padding: 6px 8px;
+  min-height: 48px;
+  padding: var(--space-2);
   background: var(--color-surface-2);
   color: var(--color-text-primary);
   border: 1px solid var(--color-field-border);
   border-radius: var(--radius-control);
   font-size: var(--font-size-xs);
   font-family: inherit;
-  line-height: 1.35;
+  line-height: 1.4;
   resize: vertical;
   outline: none;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .contentTextarea:focus {
-  border-color: var(--color-selection);
+  border-color: var(--color-primary);
 }
 
-/* ── Range Styling Notice ── */
-.rangeNotice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  background: var(--color-primary-subtle);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-xs);
-  color: var(--color-selection);
-  font-weight: 500;
-}
-
-.resetBtn {
-  background: transparent;
-  border: none;
-  color: var(--color-selection);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-}
-
-.resetBtn:hover {
-  color: var(--color-text-primary);
-}
-
+/* ── Typography Rows ── */
 .fontRow {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: var(--space-2);
   align-items: center;
   width: 100%;
   min-width: 0;
@@ -153,26 +145,36 @@
 .fontSelect {
   width: 100%;
   min-width: 0;
-  height: 26px;
+  height: var(--control-height-row);
   background: var(--color-surface-2);
   color: var(--color-text-primary);
   border: 1px solid var(--color-field-border);
   border-radius: var(--radius-control);
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   font-size: var(--font-size-xs);
+  font-family: inherit;
   outline: none;
   box-sizing: border-box;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .fontSelect:focus {
-  border-color: var(--color-selection);
+  border-color: var(--color-primary);
 }
 
-/* Swatch Box (Fill & Stroke) */
-.swatchBox {
+/* ── Appearance: Fill, Stroke & Swatch Deck ── */
+.appearanceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+}
+
+.swatchPair {
   position: relative;
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 40px;
   flex: none;
 }
 
@@ -180,8 +182,8 @@
   position: absolute;
   top: 0;
   left: 0;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   z-index: 2;
 }
 
@@ -189,63 +191,149 @@
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   z-index: 1;
 }
 
 .fillSwatchPicker,
 .strokeSwatchPicker {
-  width: 28px !important;
-  height: 28px !important;
+  width: 26px !important;
+  height: 26px !important;
   padding: 0 !important;
-  border-radius: 3px !important;
+  border-radius: var(--radius-xs) !important;
   border: 1px solid var(--color-border-strong) !important;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5) !important;
   cursor: pointer;
   display: block !important;
+  transition: transform 100ms ease-out;
 }
 
-.fillSwatchPicker span,
-.strokeSwatchPicker span {
-  width: 100% !important;
-  height: 100% !important;
-  border-radius: 2px !important;
-  display: block !important;
+.fillSwatchPicker:hover,
+.strokeSwatchPicker:hover {
+  transform: scale(1.05);
 }
 
 .strokeSwatchPicker {
-  border: 2px solid var(--color-text-primary) !important;
+  border: 2px solid var(--color-border-strong) !important;
 }
 
-.swapBtn {
+.swapToggle {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 16px;
-  height: 16px;
-  border: none;
+  top: -2px;
+  right: -2px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
   background: var(--color-surface-3);
   color: var(--color-text-secondary);
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
+  border: 1px solid var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--font-size-micro);
   cursor: pointer;
   z-index: 3;
   padding: 0;
+  transition: transform 100ms ease-out, background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
-.swapBtn:hover {
-  background: var(--color-selection);
-  color: var(--color-primary-foreground);
+.swapToggle:hover {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
-/* Two-column AE metric grid */
+.swapToggle:active {
+  transform: scale(0.9);
+}
+
+.appearanceDetails {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.appearanceMeta {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.appearanceSub {
+  font-size: var(--font-size-micro);
+  color: var(--color-text-muted);
+}
+
+/* ── Segmented Control Groups (Formatting & Alignment) ── */
+.controlGroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-control);
+  padding: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.groupItem {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--control-height-row);
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  user-select: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-standard),
+    color var(--motion-duration-fast) var(--motion-ease-standard),
+    transform 100ms ease-out;
+}
+
+.groupItem:hover:not(:disabled) {
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+}
+
+.groupItem:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.groupItem[data-active="true"] {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.groupItem[data-active="true"]:hover:not(:disabled) {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.groupItem:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+/* ── Two-Column Studio Metric Grid ── */
 .metricGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px 8px;
+  gap: var(--space-2);
   width: 100%;
   box-sizing: border-box;
 }
@@ -253,23 +341,28 @@
 .metricCell {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   background: var(--color-surface-2);
   border: 1px solid var(--color-field-border);
   border-radius: var(--radius-control);
-  padding: 2px 6px;
+  padding: 0 var(--space-2);
   height: var(--control-height-row);
   min-width: 0;
   box-sizing: border-box;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.metricCell:focus-within {
+  border-color: var(--color-primary);
 }
 
 .metricLabel {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-secondary);
   letter-spacing: -0.01em;
   user-select: none;
-  min-width: 18px;
+  min-width: 20px;
   flex-shrink: 0;
 }
 
@@ -279,10 +372,10 @@
   width: 100%;
   border: none;
   background: transparent;
-  color: var(--color-selection);
+  color: var(--color-text-primary);
   font-family: inherit;
   font-size: var(--font-size-xs);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   text-align: right;
   outline: none;
   cursor: ew-resize;
@@ -296,236 +389,106 @@
 }
 
 .metricUnit {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-micro);
   color: var(--color-text-muted);
   margin-left: 1px;
   flex-shrink: 0;
 }
 
-/* Faux Button Row */
-.fauxRow {
-  display: flex;
-  gap: 2px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-field-border);
-  border-radius: var(--radius-control);
-  padding: 2px;
-  width: 100%;
-  box-sizing: border-box;
+.metricCellWide {
+  grid-column: span 2;
 }
 
-.fauxBtn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: var(--control-height-row);
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-radius: 2px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  padding: 0;
-  transition: background-color 100ms ease, color 100ms ease;
-}
-
-.fauxBtn:hover {
-  background: var(--color-surface-3);
-  color: var(--color-text-primary);
-}
-
-.fauxBtnActive {
-  background: var(--color-primary);
-  color: var(--color-primary-foreground);
-}
-
-/* ── Path Options & Checkbox Row ── */
+/* ── Path & Box Options ── */
 .controlRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
   box-sizing: border-box;
   font-size: var(--font-size-xs);
-}
-
-/* ── Style Presets Grid ── */
-.presetGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
-  gap: 4px;
-  width: 100%;
-  max-height: 110px;
-  overflow-y: auto;
-  box-sizing: border-box;
-}
-
-.presetChip {
-  padding: 3px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-field-border);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  text-align: center;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: all 100ms ease;
-}
-
-.presetChip:hover {
-  background: var(--color-surface-3);
-  border-color: var(--color-selection);
-  color: var(--color-text-primary);
-}
-
-/* Paragraph alignment bar */
-.alignBar {
-  display: flex;
-  gap: 2px;
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-field-border);
-  border-radius: var(--radius-control);
-  padding: 2px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.alignBtn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: var(--control-height-row);
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-radius: 2px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  transition: background-color 100ms ease, color 100ms ease;
-}
-
-.alignBtn:hover {
-  background: var(--color-surface-3);
-  color: var(--color-text-primary);
-}
-
-.alignBtnActive {
-  background: var(--color-primary);
-  color: var(--color-primary-foreground);
-}
-
-.emptyHint {
-  padding: 16px;
-  text-align: center;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-size-xs);
-  line-height: 1.4;
-}
-
-
-/* ── Panel head + the small inline helpers that used to be style attributes ── */
-.panelHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: var(--space-1);
-  border-bottom: 1px solid var(--color-border-subtle);
-  font-size: var(--font-size-micro);
-  color: var(--color-text-secondary);
-}
-
-.panelHeadTitle {
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-spacing-uppercase);
-  color: var(--color-text-tertiary);
-}
-
-.panelHeadStatus {
-  color: var(--color-text-muted);
-}
-
-.panelHeadStatusOn {
-  color: var(--color-text-secondary);
-}
-
-.fontSizeCell {
-  flex: 0 0 80px;
-  min-width: 0;
-}
-
-.fullWidth {
-  width: 100%;
-}
-
-.colCentered {
-  justify-content: center;
-}
-
-.swatchTitle {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.swatchHint,
-.unit {
-  font-size: var(--font-size-micro);
-  color: var(--color-text-muted);
 }
 
 .inlineCheck {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   cursor: pointer;
+  user-select: none;
 }
 
-.inlineCheckBox {
-  width: 13px;
-  height: 13px;
-}
-
-.inlineCheckLabel,
-.inlineLabel {
+.inlineCheckLabel {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
-}
-
-.inlineLabel {
-  font-weight: var(--font-weight-medium);
 }
 
 .inlineField {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .inlineNumber {
-  width: 50px;
+  width: 60px;
+  height: var(--control-height-row);
   padding: 0 var(--space-2);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-field-border);
   border-radius: var(--radius-control);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  text-align: right;
+  outline: none;
+}
+
+.inlineNumber:focus {
+  border-color: var(--color-primary);
 }
 
 .pathSelect {
-  width: 110px;
-  height: var(--control-height-sm);
+  width: 140px;
+  height: var(--control-height-row);
 }
 
-.sectionTitleSpaced {
-  margin-top: var(--space-3);
+/* ── Style Presets Grid ── */
+.presetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: var(--space-1);
+  width: 100%;
+  max-height: 120px;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
-.metricCellWide {
-  grid-column: span 2;
+.presetChip {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-medium);
+  text-align: center;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-standard),
+    border-color var(--motion-duration-fast) var(--motion-ease-standard),
+    color var(--motion-duration-fast) var(--motion-ease-standard),
+    transform 100ms ease-out;
+}
+
+.presetChip:hover {
+  background: var(--color-surface-3);
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.presetChip:active {
+  transform: scale(0.96);
 }

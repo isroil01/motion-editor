@@ -418,6 +418,22 @@ export type RenderableEffect =
   | { type: 'inner-glow'; p: readonly FxVec4[]; sigmaPx: number }
   | { type: 'satin'; p: readonly FxVec4[]; sigmaPx: number }
   | { type: 'bevel'; p: readonly FxVec4[]; sigmaPx: number }
+  /** Round seven (effects): packed slots verbatim, documented per shader in fxRoundFifteen*.ts. */
+  | { type: 'cc-tiler'; p: readonly FxVec4[] }
+  | { type: 'ripple-pulse'; p: readonly FxVec4[] }
+  | { type: 'radial-scale-wipe'; p: readonly FxVec4[] }
+  | { type: 'glass-wipe'; p: readonly FxVec4[] }
+  | { type: 'image-wipe'; p: readonly FxVec4[] }
+  | { type: 'color-difference-key'; p: readonly FxVec4[] }
+  | { type: 'wire-removal'; p: readonly FxVec4[] }
+  | { type: 'broadcast-colors'; p: readonly FxVec4[] }
+  | { type: 'noise-hls'; p: readonly FxVec4[] }
+  | { type: 'block-load'; p: readonly FxVec4[] }
+  | { type: 'kernel'; p: readonly FxVec4[] }
+  | { type: '3d-glasses'; p: readonly FxVec4[] }
+  | { type: 'fractal'; p: readonly FxVec4[] }
+  | { type: 'particle-systems'; p: readonly FxVec4[] }
+  | { type: 'cc-bubbles'; p: readonly FxVec4[] }
   /** Round fourteen: histogram colour autos. `p` = the fx-auto-table slots (fxRoundFourteen.ts) — the reduction runs in CompositionPass. */
   | { type: 'equalize'; p: readonly FxVec4[]; lw: number; lh: number }
   | { type: 'auto-levels'; p: readonly FxVec4[]; lw: number; lh: number }
@@ -774,6 +790,12 @@ export interface Renderable {
       gain: number;
       /** Sample the layer's own texture instead of the flat colour. */
       textured?: boolean;
+      /**
+       * With `textured`: sample THIS texture (identity uv over the mesh's
+       * layer-box uv) rather than the renderable's own. An extrusion's walls
+       * sample the layer's fill-paint plate here, so a gradient reaches them.
+       */
+      textureKey?: string;
     }>;
     /**
      * An imported glTF material's maps beyond base colour. Present only when

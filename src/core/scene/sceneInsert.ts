@@ -1913,12 +1913,24 @@ export function ungroupSelected(): void {
   }
 }
 
-/** Toggle a boolean layer flag across the whole selection (all follow the
- *  first node's inverse, so one click flips them together). */
-function toggleSelectionFlag(flag: 'locked' | 'solo' | 'visible'): void {
-  const ids = useSelectionStore.getState().ids;
+/**
+ * Toggle a boolean layer flag across the whole selection (all follow ONE
+ * node's inverse, so one click flips them together).
+ *
+ * `anchorId` names that node. It defaults to the first selected, which is
+ * right for a keyboard shortcut — but a context menu labels its item after
+ * the ROW that was right-clicked ("Unlock" on a locked row), and in a mixed
+ * selection that row is not necessarily `ids[0]`: the menu said Unlock and
+ * then locked everything. The menu passes the clicked id so the label and
+ * the action agree.
+ */
+function toggleSelectionFlag(flag: 'locked' | 'solo' | 'visible', anchorId?: string): void {
+  const selected = useSelectionStore.getState().ids;
+  // An anchor outside the selection toggles just itself (the Scene panel's
+  // per-row eye is a click on that row, not on the selection).
+  const ids = anchorId && !selected.includes(anchorId) ? [anchorId] : selected;
   if (ids.length === 0) return;
-  const first = defaultSceneGraph.getNode(ids[0]!);
+  const first = defaultSceneGraph.getNode(anchorId ?? ids[0]!);
   if (!first) return;
   const next = flag === 'visible' ? first.visible === false : !first[flag];
   const label = flag === 'visible'
@@ -1942,9 +1954,20 @@ function toggleSelectionFlag(flag: 'locked' | 'solo' | 'visible'): void {
   });
 }
 
-export const toggleSelectedLocked = (): void => toggleSelectionFlag('locked');
-export const toggleSelectedSolo = (): void => toggleSelectionFlag('solo');
-export const toggleSelectedVisible = (): void => toggleSelectionFlag('visible');
+export const toggleSelectedLocked = (anchorId?: string): void => toggleSelectionFlag('locked', anchorId);
+export const toggleSelectedSolo = (anchorId?: string): void => toggleSelectionFlag('solo', anchorId);
+export const toggleSelectedVisible = (anchorId?: string): void => toggleSelectionFlag('visible', anchorId);
+
+/** Show/hide ONE layer as an undoable edit — the Scene panel's eye button. */
+export function toggleNodeVisible(id: string): void {
+  const node = defaultSceneGraph.getNode(id);
+  if (!node) return;
+  const next = node.visible === false;
+  runDocumentEdit(next ? 'Show layer' : 'Hide layer', () => {
+    node.visible = next;
+    bumpScene();
+  });
+}
 
 /**
  * Group the currently selected nodes into a single master group body.

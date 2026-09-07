@@ -11,6 +11,7 @@ import { ssaoBufferSize, ssaoCameraFor, ssaoFarFor, ssaoIntensityOf, ssaoRadiusO
 import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL } from '../../shaders/Material';
 import { roundElevenSinglePass } from './roundElevenFx';
 import { roundTwelveSinglePass, roundTwelveFieldPass } from './roundTwelveFx';
+import { roundFifteenSinglePass } from './roundFifteenFx';
 import { packBlur, packBokeh, packCocBlur, packDofGather, packGlass, packGradientRamp, packFractalNoise, packDisplacementMap, packCompoundBlur, packApplyColorLut, packSetMatte, packMotionTile, packFill, packStroke, packSharpen, packNoise, packBeam, packLightSweep, packLensFlare, packLightRays, packBend, packPerspective, packSpotlight, packArithmetic, packVignetteFx, packBlackAndWhite, packTritone, packPhotoFilter, packThreshold, packVibrance, packFxBlock, packPluginEffect } from '../../pipeline/uniforms';
 import { ENV_SPEC_LEVELS } from '../../pipeline/uniforms';
 import { Mat4 } from '../../core/math/Mat4';
@@ -1764,9 +1765,12 @@ export class CompositionPass extends RenderPass {
           ], fxBox),
           texture: curTex, sampler: clampSampler(),
         });
-      } else if (roundElevenSinglePass(effect) || roundTwelveSinglePass(effect)) {
-        // Rounds eleven + twelve single-pass effects — the tables in roundElevenFx.ts / roundTwelveFx.ts.
-        const draw = (roundElevenSinglePass(effect) ?? roundTwelveSinglePass(effect))!;
+      } else if (roundElevenSinglePass(effect) || roundTwelveSinglePass(effect) || roundFifteenSinglePass(effect)) {
+        // Rounds eleven, twelve and fifteen single-pass effects — the tables in
+        // roundElevenFx.ts / roundTwelveFx.ts / roundFifteenFx.ts.
+        const draw = (roundElevenSinglePass(effect)
+          ?? roundTwelveSinglePass(effect)
+          ?? roundFifteenSinglePass(effect))!;
         cmds.add({
           batchKey: effect.type, material: draw.material, blend: 'normal',
           uniforms: packFxBlock(mvp, targetUv, draw.params, fxBox),
@@ -3248,10 +3252,20 @@ export class CompositionPass extends RenderPass {
       const rangeShade = shade && range.role === 'front' && shade.oneSided
         ? { ...shade, oneSided: undefined }
         : shade;
-      if (range.textured && tex) {
-        emitMesh3D(cmds, mvp, Color.white(), r.opacity, r.blend, geometry, rangeShade,
-          { texture: tex.texture, sampler: clampSampler(), uvRect: r.uvRect, color: r.colorMatrix, sampleLinear: !!tex.sampleLinear },
+      // A range may sample its OWN texture — an extrusion's gradient plate —
+      // over the mesh's layer-box uv (no pad correction: the plate is the box).
+      // Its tint carries the unlit face gain the way the flat path's `color`
+      // does; lit ranges leave that to the shader, as everywhere else.
+      const rangeTex = range.textureKey ? this.texFor(ctx, range.textureKey) : tex;
+      const ownTexture = !!range.textureKey && !!rangeTex;
+      if (range.textured && rangeTex) {
+        const tint = ownTexture && !shade ? { r: range.gain, g: range.gain, b: range.gain, a: 1 } : Color.white();
+        emitMesh3D(cmds, mvp, tint, r.opacity, r.blend, geometry, rangeShade,
+          { texture: rangeTex.texture, sampler: clampSampler(), uvRect: ownTexture ? undefined : r.uvRect, color: r.colorMatrix, sampleLinear: !!rangeTex.sampleLinear },
           pbrSet);
+      } else if (range.textured && range.textureKey && !rangeTex) {
+        // Plate not uploaded yet (first frame): the flat colour, never nothing.
+        emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade);
       } else if (pbrSet && white) {
         // Untextured base colour with maps: white at slot 1, the material's
         // colour through the tint.

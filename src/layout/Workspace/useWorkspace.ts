@@ -94,7 +94,7 @@ import {
   type NavTarget,
 } from '@core/workspace/cameraNav';
 import { useFaceSelectionStore } from '@stores/faceSelectionStore';
-import { facesOfNode, pickFace } from '@core/scene/facePicking';
+import { facesOfNode, pickFace, faceHighlightGroups } from '@core/scene/facePicking';
 import { compSizeOf } from '@core/composition/compSizes';
 import { RULER_CSS_PX, inStrip, rulerStrips } from './rulerGeometry';
 
@@ -2800,27 +2800,40 @@ function paintFaceSelection(canvas: HTMLCanvasElement, controller: WorkspaceCont
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const trace = (quad: ReadonlyArray<{ x: number; y: number }>): void => {
-    ctx.beginPath();
-    quad.forEach((p, i) => {
-      const s = controller.ws.worldToScreen(p);
-      if (i === 0) ctx.moveTo(s.x, s.y);
-      else ctx.lineTo(s.x, s.y);
-    });
-    ctx.closePath();
-  };
+  const toScreen = (p: { x: number; y: number }) => controller.ws.worldToScreen(p);
 
-  // Far faces first so the near ones outline on top.
-  // Edge-on faces are skipped for the same reason the picker skips them: an
+  // Faces are grouped into SURFACES: a quad face is its own surface, while on
+  // the mesh path every visible triangle of a kind (all of a glyph set's walls,
+  // say) is one surface — filled as one path and outlined along its boundary
+  // edges only, so the highlight is the object's face and not a wireframe.
+  // Far surfaces first so the near ones outline on top. Edge-on faces are
+  // dropped by the grouping for the same reason the picker skips them: an
   // invisible sliver drawn as a line reads as a stray scratch on the object.
-  const sorted = faces.filter((f) => f.area >= 4).sort((a, b) => b.depth - a.depth);
+  const groups = faceHighlightGroups(faces).sort((a, b) => b.depth - a.depth);
   ctx.lineWidth = 1;
-  for (const f of sorted) {
-    const active = fs.nodeId === nodeId && f.suffix === fs.suffix;
-    trace(f.quad);
+  for (const g of groups) {
+    const active = fs.nodeId === nodeId && g.suffix === fs.suffix;
     if (active) {
+      ctx.beginPath();
+      for (const poly of g.polygons) {
+        poly.forEach((p, i) => {
+          const s = toScreen(p);
+          if (i === 0) ctx.moveTo(s.x, s.y);
+          else ctx.lineTo(s.x, s.y);
+        });
+        ctx.closePath();
+      }
       ctx.fillStyle = 'rgba(120,170,255,0.28)';
       ctx.fill();
+    }
+    ctx.beginPath();
+    for (const [a, b] of g.outline) {
+      const sa = toScreen(a);
+      const sb = toScreen(b);
+      ctx.moveTo(sa.x, sa.y);
+      ctx.lineTo(sb.x, sb.y);
+    }
+    if (active) {
       ctx.strokeStyle = 'rgba(150,195,255,1)';
       ctx.lineWidth = 2;
       ctx.stroke();

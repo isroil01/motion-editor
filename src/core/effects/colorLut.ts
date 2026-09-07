@@ -15,6 +15,7 @@
 
 import type { Effect, EffectType } from './effects';
 import { effectNumber } from './effects';
+import { cineonConverterTables, colorOffsetTables, thresholdRgbTables } from './aeRoundSevenLuts';
 
 /** 256-entry output tables (0..255 float), one per channel. */
 export interface ChannelLut {
@@ -82,6 +83,17 @@ const LUT_BUILDER_ENTRIES: readonly LutBuilderEntry[] = [
     // between usable and not.
     ['color-balance', (e) => colorBalanceTables(e)],
     ['gamma-pedestal-gain', (e) => gammaPedestalGainTables(e)],
+    /*
+      Round seven's three. Each qualifies on the SHAPE rule above — a per
+      channel transfer with no reference to the other two channels and none to
+      the neighbours — and each pays for the placement in the same coin: an
+      effect here renders on both backends and forces no bake, which for a
+      Cineon linearise (switched on for a whole log-footage comp) is the
+      difference between usable and not.
+    */
+    ['color-offset', (e) => colorOffsetTables(e)],
+    ['threshold-rgb', (e) => thresholdRgbTables(e)],
+    ['cineon-converter', (e) => cineonConverterTables(e)],
 ];
 
 const LUT_BUILDERS: ReadonlyMap<EffectType, (effect: Effect) => ChannelLut> =

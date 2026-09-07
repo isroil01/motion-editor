@@ -82,6 +82,48 @@ export function filterSceneTree<T>(
   return out;
 }
 
+/**
+ * How many rows of a FILTERED tree pass the filter on their own facts.
+ *
+ * This is the number the footer reports as matching. It is not the row
+ * count: `filterSceneTree` keeps an ancestor purely as the path to a match,
+ * and a matching group drags all of its children along — both are on screen,
+ * neither is a match, and counting them said "12 shown" for a search that
+ * hit one layer inside one group.
+ */
+export function countSceneMatches<T>(
+  nodes: ReadonlyArray<TreeNode<T>>,
+  f: SceneFilter,
+  factsOf: (id: string) => SceneNodeFacts | null,
+): number {
+  let n = 0;
+  for (const node of nodes) {
+    const facts = factsOf(node.id);
+    if (facts && nodeMatches(facts, f)) n += 1;
+    if (node.children) n += countSceneMatches(node.children, f, factsOf);
+  }
+  return n;
+}
+
+/**
+ * The expansion set a CONTROLLED tree should show: everything the filter
+ * expanded plus whatever the host asked to reveal.
+ *
+ * TreeView merges `revealIds` into its own state only while it owns that
+ * state; with `expandedIds` supplied the host owns it, and a reveal that
+ * arrives then (parenting a layer while a search is active) has to be merged
+ * here or it is dropped. Returns `expanded` itself when there is nothing to
+ * add, so the tree's memo on the array's identity is not defeated.
+ */
+export function withRevealed(
+  expanded: ReadonlyArray<string>,
+  reveal: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const have = new Set(expanded);
+  const missing = reveal.filter((id) => !have.has(id));
+  return missing.length === 0 ? expanded : [...expanded, ...missing];
+}
+
 /** Toggle a kind in the set; an empty set collapses back to "every kind". */
 export function toggleKind(kinds: ReadonlySet<SceneKind> | null, kind: SceneKind): ReadonlySet<SceneKind> | null {
   const next = new Set(kinds ?? []);

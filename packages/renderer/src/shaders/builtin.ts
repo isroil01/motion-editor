@@ -30,6 +30,7 @@ import { FX_ROUND_ELEVEN_SHADERS } from './fxRoundEleven';
 import { FX_ROUND_TWELVE_SHADERS } from './fxRoundTwelve';
 import { FX_ROUND_THIRTEEN_SHADERS } from './fxRoundThirteen';
 import { FX_ROUND_FOURTEEN_SHADERS } from './fxRoundFourteen';
+import { FX_ROUND_FIFTEEN_SHADERS } from './fxRoundFifteen';
 export { GLASS_COMPOSITE };
 
 import {
@@ -6671,6 +6672,9 @@ export const BUILTIN_SHADERS: readonly ShaderSource[] = [
   ...FX_ROUND_THIRTEEN_SHADERS,
   // Round fourteen: the histogram colour autos (fxRoundFourteen.ts).
   ...FX_ROUND_FOURTEEN_SHADERS,
+  // Effects round seven: distort / transition / keying / colour / stylize /
+  // generate / simulation (fxRoundFifteen.ts).
+  ...FX_ROUND_FIFTEEN_SHADERS,
   SOLID3D,
   // Shadow-map casters. No `-linear` twin and no premultiply handling: neither
   // samples a texture — they write a packed distance, not a colour.

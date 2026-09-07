@@ -248,6 +248,11 @@ describe('EFFECT_DEFS', () => {
     'directional-blur', 'linear-wipe', 'shift-channels', 'alpha-levels', 'solid-composite', 'channel-combiner', 'remove-color-matting', 'change-color', 'change-to-color', 'leave-color', 'toner', 'venetian-blinds', 'radial-wipe', 'iris-wipe', 'line-sweep',
     // Round eight (2026-09-06): the keying set.
     'keylight', 'wave-warp', 'linear-color-key', 'luma-key', 'color-key', 'color-range', 'extract', 'spill-suppressor', 'simple-choker', 'matte-choker',
+    // Effects round seven (2026-09-06). Fifteen — the round's other three are
+    // per-channel transfers and are already covered by `isLutEffect`.
+    'cc-tiler', 'ripple-pulse', 'radial-scale-wipe', 'glass-wipe', 'image-wipe',
+    'color-difference-key', 'wire-removal', 'broadcast-colors', 'noise-hls',
+    'block-load', 'kernel', '3d-glasses', 'fractal', 'particle-systems', 'cc-bubbles',
   ]);
   // Temporal effects (Echo, Posterize Time) are resolved in buildSnapshot's
   // time plumbing, not as a per-layer pass. Read the REAL predicate — this was

@@ -61,7 +61,7 @@ rediscovered in git history and believed a second time.
 
 | Registry | Count | Source of truth |
 |---|---|---|
-| Effects | 183 | `src/core/effects/effects.ts` → `EffectType` |
+| Effects | 201 | `src/core/effects/effects.ts` → `EffectType` |
 | Blend modes | 38 | `src/core/effects/blendMode.ts` → `LayerBlendMode` |
 | Layer styles | 10 | `layerStyles.ts` → `LAYER_STYLE_LABEL` + `BACKDROP_STYLES` |
 | Path operators | 9 | `src/core/scene/pathOps.ts` → `PathOpType` (less `none`) |
@@ -837,8 +837,8 @@ output.
 
 ### Tier 2 — ceilings on visual density
 
-**Effect breadth: 183 effects vs AE's 400+.** The raw count misleads in both
-directions — nobody uses 400, and the 183 effects present are properly
+**Effect breadth: 201 effects vs AE's 400+.** The raw count misleads in both
+directions — nobody uses 400, and the 201 effects present are properly
 parameterised (Levels, Curves, Channel Mixer, Keylight with
 despill/choke/softness). What matters is the missing *classes*, not the delta:
 no 3D Stroke, no Form/Plexus, no Element 3D. The dense, expensive-looking AE
@@ -851,7 +851,7 @@ written against this document inherited. And the missing *classes* named "no
 volumetric light rays (Shine)" and "no optical-flare system worth the name":
 `light-rays`, `lens-flare`, `light-sweep` and `beam` all ship, each with a
 registry def, a Canvas2D reference, a Generate entry, and (as of 2026-08-14) a
-GPU shader. The count is now phrased as "183 effects" rather than as a bare
+GPU shader. The count is now phrased as "201 effects" rather than as a bare
 figure specifically so that `docPropagatedCounts.test.ts` can check it.
 
 **Variable-width mask feather LANDED** (2026-08-20). `MaskPoint` gained an
@@ -2057,7 +2057,7 @@ needing a 39-entry allow-list is one that gets silenced the first time it fires.
 The cost of the narrowness is that an oblique phrasing still escapes, and §4's
 did — "Effect breadth: 73 vs AE's 400+" puts no noun after the number. That was
 rewritten into the checkable form rather than the regex being widened to chase
-it. Prose stating a count should say "183 effects".
+it. Prose stating a count should say "201 effects".
 
 Ledger table ROWS in this section are exempt, structurally rather than by a list
 of phrases: quoting a superseded number is what a corrections ledger is for, and
@@ -2596,3 +2596,64 @@ features and are not this.
 **Particle density is still the ceiling it was.** Bake-to-layers shipped, which
 makes a simulation art-directable, but turbulence, particle–particle collisions,
 sub-emitters, trails, 3D particles and layer-as-particle remain absent.
+
+### Built 2026-09-07 — effects round seven, and a miscount inside the counter
+
+Eighteen effects, taking `EffectType` from 183 to **201 effects**. Fifteen ship
+as a GPU shader in both dialects plus a retained Canvas2D kernel, which is the
+shape every port since round six has held; three ship as per-channel transfer
+tables and no shader at all.
+
+| Family | Effects |
+|---|---|
+| Simulation | CC Particle Systems II, CC Bubbles |
+| Generate / Perspective | Fractal, 3D Glasses |
+| Stylize | CC Block Load, CC Kernel, CC Threshold RGB |
+| Keying | Color Difference Key, CC Simple Wire Removal |
+| Colour | Broadcast Colors, Noise HLS, CC Color Offset, Cineon Converter |
+| Distort / Transition | CC Tiler, CC Ripple Pulse, CC Radial ScaleWipe, CC Glass Wipe, CC Image Wipe |
+
+**Three went to `LUT_BUILDERS`, not to a shader.** Color Offset, Threshold RGB
+and Cineon Converter each map an input value to an output value one channel at
+a time, with no reference to the other two channels and none to the
+neighbours — which is exactly the shape rule at the top of `colorLut.ts`. The
+placement is worth more than it looks: a table renders on both backends and
+forces no CPU bake, and for a Cineon linearise, which is switched on for a
+whole log-footage comp and left on, that is the difference between usable and
+not. `colourRoundTwo.test.ts` covers each with a fixture that must move the
+table off identity.
+
+**Particle Systems is the third member of `TIME_DEPENDENT`, and the only one
+this round earned.** The set is a deliberate speed bump — membership opts a
+layer out of raster caching — and the rule is to reach for a keyframed
+parameter first. Bubbles did exactly that and rides an `evolution` slider like
+Snowfall, because a wrapping field needs no absolute origin. An emitter does:
+its alive set is indexed by absolute time, so a keyframed phase would leave it
+static by default, which is the one case that clears the bump.
+
+**Both simulations are closed form, and that is a decision rather than a
+shortcut.** No frame refers to any other: a particle's whole trajectory is a
+function of its index, the seed and its age. A stateful integrator would scrub
+differently from how it plays and could not start an export at frame 400, which
+is the failure the seek architecture in §5 exists to prevent. The cost is that
+particles cannot collide or read a force field. The alive window is computed in
+`snapshotToFrameScene` and handed to the shader in a param slot, so the
+per-fragment loop is bounded by a compile-time 512 with a runtime break —
+an unbounded per-fragment loop is not a slow frame but a hung device.
+
+**A semicolon in a comment had been silently truncating the effect count.**
+`featureCounts.cjs` finds a union's terminating `;` with a non-greedy match and
+stripped comments only afterwards, so a semicolon inside a `//` line between two
+members ended the match there and every member below it vanished. Eighteen
+effects were added and the script kept reporting 183 — no error, no warning,
+and `docFeatureCounts.test.ts` would then have held every doc in the repo to
+the stale figure. The strip now happens before the union is located, which also
+subsumes the apostrophe bug the same function already carried a note about, and
+`docFeatureCounts.test.ts` pins the semicolon case directly.
+
+**Not done, and owed:** no render-test goldens for the fifteen shaders. The
+CPU kernels are covered by 38 assertions in `aeRoundSeven.test.ts` and the
+GPU/CPU wiring by `portedEffectContract.test.ts`, but nothing yet compares the
+two backends' PIXELS for this round — which is the check that would catch a
+shader that is wired correctly and computes the wrong thing. That needs a pass
+of the GPU harness in `packages/render-tests` to bless references.

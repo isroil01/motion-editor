@@ -58,6 +58,35 @@ const EFFECTS: EffectSpec[] = [
   { type: 'gradient-ramp', params: { blend: 100, colorA: '#ff0000', colorB: '#0000ff' } },
   { type: 'fractal-noise', params: { scale: 12 }, gpuOracle: true },
   { type: 'displacement-map', params: { amount: 20 }, gpuOnly: true },
+  /*
+    Effects round seven. Every params object is a VISIBLE setting rather than
+    the registry default: each of these fifteen skips both its GPU pass and its
+    Canvas2D pass at the neutral setting, so a scene left at the defaults would
+    gate two engines agreeing to do nothing.
+
+    CC Particle Systems II is not here — it reads the clock, and frame 0 is
+    before its first particle is born, so it gets its own scene at frame 30.
+  */
+  { type: 'cc-tiler', params: { scale: 40, centerX: 0, centerY: 0, blendWithOriginal: 0 } },
+  { type: 'ripple-pulse', params: { centerX: 0, centerY: 0, pulseRadius: 60, amplitude: 22, width: 26, renderBump: true } },
+  { type: 'radial-scale-wipe', params: { completion: 35, centerX: 0, centerY: 0, reverse: false } },
+  { type: 'glass-wipe', params: { completion: 55, displacement: 40, softness: 35 } },
+  { type: 'image-wipe', params: { completion: 50, borderSoftness: 25, gradientChannel: 0, invertGradient: false } },
+  { type: 'color-difference-key', params: { keyColor: '#00ff00', matteInBlack: 20, matteInWhite: 235, matteGamma: 1, viewMode: 0 } },
+  { type: 'wire-removal', params: { pointAX: -90, pointAY: 0, pointBX: 90, pointBY: 0, thickness: 6, slope: 60 } },
+  { type: 'broadcast-colors', params: { standard: 0, howToMakeColorSafe: 1, maxSignalAmplitude: 100 } },
+  { type: 'noise-hls', params: { noiseType: 0, hue: 30, lightness: 14, saturation: 10, grainSize: 3, noisePhase: 5 } },
+  { type: 'block-load', params: { completion: 35, scans: 4, blockSize: 48 } },
+  { type: 'kernel', params: { k00: -2, k01: -1, k02: 0, k10: -1, k11: 1, k12: 1, k20: 0, k21: 1, k22: 2, divisor: 1, offset: 0 } },
+  { type: '3d-glasses', params: { convergenceOffset: 14, view: 0, balance: 50, swapLeftRight: false } },
+  { type: 'fractal', params: { setType: 0, centerX: -0.6, centerY: 0, magnification: 1.1, iterations: 90, juliaX: -0.7, juliaY: 0.27, colorPhase: 200, colorCycles: 3, insideColor: '#000000' } },
+  { type: 'cc-bubbles', params: { bubbleAmount: 60, bubbleSpeed: 300, wobbleAmplitude: 8, wobbleFrequency: 2, bubbleSize: 16, sizeVariation: 50, shading: 2, color: '#ffffff', opacity: 85, evolution: 40, seed: 3 } },
+  // The three per-channel transfers of the round. They render through the LUT
+  // strip on both backends rather than through a shader, which is a different
+  // path from every neighbour above and worth one scene each.
+  { type: 'color-offset', params: { redPhase: 60, greenPhase: 180, bluePhase: 300, overflow: 0 } },
+  { type: 'threshold-rgb', params: { redLevel: 100, greenLevel: 128, blueLevel: 160 } },
+  { type: 'cineon-converter', params: { conversionType: 0, tenBitBlackPoint: 95, internalBlackPoint: 0, tenBitWhitePoint: 685, internalWhitePoint: 255, gamma: 1.7, highlightRolloff: 20 } },
   { type: 'motion-tile', params: { scale: 2 }, gpuOnly: true },
   /*
     Bend. `gpuOnly` like its Distort neighbours above — it has no Canvas2D
@@ -765,6 +794,41 @@ const bezierWarpGridScene: Scene = defineScene({
   },
 });
 
+/*
+  CC Particle Systems II, at frame 30 — one second in.
+
+  Its own scene because it is the round's one clock-driven effect: the emitter
+  indexes births by absolute time, so at frame 0 nothing has been born yet and
+  the shared per-effect scene (which renders frame 0) would gate an empty
+  frame. One second in, the alive window is the full steady-state set.
+*/
+const particleSystemsScene: Scene = defineScene({
+  id: 'effect-particle-systems',
+  description: 'CC Particle Systems II one second in: an explosive emitter under gravity.',
+  size: SIZE,
+  comp: COMP,
+  fps: 30,
+  frames: [30],
+  gpuParity: 'expect-pass',
+  build(graph) {
+    graph.addNode(node('emitter', {
+      kind: 'shape',
+      position: { x: 160, y: 110 },
+      transform: { width: 300, height: 200, shapeType: 'rect' },
+      style: { fill: '#141a26' },
+    }));
+    graph.setEffects('emitter', [
+      { id: 'ps', type: 'particle-systems', params: {
+        birthRate: 60, longevity: 1.2, producerX: 0, producerY: 40,
+        producerRadiusX: 0, producerRadiusY: 0, animation: 0, direction: 0,
+        spread: 60, velocity: 110, velocityVariation: 50, gravity: 140,
+        resistance: 0, birthSize: 9, deathSize: 2, sizeVariation: 40,
+        birthColor: '#ffe27a', deathColor: '#ff3b00', opacity: 100, blend: 0, seed: 1,
+      } },
+    ]);
+  },
+});
+
 export const effectScenes: Scene[] = [
   ...EFFECTS.map(effectScene),
   displacementMapLayerScene,
@@ -776,4 +840,5 @@ export const effectScenes: Scene[] = [
   meshWarpScene,
   opticsCompensationScene,
   bezierWarpGridScene,
+  particleSystemsScene,
 ];

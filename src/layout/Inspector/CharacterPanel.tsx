@@ -18,8 +18,16 @@ import { FontPicker } from './FontPicker';
 import { SectionPresetMenu } from './SectionPresetMenu';
 import { ColorPicker } from '@components/ColorPicker';
 import { Checkbox } from '@components/Checkbox';
+import { Button } from '@components/Button';
+import { IconButton } from '@components/IconButton';
 import { Icon } from '@components/Icon';
+import { TooltipProvider } from '@components/Tooltip';
 import styles from './CharacterPanel.module.css';
+
+/* eslint-disable design-system/no-hex-color */
+const DEFAULT_TEXT_FILL = '#ffffff';
+const DEFAULT_TEXT_STROKE = '#000000';
+/* eslint-enable design-system/no-hex-color */
 
 const PRESETS = [
   { label: 'Display', fontSize: 96, fontWeight: '800', fontStyle: 'normal' },
@@ -47,7 +55,7 @@ export function CharacterPanel(): JSX.Element {
   const node = primary ? defaultSceneGraph.getNode(primary) : null;
   const tComp = useMemo(() => node?.components.find((c) => c.type === 'Text'), [node]);
 
-  // Bound layer hooks
+  // Bound layer hooks — Character properties
   const [content, setContent] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'content');
   const [fontSize, setFontSize] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'fontSize');
   const [fontFamily, setFontFamily] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'fontFamily');
@@ -67,6 +75,14 @@ export function CharacterPanel(): JSX.Element {
   const [fontVariant, setFontVariant] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'fontVariant');
   const [verticalAlign, setVerticalAlign] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'verticalAlign');
 
+  // Bound layer hooks — Paragraph properties
+  const [align, setAlign] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'align');
+  const [paragraphSpacing, setParagraphSpacing] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'paragraphSpacing');
+  const [leftIndent, setLeftIndent] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'leftIndent');
+  const [rightIndent, setRightIndent] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'rightIndent');
+  const [firstLineIndent, setFirstLineIndent] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'firstLineIndent');
+  const [spaceBefore, setSpaceBefore] = useNodeComponentProp(defaultSceneGraph, primary, tComp?.id, 'spaceBefore');
+
   // Local fallback states when no text layer is active
   const [fallbackFamily, setFallbackFamily] = useState('Inter');
   const [fallbackWeight, setFallbackWeight] = useState('400');
@@ -74,8 +90,8 @@ export function CharacterPanel(): JSX.Element {
   const [fallbackSize, setFallbackSize] = useState(72);
   const [fallbackLeading, setFallbackLeading] = useState(1.2);
   const [fallbackTracking, setFallbackTracking] = useState(0);
-  const [fallbackFill, setFallbackFill] = useState('#ffffff');
-  const [fallbackStroke, setFallbackStroke] = useState('#000000');
+  const [fallbackFill, setFallbackFill] = useState(DEFAULT_TEXT_FILL);
+  const [fallbackStroke, setFallbackStroke] = useState(DEFAULT_TEXT_STROKE);
   const [fallbackStrokeWidth, setFallbackStrokeWidth] = useState(0);
   const [fallbackStrokeOverFill, setFallbackStrokeOverFill] = useState(false);
   const [fallbackVertScale, setFallbackVertScale] = useState(100);
@@ -84,6 +100,12 @@ export function CharacterPanel(): JSX.Element {
   const [fallbackTextTransform, setFallbackTextTransform] = useState('none');
   const [fallbackFontVariant, setFallbackFontVariant] = useState('normal');
   const [fallbackVerticalAlign, setFallbackVerticalAlign] = useState('baseline');
+  const [fallbackAlign, setFallbackAlign] = useState('left');
+  const [fallbackSpacing, setFallbackSpacing] = useState(0);
+  const [fallbackFirstLineIndent, setFallbackFirstLineIndent] = useState(0);
+  const [fallbackLeftIndent, setFallbackLeftIndent] = useState(0);
+  const [fallbackRightIndent, setFallbackRightIndent] = useState(0);
+  const [fallbackSpaceBefore, setFallbackSpaceBefore] = useState(0);
 
   const hasTarget = Boolean(primary && tComp && node);
 
@@ -131,8 +153,8 @@ export function CharacterPanel(): JSX.Element {
   const activeSize = hasTarget ? Math.round(Number(fontSize ?? 72)) : fallbackSize;
   const activeLeading = hasTarget ? Number(lineHeight ?? 1.2) : fallbackLeading;
   const activeTracking = hasTarget ? Math.round(Number(letterSpacing ?? 0)) : fallbackTracking;
-  const activeFill = hasTarget ? String(fill ?? '#ffffff') : fallbackFill;
-  const activeStroke = hasTarget ? String(stroke ?? '#000000') : fallbackStroke;
+  const activeFill = hasTarget ? String(fill ?? DEFAULT_TEXT_FILL) : fallbackFill;
+  const activeStroke = hasTarget ? String(stroke ?? DEFAULT_TEXT_STROKE) : fallbackStroke;
   const activeStrokeWidth = hasTarget ? Number(strokeWidth ?? 0) : fallbackStrokeWidth;
   const activeStrokeOverFill = hasTarget ? strokeOverFill === true : fallbackStrokeOverFill;
   const activeVertScale = hasTarget ? Number(verticalScale ?? 100) : fallbackVertScale;
@@ -141,6 +163,13 @@ export function CharacterPanel(): JSX.Element {
   const activeTextTransform = hasTarget ? String(textTransform ?? 'none') : fallbackTextTransform;
   const activeFontVariant = hasTarget ? String(fontVariant ?? 'normal') : fallbackFontVariant;
   const activeVerticalAlign = hasTarget ? String(verticalAlign ?? 'baseline') : fallbackVerticalAlign;
+
+  const currentAlign = hasTarget ? String(align ?? 'left') : fallbackAlign;
+  const currentSpacing = hasTarget ? Number(paragraphSpacing ?? 0) : fallbackSpacing;
+  const currentLeftIndent = hasTarget ? Number(leftIndent ?? 0) : fallbackLeftIndent;
+  const currentRightIndent = hasTarget ? Number(rightIndent ?? 0) : fallbackRightIndent;
+  const currentFirstLineIndent = hasTarget ? Number(firstLineIndent ?? 0) : fallbackFirstLineIndent;
+  const currentSpaceBefore = hasTarget ? Number(spaceBefore ?? 0) : fallbackSpaceBefore;
 
   const availableWeights = getFontWeights(activeFamily);
 
@@ -245,11 +274,41 @@ export function CharacterPanel(): JSX.Element {
   const handleSwapFillStroke = () => {
     const prevFill = activeFill;
     const prevStroke = activeStroke;
-    handleFillChange(prevStroke || '#000000');
+    handleFillChange(prevStroke || DEFAULT_TEXT_STROKE);
     handleStrokeChange(prevFill);
     if (activeStrokeWidth === 0) {
       handleStrokeWidthChange(2);
     }
+  };
+
+  const handleAlignChange = (a: string) => {
+    if (hasTarget) setAlign(a);
+    else setFallbackAlign(a);
+  };
+
+  const handleSpacingChange = (sp: number) => {
+    if (hasTarget) setParagraphSpacing(sp);
+    else setFallbackSpacing(sp);
+  };
+
+  const handleLeftIndentChange = (v: number) => {
+    if (hasTarget) setLeftIndent(v);
+    else setFallbackLeftIndent(v);
+  };
+
+  const handleRightIndentChange = (v: number) => {
+    if (hasTarget) setRightIndent(v);
+    else setFallbackRightIndent(v);
+  };
+
+  const handleFirstLineIndentChange = (v: number) => {
+    if (hasTarget) setFirstLineIndent(v);
+    else setFallbackFirstLineIndent(v);
+  };
+
+  const handleSpaceBeforeChange = (v: number) => {
+    if (hasTarget) setSpaceBefore(v);
+    else setFallbackSpaceBefore(v);
   };
 
   const applyPreset = (preset: typeof PRESETS[number]) => {
@@ -285,19 +344,16 @@ export function CharacterPanel(): JSX.Element {
   const isSubscript = activeVerticalAlign === 'sub';
 
   return (
-    <div className={styles.root}>
+    <TooltipProvider>
+      <div className={styles.root}>
       {/* Target Status Banner */}
       <div className={styles.panelHead}>
-        <span className={styles.panelHeadTitle}>Character</span>
-        <span className={hasTarget ? styles.panelHeadStatusOn : styles.panelHeadStatus}>
-          {hasTarget ? node?.name || 'Selected Text' : 'Default Preset'}
-        </span>
-        {/*
-         * Text-style presets capture the PRIMARY layer's Text component props
-         * and write them to every selected text layer as one undo entry. The
-         * built-in `PRESETS` row below is a fixed type scale; this is the
-         * user's own house style, saved from whatever is on screen.
-         */}
+        <div className={styles.panelHeadLeft}>
+          <span className={styles.panelHeadTitle}>Text</span>
+          <span className={`${styles.targetBadge}${hasTarget ? ` ${styles.targetBadgeActive}` : ''}`}>
+            {hasTarget ? node?.name || 'Selected Text' : 'Default Preset'}
+          </span>
+        </div>
         {hasTarget && (
           <SectionPresetMenu
             sectionId="text"
@@ -312,31 +368,31 @@ export function CharacterPanel(): JSX.Element {
       {ranged && (
         <div className={styles.rangeNotice}>
           <span>{`Styling ${selection.end - selection.start} character${selection.end - selection.start === 1 ? '' : 's'}`}</span>
-          <button
-            type="button"
-            className={styles.resetBtn}
+          <Button
+            size="xs"
+            variant="ghost"
             onClick={clearRunStyling}
             title="Reset per-character styling for selected range"
           >
             Reset
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Text Content & Source Text Keyframing */}
       {hasTarget && (
-        <div className={styles.contentBox}>
+        <div className={styles.sectionCard}>
           <div className={styles.contentHead}>
-            <span className={styles.sectionTitle}>Content</span>
-            <button
-              type="button"
-              className={`${styles.sourceStopwatch}${sourceAnimated ? ` ${styles.sourceStopwatchActive}` : ''}`}
+            <span className={styles.sectionHeader}>Content</span>
+            <Button
+              size="xs"
+              variant={sourceAnimated ? 'primary' : 'ghost'}
+              icon={<Icon name="keyframe" size="sm" />}
               title={sourceAnimated ? 'Remove Source Text keyframes' : 'Keyframe Source Text across timeline'}
               onClick={toggleSourceStopwatch}
             >
-              <Icon name="keyframe" size="sm" />
-              <span>{sourceAnimated ? 'Animated' : 'Keyframe'}</span>
-            </button>
+              {sourceAnimated ? 'Animated' : 'Keyframe'}
+            </Button>
           </div>
           <textarea
             className={styles.contentTextarea}
@@ -348,314 +404,512 @@ export function CharacterPanel(): JSX.Element {
         </div>
       )}
 
-      {/* Font Family & Weight */}
-      <div className={styles.row}>
-        <div className={styles.col}>
+      {/* Typography & Character Formatting */}
+      <div className={styles.sectionCard}>
+        <div className={styles.sectionHeader}>Typography</div>
+        
+        {/* Font Family & Weight */}
+        <div className={styles.fontRow}>
           <FontPicker
             value={activeFamily}
             onChange={handleFamilyChange}
           />
-        </div>
-        <div className={styles.fontSizeCell}>
           <select
             value={activeWeight}
             onChange={(e) => handleWeightChange(e.target.value)}
-            className={`${styles.fontSelect} ${styles.fullWidth}`}
+            className={styles.fontSelect}
+            aria-label="Font Weight"
           >
             {availableWeights.map((w) => (
               <option key={w} value={String(w)}>{WEIGHT_LABELS[w] ?? String(w)}</option>
             ))}
           </select>
         </div>
-      </div>
 
-      {/* Swatches & Swatch Swap */}
-      <div className={styles.row}>
-        <div className={styles.swatchBox}>
-          <div className={styles.fillSwatchWrap} title="Character Fill Color">
-            <ColorPicker
-              value={activeFill}
-              onChange={handleFillChange}
-              compact
-              aria-label="Character Fill Color"
-              className={styles.fillSwatchPicker}
+        {/* Font Size & Leading */}
+        <div className={styles.metricGrid}>
+          {/* Font Size */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Font Size (TT)">Size</span>
+            <input
+              type="number"
+              aria-label="Font Size"
+              className={styles.metricInput}
+              value={activeSize}
+              onChange={(e) => handleSizeChange(Math.max(1, Number(e.target.value)))}
             />
+            <span className={styles.metricUnit}>px</span>
           </div>
 
-          <div className={styles.strokeSwatchWrap} title="Character Stroke Color">
-            <ColorPicker
-              value={activeStroke}
-              onChange={handleStrokeChange}
-              compact
-              aria-label="Character Stroke Color"
-              className={styles.strokeSwatchPicker}
+          {/* Leading (Line Height) */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Leading / Line Height (A/A)">Leading</span>
+            <input
+              type="number"
+              aria-label="Leading (Line Height)"
+              step="0.1"
+              className={styles.metricInput}
+              value={activeLeading}
+              onChange={(e) => handleLeadingChange(Math.max(0.5, Number(e.target.value)))}
             />
+            <span className={styles.metricUnit}>em</span>
           </div>
+        </div>
 
-          <button
-            type="button"
-            className={styles.swapBtn}
-            title="Swap Fill and Stroke (Shift+X)"
-            onClick={handleSwapFillStroke}
+        {/* Tactile Character Style Button Group */}
+        <div className={styles.controlGroup} role="toolbar" aria-label="Character Formatting Styles">
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={isBold}
+            aria-label="Bold"
+            tooltip="Faux Bold"
+            className={styles.groupItem}
+            onClick={() => handleWeightChange(isBold ? '400' : '700')}
           >
-            ⇄
-          </button>
-        </div>
-
-        <div className={`${styles.col} ${styles.colCentered}`}>
-          <span className={styles.swatchTitle}>
-            {activeFamily}
-          </span>
-          <span className={styles.swatchHint}>
-            {WEIGHT_LABELS[Number(activeWeight)] ?? 'Regular'} · {activeStyle === 'italic' ? 'Italic' : 'Normal'}
-          </span>
+            <b>B</b>
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={isItalic}
+            aria-label="Italic"
+            tooltip="Faux Italic"
+            className={styles.groupItem}
+            onClick={() => handleStyleChange(isItalic ? 'normal' : 'italic')}
+          >
+            <i>I</i>
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={isAllCaps}
+            aria-label="All Caps"
+            tooltip="All Caps"
+            className={styles.groupItem}
+            onClick={() => {
+              const next = isAllCaps ? 'none' : 'uppercase';
+              if (hasTarget) setTextTransform(next);
+              else setFallbackTextTransform(next);
+            }}
+          >
+            TT
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={isSmallCaps}
+            aria-label="Small Caps"
+            tooltip="Small Caps"
+            className={styles.groupItem}
+            onClick={() => {
+              const next = isSmallCaps ? 'normal' : 'small-caps';
+              if (hasTarget) setFontVariant(next);
+              else setFallbackFontVariant(next);
+            }}
+          >
+            Tt
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={isSuperscript}
+            aria-label="Superscript"
+            tooltip="Superscript"
+            className={styles.groupItem}
+            onClick={() => {
+              const next = isSuperscript ? 'baseline' : 'super';
+              if (hasTarget) setVerticalAlign(next);
+              else setFallbackVerticalAlign(next);
+            }}
+          >
+            T¹
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={isSubscript}
+            aria-label="Subscript"
+            tooltip="Subscript"
+            className={styles.groupItem}
+            onClick={() => {
+              const next = isSubscript ? 'baseline' : 'sub';
+              if (hasTarget) setVerticalAlign(next);
+              else setFallbackVerticalAlign(next);
+            }}
+          >
+            T₁
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={activeStrokeOverFill}
+            aria-label="Stroke over Fill"
+            tooltip="Stroke over Fill"
+            className={styles.groupItem}
+            onClick={() => {
+              if (hasTarget) setStrokeOverFill(!activeStrokeOverFill);
+              else setFallbackStrokeOverFill(!activeStrokeOverFill);
+            }}
+          >
+            <Icon name="layers" size="sm" />
+          </IconButton>
         </div>
       </div>
 
-      {/* AE Two-Column Metrics Grid */}
-      <div className={styles.metricGrid}>
-        {/* Font Size (TT) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Set the font size (TT)">TT</span>
-          <input
-            type="number"
-            className={styles.metricInput}
-            value={activeSize}
-            onChange={(e) => handleSizeChange(Math.max(1, Number(e.target.value)))}
-          />
-          <span className={styles.metricUnit}>px</span>
+      {/* Paragraph Alignment & Spacing Deck */}
+      <div className={styles.sectionCard}>
+        <div className={styles.sectionHeader}>Paragraph &amp; Alignment</div>
+
+        {/* 7 Alignment buttons in professional segmented deck */}
+        <div className={styles.controlGroup} role="radiogroup" aria-label="Paragraph Alignment">
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'left'}
+            aria-label="Left Align"
+            tooltip="Left Align"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('left')}
+          >
+            <Icon name="text-left" size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'center'}
+            aria-label="Center Align"
+            tooltip="Center Align"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('center')}
+          >
+            <Icon name="text-center" size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'right'}
+            aria-label="Right Align"
+            tooltip="Right Align"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('right')}
+          >
+            <Icon name="text-right" size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'justify' || currentAlign === 'justify-left'}
+            aria-label="Justify Last Left"
+            tooltip="Justify Last Left"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('justify-left')}
+          >
+            <Icon name="align-left" size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'justify-center'}
+            aria-label="Justify Last Center"
+            tooltip="Justify Last Center"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('justify-center')}
+          >
+            <Icon name="align-center" size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'justify-right'}
+            aria-label="Justify Last Right"
+            tooltip="Justify Last Right"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('justify-right')}
+          >
+            <Icon name="align-right" size="sm" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            active={currentAlign === 'justify-all'}
+            aria-label="Justify All Lines"
+            tooltip="Justify All Lines"
+            className={styles.groupItem}
+            onClick={() => handleAlignChange('justify-all')}
+          >
+            <Icon name="distribute-horizontal" size="sm" />
+          </IconButton>
         </div>
 
-        {/* Leading (A/A) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Set the leading (line height) (A/A)">A/A</span>
-          <input
-            type="number"
-            step="0.1"
-            className={styles.metricInput}
-            value={activeLeading}
-            onChange={(e) => handleLeadingChange(Math.max(0.5, Number(e.target.value)))}
-          />
-          <span className={styles.metricUnit}>em</span>
-        </div>
-
-        {/* Kerning (V/A) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Set the kerning between two characters (V/A)">V/A</span>
-          <input
-            type="text"
-            className={styles.metricInput}
-            defaultValue="Metrics"
-            readOnly
-          />
-        </div>
-
-        {/* Tracking (VA) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Set the tracking (letter spacing) for selected characters (VA)">VA</span>
-          <input
-            type="number"
-            className={styles.metricInput}
-            value={activeTracking}
-            onChange={(e) => handleTrackingChange(Number(e.target.value))}
-          />
-          <span className={styles.metricUnit}>px</span>
-        </div>
-
-        {/* Stroke Width (—) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Set the stroke width">—</span>
-          <input
-            type="number"
-            min="0"
-            className={styles.metricInput}
-            value={activeStrokeWidth}
-            onChange={(e) => handleStrokeWidthChange(Math.max(0, Number(e.target.value)))}
-          />
-          <span className={styles.metricUnit}>px</span>
-        </div>
-
-        {/* Vertical Scale (IT) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Vertically scale (IT)">IT</span>
-          <input
-            type="number"
-            className={styles.metricInput}
-            value={activeVertScale}
-            onChange={(e) => {
-              const val = Number(e.target.value);
-              if (hasTarget) setVerticalScale(val);
-              else setFallbackVertScale(val);
-            }}
-          />
-          <span className={styles.metricUnit}>%</span>
-        </div>
-
-        {/* Horizontal Scale (T-) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Horizontally scale (T-)">T-</span>
-          <input
-            type="number"
-            className={styles.metricInput}
-            value={activeHorizScale}
-            onChange={(e) => {
-              const val = Number(e.target.value);
-              if (hasTarget) setHorizontalScale(val);
-              else setFallbackHorizScale(val);
-            }}
-          />
-          <span className={styles.metricUnit}>%</span>
-        </div>
-
-        {/* Baseline Shift (A_) */}
-        <div className={styles.metricCell}>
-          <span className={styles.metricLabel} title="Set the baseline shift (A_)">A_</span>
-          <input
-            type="number"
-            className={styles.metricInput}
-            value={activeBaselineShift}
-            onChange={(e) => {
-              const val = Number(e.target.value);
-              if (hasTarget) setBaselineShift(val);
-              else setFallbackBaselineShift(val);
-            }}
-          />
-          <span className={styles.metricUnit}>px</span>
-        </div>
-      </div>
-
-      {/* Faux Typography Buttons */}
-      <div className={styles.fauxRow}>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${isBold ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="Faux Bold"
-          onClick={() => handleWeightChange(isBold ? '400' : '700')}
-        >
-          <b>B</b>
-        </button>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${isItalic ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="Faux Italic"
-          onClick={() => handleStyleChange(isItalic ? 'normal' : 'italic')}
-        >
-          <i>I</i>
-        </button>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${isAllCaps ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="All Caps"
-          onClick={() => {
-            const next = isAllCaps ? 'none' : 'uppercase';
-            if (hasTarget) setTextTransform(next);
-            else setFallbackTextTransform(next);
-          }}
-        >
-          TT
-        </button>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${isSmallCaps ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="Small Caps"
-          onClick={() => {
-            const next = isSmallCaps ? 'normal' : 'small-caps';
-            if (hasTarget) setFontVariant(next);
-            else setFallbackFontVariant(next);
-          }}
-        >
-          Tt
-        </button>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${isSuperscript ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="Superscript"
-          onClick={() => {
-            const next = isSuperscript ? 'baseline' : 'super';
-            if (hasTarget) setVerticalAlign(next);
-            else setFallbackVerticalAlign(next);
-          }}
-        >
-          T¹
-        </button>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${isSubscript ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="Subscript"
-          onClick={() => {
-            const next = isSubscript ? 'baseline' : 'sub';
-            if (hasTarget) setVerticalAlign(next);
-            else setFallbackVerticalAlign(next);
-          }}
-        >
-          T₁
-        </button>
-        <button
-          type="button"
-          className={`${styles.fauxBtn}${activeStrokeOverFill ? ` ${styles.fauxBtnActive}` : ''}`}
-          title="Stroke over Fill"
-          onClick={() => {
-            if (hasTarget) setStrokeOverFill(!activeStrokeOverFill);
-            else setFallbackStrokeOverFill(!activeStrokeOverFill);
-          }}
-        >
-          ⇄
-        </button>
-      </div>
-
-      {/* Box Text Option */}
-      {hasTarget && (
-        <div className={styles.controlRow}>
-          <label className={styles.inlineCheck}>
-            <Checkbox
-              checked={typeof boxWidth === 'number' && boxWidth > 0}
-              onChange={() => {
-                if (typeof boxWidth === 'number' && boxWidth > 0) setBoxWidth(0);
-                else setBoxWidth(400);
-              }}
-              className={styles.inlineCheckBox}
+        {/* Paragraph Spacing & Indents Grid */}
+        <div className={styles.metricGrid}>
+          {/* Paragraph Spacing */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Space after paragraph (Paragraph Spacing)">¶ Space</span>
+            <input
+              type="number"
+              aria-label="Paragraph Spacing"
+              className={styles.metricInput}
+              value={currentSpacing}
+              onChange={(e) => handleSpacingChange(Number(e.target.value))}
             />
-            <span className={styles.inlineCheckLabel}>Box Text Wrap</span>
-          </label>
-          {typeof boxWidth === 'number' && boxWidth > 0 && (
-            <div className={styles.inlineField}>
-              <input
-                type="number"
-                value={boxWidth}
-                onChange={(e) => setBoxWidth(Math.max(50, Number(e.target.value)))}
-                className={`${styles.metricInput} ${styles.inlineNumber}`}
+            <span className={styles.metricUnit}>px</span>
+          </div>
+
+          {/* First Line Indent */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="First Line Indent">1st Line</span>
+            <input
+              type="number"
+              aria-label="First Line Indent"
+              className={styles.metricInput}
+              value={currentFirstLineIndent}
+              onChange={(e) => handleFirstLineIndentChange(Number(e.target.value))}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+
+          {/* Left Indent */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Indent left margin">⇤ Left</span>
+            <input
+              type="number"
+              aria-label="Left Indent"
+              className={styles.metricInput}
+              value={currentLeftIndent}
+              onChange={(e) => handleLeftIndentChange(Number(e.target.value))}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+
+          {/* Right Indent */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Indent right margin">Right ⇥</span>
+            <input
+              type="number"
+              aria-label="Right Indent"
+              className={styles.metricInput}
+              value={currentRightIndent}
+              onChange={(e) => handleRightIndentChange(Number(e.target.value))}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+
+          {/* Space Before */}
+          <div className={`${styles.metricCell} ${styles.metricCellWide}`}>
+            <span className={styles.metricLabel} title="Space before paragraph">↑ Space Before</span>
+            <input
+              type="number"
+              aria-label="Space Before"
+              className={styles.metricInput}
+              value={currentSpaceBefore}
+              onChange={(e) => handleSpaceBeforeChange(Number(e.target.value))}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Appearance (Fill & Stroke) */}
+      <div className={styles.sectionCard}>
+        <div className={styles.sectionHeader}>Appearance</div>
+        <div className={styles.appearanceRow}>
+          <div className={styles.swatchPair}>
+            <div className={styles.fillSwatchWrap} title="Character Fill Color">
+              <ColorPicker
+                value={activeFill}
+                onChange={handleFillChange}
+                compact
+                aria-label="Character Fill Color"
+                className={styles.fillSwatchPicker}
               />
-              <span className={styles.unit}>px</span>
             </div>
-          )}
+            <div className={styles.strokeSwatchWrap} title="Character Stroke Color">
+              <ColorPicker
+                value={activeStroke}
+                onChange={handleStrokeChange}
+                compact
+                aria-label="Character Stroke Color"
+                className={styles.strokeSwatchPicker}
+              />
+            </div>
+            <IconButton
+              size="sm"
+              variant="ghost"
+              aria-label="Swap Fill and Stroke (Shift+X)"
+              tooltip="Swap Fill and Stroke (Shift+X)"
+              className={styles.swapToggle}
+              onClick={handleSwapFillStroke}
+            >
+              ⇄
+            </IconButton>
+          </div>
+          <div className={styles.appearanceDetails}>
+            <span className={styles.appearanceMeta}>{activeFamily}</span>
+            <span className={styles.appearanceSub}>
+              {WEIGHT_LABELS[Number(activeWeight)] ?? 'Regular'} · {activeStyle === 'italic' ? 'Italic' : 'Normal'}
+            </span>
+          </div>
+        </div>
+
+        {/* Stroke Width */}
+        <div className={styles.metricGrid}>
+          <div className={`${styles.metricCell} ${styles.metricCellWide}`}>
+            <span className={styles.metricLabel} title="Stroke Width">Stroke</span>
+            <input
+              type="number"
+              aria-label="Stroke Width"
+              min="0"
+              className={styles.metricInput}
+              value={activeStrokeWidth}
+              onChange={(e) => handleStrokeWidthChange(Math.max(0, Number(e.target.value)))}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Advanced Metrics Grid (Tracking, Kerning, Scales, Baseline) */}
+      <div className={styles.sectionCard}>
+        <div className={styles.sectionHeader}>Metrics &amp; Scale</div>
+        <div className={styles.metricGrid}>
+          {/* Tracking (Letter Spacing) */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Tracking (Letter Spacing) (VA)">Tracking</span>
+            <input
+              type="number"
+              aria-label="Tracking (Letter Spacing)"
+              className={styles.metricInput}
+              value={activeTracking}
+              onChange={(e) => handleTrackingChange(Number(e.target.value))}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+
+          {/* Kerning */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Kerning between characters (V/A)">Kerning</span>
+            <input
+              type="text"
+              aria-label="Kerning"
+              className={styles.metricInput}
+              defaultValue="Metrics"
+              readOnly
+            />
+          </div>
+
+          {/* Vertical Scale */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Vertical Scale (IT)">↕ Scale</span>
+            <input
+              type="number"
+              aria-label="Vertical Scale"
+              className={styles.metricInput}
+              value={activeVertScale}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (hasTarget) setVerticalScale(val);
+                else setFallbackVertScale(val);
+              }}
+            />
+            <span className={styles.metricUnit}>%</span>
+          </div>
+
+          {/* Horizontal Scale */}
+          <div className={styles.metricCell}>
+            <span className={styles.metricLabel} title="Horizontal Scale (T-)">↔ Scale</span>
+            <input
+              type="number"
+              aria-label="Horizontal Scale"
+              className={styles.metricInput}
+              value={activeHorizScale}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (hasTarget) setHorizontalScale(val);
+                else setFallbackHorizScale(val);
+              }}
+            />
+            <span className={styles.metricUnit}>%</span>
+          </div>
+
+          {/* Baseline Shift */}
+          <div className={`${styles.metricCell} ${styles.metricCellWide}`}>
+            <span className={styles.metricLabel} title="Baseline Shift (A_)">Baseline</span>
+            <input
+              type="number"
+              aria-label="Baseline Shift"
+              className={styles.metricInput}
+              value={activeBaselineShift}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (hasTarget) setBaselineShift(val);
+                else setFallbackBaselineShift(val);
+              }}
+            />
+            <span className={styles.metricUnit}>px</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Box Text Wrap Option */}
+      {hasTarget && (
+        <div className={styles.sectionCard}>
+          <div className={styles.controlRow}>
+            <label className={styles.inlineCheck}>
+              <Checkbox
+                checked={typeof boxWidth === 'number' && boxWidth > 0}
+                onChange={() => {
+                  if (typeof boxWidth === 'number' && boxWidth > 0) setBoxWidth(0);
+                  else setBoxWidth(400);
+                }}
+              />
+              <span className={styles.inlineCheckLabel}>Box Text Wrap</span>
+            </label>
+            {typeof boxWidth === 'number' && boxWidth > 0 && (
+              <div className={styles.inlineField}>
+                <input
+                  type="number"
+                  aria-label="Box Width"
+                  value={boxWidth}
+                  onChange={(e) => setBoxWidth(Math.max(50, Number(e.target.value)))}
+                  className={styles.inlineNumber}
+                />
+                <span className={styles.metricUnit}>px</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Path Options (Mask text path riding) */}
       {hasTarget && maskPaths.length > 0 && (
-        <div className={styles.controlRow}>
-          <span className={styles.inlineLabel}>Path</span>
-          <select
-            value={activePathId}
-            onChange={(e) => {
-              if (!primary) return;
-              const id = e.target.value;
-              if (!id) setTextPath(primary, null);
-              else updateTextPath(primary, { ...(textPathCfg ?? defaultTextPath()), pathId: id });
-            }}
-            className={`${styles.fontSelect} ${styles.pathSelect}`}
-          >
-            <option value="">None</option>
-            {maskPaths.map((p, i) => (
-              <option key={p.id} value={p.id}>{`Mask ${i + 1}`}</option>
-            ))}
-          </select>
+        <div className={styles.sectionCard}>
+          <div className={styles.controlRow}>
+            <span className={styles.sectionHeader}>Mask Path</span>
+            <select
+              value={activePathId}
+              aria-label="Mask Path"
+              onChange={(e) => {
+                if (!primary) return;
+                const id = e.target.value;
+                if (!id) setTextPath(primary, null);
+                else updateTextPath(primary, { ...(textPathCfg ?? defaultTextPath()), pathId: id });
+              }}
+              className={`${styles.fontSelect} ${styles.pathSelect}`}
+            >
+              <option value="">None</option>
+              {maskPaths.map((p, i) => (
+                <option key={p.id} value={p.id}>{`Mask ${i + 1}`}</option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
       {/* Quick Typography Presets */}
-      <div>
-        <div className={styles.subhead}>Typography Presets</div>
+      <div className={styles.sectionCard}>
+        <div className={styles.sectionHeader}>Presets</div>
         <div className={styles.presetGrid}>
           {PRESETS.map((p) => (
             <button
@@ -671,5 +925,6 @@ export function CharacterPanel(): JSX.Element {
         </div>
       </div>
     </div>
-  );
+  </TooltipProvider>
+);
 }

@@ -23,7 +23,8 @@
 
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { readNodeKind } from '@core/scene/sceneDerive';
-import { readMeasuredTextStyle, measureTextBoxes, applyFontVariations } from '@core/text/measureText';
+import { readMeasuredTextStyle, measureTextBoxes, measureTextSize } from '@core/text/measureText';
+import { paintTextInBox, type TextPaintSpec } from '@core/rendering/raster/textPaint';
 import { useSelectionStore } from '@stores/selectionStore';
 import { bumpScene } from '@stores/sceneStore';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
@@ -39,66 +40,79 @@ const OVERSAMPLE = 4;
 interface BPt { x: number; y: number; inX: number; inY: number; outX: number; outY: number }
 
 /**
- * Rasterise the text exactly as the measurer lays it out, and return the
- * alpha plane plus the offset from the raster's origin to the layer's centre.
- * Null when there is no canvas to draw with (headless).
+ * Rasterise a text spec EXACTLY as the layer's own texture is drawn — the
+ * same painter (`paintTextInBox`), the same box, the same origin — at 4×,
+ * as a white silhouette (fill and stroke both white, so the layer stroke is
+ * part of the outline the way it is part of the pixels).
+ *
+ * The raster is the layer box (`spec.width × spec.height`) scaled by
+ * OVERSAMPLE; its centre is the layer's centre. Null when there is no canvas
+ * to draw with (headless).
  */
-function rasterizeText(node: SceneNode): { alpha: Uint8ClampedArray; w: number; h: number; cx: number; cy: number; scale: number } | null {
+function rasterizeTextSpec(spec: TextPaintSpec, oversample: number): { alpha: Uint8ClampedArray; w: number; h: number; scale: number } | null {
   if (typeof document === 'undefined') return null;
-  const style = readMeasuredTextStyle(node);
-  if (!style || !style.content.trim()) return null;
-  const boxes = measureTextBoxes(style);
-  if (!boxes) return null;
-
-  const pad = Math.ceil(style.fontSize * 0.25);
-  const w = Math.ceil((boxes.ink.width + pad * 2) * OVERSAMPLE);
-  const h = Math.ceil((boxes.ink.height + pad * 2) * OVERSAMPLE);
+  if (!(spec.text ?? '').trim()) return null;
+  const w = Math.ceil(spec.width * oversample);
+  const h = Math.ceil(spec.height * oversample);
   if (w < 2 || h < 2) return null;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const g = canvas.getContext('2d', { willReadFrequently: true });
   if (!g) return null;
-
-  g.scale(OVERSAMPLE, OVERSAMPLE);
-  const fontStyle = style.fontStyle === 'italic' ? 'italic ' : '';
-  g.font = `${fontStyle}${style.fontWeight} ${style.fontSize}px "${style.fontFamily}", Inter, system-ui, sans-serif`;
-  // Variable Width/Slant must match the on-screen glyph — font-file outlines
-  // ignore `fvar`, so the trace path is the one that can honor them.
-  applyFontVariations(g, style);
-  g.textBaseline = 'middle';
-  g.textAlign = 'center';
-  g.fillStyle = '#fff';
-  const lines = style.content.split('\n');
-  const n = lines.length;
-  const gap = style.fontSize * style.lineHeight + style.paragraphSpacing;
-  // The block centre sits at the ink box's centre in the raster. The
-  // measurer's `ink.offsetY` is the ink centre relative to the draw origin,
-  // so the draw origin is the raster centre minus that.
-  const cx = w / OVERSAMPLE / 2;
-  const cy = h / OVERSAMPLE / 2 - boxes.ink.offsetY;
-  const spacing = style.letterSpacing;
-  for (let i = 0; i < n; i++) {
-    const dy = (i - (n - 1) / 2) * gap;
-    const line = lines[i] ?? '';
-    if (spacing === 0) {
-      g.fillText(line, cx, cy + dy);
-    } else {
-      // Letter spacing: lay glyphs by hand, centred as a whole.
-      const chars = [...line];
-      const widths = chars.map((c) => g.measureText(c).width);
-      const total = widths.reduce((a, b) => a + b, 0) + Math.max(0, chars.length - 1) * spacing;
-      let x = cx - total / 2;
-      g.textAlign = 'left';
-      chars.forEach((c, k) => {
-        g.fillText(c, x, cy + dy);
-        x += widths[k]! + spacing;
-      });
-      g.textAlign = 'center';
-    }
-  }
+  g.scale(oversample, oversample);
+  paintTextInBox(g, { ...spec, color: '#ffffff', textStroke: '#ffffff' });
   const img = g.getImageData(0, 0, w, h);
-  return { alpha: img.data, w, h, cx: w / 2, cy: h / 2, scale: OVERSAMPLE };
+  return { alpha: img.data, w, h, scale: oversample };
+}
+
+/**
+ * The paint spec for a text NODE — the same fields buildSnapshot puts on the
+ * render layer and MotionRendererBackend feeds the texture provider, read
+ * straight off the components. For Create Shapes From Text, which has a node
+ * and no render layer; the render snapshot builds its spec from the layer.
+ */
+export function textPaintSpecFromNode(node: SceneNode): TextPaintSpec | null {
+  const style = readMeasuredTextStyle(node);
+  if (!style || !style.content.trim()) return null;
+  const size = measureTextSize(style);
+  if (!size) return null;
+  let align: string | undefined;
+  let textStroke: string | undefined;
+  let textStrokeWidth: number | undefined;
+  let strokeOverFill: boolean | undefined;
+  for (const c of node.components) {
+    const p = c.props as Record<string, unknown>;
+    if (typeof p.align === 'string') align = p.align;
+    if (typeof p.textStroke === 'string') textStroke = p.textStroke;
+    if (typeof p.textStrokeWidth === 'number') textStrokeWidth = p.textStrokeWidth;
+    if (typeof p.strokeOverFill === 'boolean') strokeOverFill = p.strokeOverFill;
+  }
+  return {
+    text: style.content,
+    fontSize: style.fontSize,
+    color: '#ffffff',
+    width: size.w,
+    height: size.h,
+    fontFamily: style.fontFamily,
+    fontWeight: style.fontWeight,
+    fontWidth: style.fontWidth,
+    fontSlant: style.fontSlant,
+    fontStyle: style.fontStyle,
+    align,
+    letterSpacing: style.letterSpacing,
+    lineHeight: style.lineHeight,
+    paragraphSpacing: style.paragraphSpacing,
+    textTransform: style.textTransform,
+    fontVariant: style.fontVariant,
+    verticalAlign: style.verticalAlign,
+    verticalScale: style.verticalScale,
+    horizontalScale: style.horizontalScale,
+    baselineShift: style.baselineShift,
+    textStroke,
+    textStrokeWidth,
+    strokeOverFill,
+  };
 }
 
 /** Trace, smooth, and express contours in LAYER space (centre-origin, 1×). */
@@ -140,31 +154,42 @@ async function fontRuns(node: SceneNode): Promise<{ runs: Array<{ points: BPt[];
   g.textBaseline = 'middle';
   const runs = outlineRuns(style, boxes, face, g);
   if (runs.length === 0) return null;
-  const pad = Math.ceil(style.fontSize * 0.25);
-  return { runs, w: boxes.ink.width + pad * 2, h: boxes.ink.height + pad * 2 };
+  // The LAYER box, so the shape layer's box is the text layer's box.
+  const size = measureTextSize(style);
+  if (!size) return null;
+  return { runs, w: size.w, h: size.h };
+}
+
+/**
+ * Trace a text spec's silhouette into closed Bézier runs in LAYER space —
+ * centre-origin, 1×, the origin being the box centre the layer's texture is
+ * drawn around. Synchronous, so the render snapshot can build an extrusion
+ * mesh from it. Null without a canvas (headless) or for empty text.
+ */
+export function traceTextSpec(spec: TextPaintSpec, oversample: number = OVERSAMPLE): Array<{ points: BPt[]; open: false }> | null {
+  const raster = rasterizeTextSpec(spec, oversample);
+  if (!raster) return null;
+  const contours = traceBitmap(raster.alpha, raster.w, raster.h, 4, {
+    threshold: 128,
+    // Tolerance in RASTER pixels: ~0.4 px at 1× whatever the oversample —
+    // well under what smoothing then rounds away.
+    tolerance: 0.375 * oversample,
+    minArea: 6 * oversample,
+  });
+  const runs = contoursToRuns(contours, raster.w / 2, raster.h / 2, raster.scale);
+  return runs.length > 0 ? runs : null;
 }
 
 /** The traced outlines — the fallback when the font cannot be read. */
 function tracedRuns(node: SceneNode): { runs: Array<{ points: BPt[]; open: false }>; w: number; h: number } | null {
-  const raster = rasterizeText(node);
-  if (!raster) return null;
-  const contours = traceBitmap(raster.alpha, raster.w, raster.h, 4, {
-    threshold: 128,
-    // Tolerance in RASTER pixels: 1.5 at 4× is ~0.4 px at 1× — well under
-    // what smoothing then rounds away.
-    tolerance: 1.5,
-    minArea: 6 * OVERSAMPLE,
-  });
-  const runs = contoursToRuns(contours, raster.cx, raster.cy, raster.scale);
-  if (runs.length === 0) return null;
-  return { runs, w: raster.w / raster.scale, h: raster.h / raster.scale };
+  const spec = textPaintSpecFromNode(node);
+  if (!spec) return null;
+  const runs = traceTextSpec(spec);
+  if (!runs) return null;
+  return { runs, w: spec.width, h: spec.height };
 }
 
-/**
- * The text's outlines as closed Bézier runs in layer space, from the trace —
- * synchronous, so the render snapshot can build an extrusion mesh from it.
- * Null without a canvas (headless) or for empty text.
- */
+/** A text node's traced outlines in layer space (see `traceTextSpec`). */
 export function traceTextRuns(node: SceneNode): Array<{ points: BPt[]; open: false }> | null {
   return tracedRuns(node)?.runs ?? null;
 }
@@ -180,14 +205,23 @@ export async function createShapesFromText(nodeId: string): Promise<{ id: string
   const node = defaultSceneGraph.getNode(nodeId);
   if (!node || readNodeKind(node) !== 'text') return null;
   const style = readMeasuredTextStyle(node);
-  // Installed-face outlines do not apply `wdth`/`slnt`. When the author set a
-  // variable axis, prefer the variation-aware raster trace over a misleading
-  // default-axis outline.
+  const spec = textPaintSpecFromNode(node);
+  // Installed-face outlines do not apply `wdth`/`slnt`, and `outlineRuns`
+  // lays out plain centred lines: no case transform, small caps, scale,
+  // baseline shift, stroke, or left/right alignment. When the author set any
+  // of those, prefer the trace — which is painted by the layer's own
+  // rasteriser and so has them all — over a misleading default outline.
   const wantsVariations = style != null
     && ((style.fontWidth !== undefined && Number.isFinite(style.fontWidth))
       || (style.fontSlant !== undefined && Number.isFinite(style.fontSlant)));
+  const wantsPaintedLayout = spec != null && (
+    !!spec.textTransform || !!spec.fontVariant || !!spec.verticalAlign
+    || spec.verticalScale !== undefined || spec.horizontalScale !== undefined || spec.baselineShift !== undefined
+    || (spec.textStrokeWidth ?? 0) > 0
+    || (spec.align !== undefined && spec.align !== 'center' && spec.text.includes('\n'))
+  );
   let source: ShapesFromTextSource = 'outlines';
-  let built = wantsVariations ? null : await fontRuns(node);
+  let built = wantsVariations || wantsPaintedLayout ? null : await fontRuns(node);
   if (!built) {
     source = 'traced';
     built = tracedRuns(node);

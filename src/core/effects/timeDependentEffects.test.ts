@@ -66,7 +66,10 @@ describe('the TIME_DEPENDENT set', () => {
     // Reach for a keyframed parameter first; land here only when the effect
     // cannot be expressed that way.
     const members = EFFECT_DEFS.filter((d) => isTimeDependentEffect(d.type)).map((d) => d.type);
-    expect(members).toEqual(['timecode', 'strobe-light']);
+    // `particle-systems` (round seven) is the third: an emitter indexes births
+    // by absolute time, so a keyframed phase would leave it static by default
+    // — the one case the note above says to reach past keyframes for.
+    expect(members).toEqual(['timecode', 'strobe-light', 'particle-systems']);
   });
 
   it('names a real param on a real effect for every member', () => {

@@ -49,6 +49,11 @@ const LUT_FIXTURES: ReadonlyArray<readonly [EffectType, Record<string, unknown>]
   // that has nothing to do with the effect being broken.
   ['color-balance', { shadowRed: 60, midtoneRed: -40, highlightRed: 30 }],
   ['gamma-pedestal-gain', { redGamma: 2.2, redGain: 1.2 }],
+  // Effects round seven. Same rule as the round-three pair above: each fixture
+  // pushes the RED channel, because the assertion below reads `lut.r`.
+  ['color-offset', { redPhase: 120, overflow: 0 }],
+  ['threshold-rgb', { redLevel: 100 }],
+  ['cineon-converter', { conversionType: 0 }],
 ];
 
 describe('every LUT effect actually produces a table', () => {

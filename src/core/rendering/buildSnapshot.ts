@@ -86,6 +86,7 @@ import { expandCloners, cloneOffsetOf } from '@core/scene/clonerExpand';
 import { readNodePhysics, physicsPosesAt } from '@core/simulation/physicsBodies';
 import type { BodySeed } from '@core/simulation/rigidBody';
 import { usePhysicsStore } from '@stores/physicsStore';
+import { useTextEditStore } from '@stores/textEditStore';
 import { readLiveBoolean, evaluateLiveBoolean, isBooleanOperand, nodeWorldOutline, flattenOutline, ADAPTIVE } from '@core/scene/mergePaths';
 import { readContinuousRaster, supportsContinuousRaster } from '@core/scene/continuousRaster';
 import { readNodeCornerPin } from '@core/scene/cornerPin';
@@ -3523,7 +3524,19 @@ export function buildSnapshot(
     // extruded: both carriers would draw, one inside the other. (Extrusion
     // Depth still shows in the 3D panel for such a layer; it simply has
     // nothing to sweep.)
-    if (is3D && world3d && extrusionDepth > 0 && !isPrimitiveMeshNode(node)) {
+    /*
+      No body while the text is being edited in place: the body is traced
+      from the layer's text, which the edit overlay is replacing character by
+      character, so the solid showed the PRE-edit string through the overlay
+      until Enter. (The texture provider already blanks the front face for the
+      edited id; the `::ext-*` carriers never matched it.)
+    */
+    const textBodySuppressed = layer.kind === 'text' && useTextEditStore.getState().nodeId === node.id;
+    // Per-character 3D keeps the whole-string body (pinned by
+    // buildSnapshotPerChar3D.test) but the FRONT is the glyph planes below —
+    // the mesh must not also paint the string on an inset cap.
+    const perCharText = layer.kind === 'text' && isPerChar3D(node);
+    if (is3D && world3d && extrusionDepth > 0 && !isPrimitiveMeshNode(node) && !textBodySuppressed) {
       const isComplexContent =
         layer.kind === 'text' ||
         (layer.kind === 'shape' && layer.primitive !== 'rect' && layer.primitive !== 'ellipse');
@@ -3619,7 +3632,7 @@ export function buildSnapshot(
         and the quad is not emitted.
       */
       const complexOutline = layer.kind === 'text' || (layer.kind === 'shape' && layer.primitive === 'path');
-      const meshOwnsFront = complexOutline && meshBevel > 0;
+      const meshOwnsFront = complexOutline && meshBevel > 0 && !perCharText;
       /*
         Effect REACH decides the path. COLOUR effects (invert, tint, …) fold
         into the mesh's range colours / colour matrix on the CPU, so they reach
@@ -3628,8 +3641,25 @@ export function buildSnapshot(
         synthesis can stage — so their presence sends the whole object down the
         fallback, where each face still carries them (see faceEffectsFor).
       */
-      const meshBlockedByFx = (layer.effects ?? []).some((e) => e.enabled !== false && !isColorEffect(e.type));
-      const builtMesh = meshOutline && !meshBlockedByFx
+      // The camera-DOF blur (`id: 'dof'`) is excluded: inside a depth group the
+      // mesh is defocused per pixel from the depth buffer (the gather pass),
+      // so the appended flat-quad blur is not what it needs — and counting it
+      // sent every extruded text to the slice stack the moment DOF came on.
+      const meshBlockedByFx = (layer.effects ?? []).some((e) => e.enabled !== false && e.id !== 'dof' && !isColorEffect(e.type));
+      /*
+        INTERIOR layer styles (inner shadow, inner glow, satin, bevel, stroke)
+        hug the contour of the surface they are on, so each one has to be
+        resolved per FACE against that face's own edges. A mesh range is a
+        single flat colour and a single draw — there is nowhere to put them,
+        and the result was a title whose front carried the inner shadow and
+        whose walls carried nothing, split along the front edge exactly like
+        the gradient above. The quad synthesis stages a resolve per face
+        (`faceFxFor`), so a layer that asks for one goes there — the same rule
+        the spatial effects above follow. Overlays are not in this set: they
+        repaint the surface and already reach every face through `wallFill`.
+      */
+      const meshBlockedByStyles = faceStyles !== undefined;
+      const builtMesh = meshOutline && !meshBlockedByFx && !meshBlockedByStyles
         ? extrusionMeshFor(meshOutline, layerW, layerH, { depth: extrusionDepth, bevel: meshBevel, bevelStyle: d3.bevelStyle, frontCap: meshOwnsFront })
         : null;
       let meshEmitted = false;
@@ -3643,6 +3673,22 @@ export function buildSnapshot(
         if (!O.clipped) {
           const isMedia = layer.kind === 'image' || layer.kind === 'video';
           const hasFrontCap = mesh.ranges.some((r) => r.role === 'front');
+          /*
+            A GRADIENT fill reaches the walls through a paint plate: the layer
+            box painted edge to edge with `fillPaint`, which the wall, bevel and
+            back ranges sample over the mesh's layer-box uv. `layer.fill` is
+            only the BASE colour a gradient never writes to, so a gradient-
+            filled title used to get a gradient front over flat blue walls,
+            split exactly along the front edge (the quad path samples the
+            paint per face; a mesh range is one colour). A Colour/Gradient
+            Overlay style repaints the surface instead (wallFill differs from
+            the base) and keeps the flat styled colour; so does an explicit
+            per-face material.
+          */
+          const wallBase = typeof layer.fill === 'string' ? layer.fill : EXTRUSION_WALL_FALLBACK_FILL;
+          const wallPaint = layer.fillPaint && layer.fillPaint.type !== 'solid' && wallFill === wallBase
+            ? { key: `paint:${layer.id}`, fillPaint: layer.fillPaint, fill: wallBase, width: layerW, height: layerH }
+            : undefined;
           const ranges = mesh.ranges.map((r) => {
             if (r.role === 'front') {
               // The layer's own content, on the inset cap, undimmed.
@@ -3655,8 +3701,14 @@ export function buildSnapshot(
             // Media keeps its picture on the back cap unless a back colour
             // was chosen, as the quad path's spread back cap did.
             const textured = isMedia && r.role === 'back' && !faceMats.back?.fill;
-            return { role: r.role, first: r.first, count: r.count, fill: fm.fill, gain, ...(textured ? { textured: true } : {}) };
+            const paintTextured = !!wallPaint && !textured && !faceMats[r.role]?.fill;
+            return {
+              role: r.role, first: r.first, count: r.count, fill: fm.fill, gain,
+              ...(textured ? { textured: true } : {}),
+              ...(paintTextured ? { paintTextured: true } : {}),
+            };
           });
+          const extrudedMesh = { key, vertices: mesh.vertices, indices: mesh.indices, ranges, ...(wallPaint ? { paint: wallPaint } : {}) };
           // A carrier that samples the layer's raster (media back cap, or a
           // front cap the mesh owns) must keep the layer's content fields so
           // the texture provider rasterises the same thing under the new id.
@@ -3682,7 +3734,7 @@ export function buildSnapshot(
                 ...layer,
                 ...scrub,
                 id: `${layer.id}::ext-mesh`,
-                extrudedMesh: { key, vertices: mesh.vertices, indices: mesh.indices, ranges },
+                extrudedMesh,
               }
             : {
                 ...scrub,
@@ -3704,7 +3756,12 @@ export function buildSnapshot(
                 fill: resolveFaceMaterial(faceMats, 'side', wallFill).fill,
                 visible: layer.visible,
                 flatFacet: true,
-                extrudedMesh: { key, vertices: mesh.vertices, indices: mesh.indices, ranges },
+                // The SOLID casts into the GPU shadow map, not just the front
+                // plane: `castsShadow3d` was set on `layer` above and the
+                // content-carrying clone inherits it, but this bare carrier
+                // did not — so an extruded box threw a zero-depth shadow.
+                ...(layer.castsShadow3d ? { castsShadow3d: true } : {}),
+                extrudedMesh,
               };
           if (extLit) {
             // Per-fragment lighting from the interpolated vertex normals, one

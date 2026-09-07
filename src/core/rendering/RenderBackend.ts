@@ -538,7 +538,19 @@ export interface RenderLayer {
       gain: number;
       /** Sample the layer's own texture (image/video back cap) instead of `fill`. */
       textured?: boolean;
+      /**
+       * Sample the layer's FILL PAINT plate (`paint.key` below) instead of
+       * `fill` — what puts a gradient on the walls. The mesh's uv is the layer
+       * box, so the plate is that box painted edge to edge with the gradient.
+       */
+      paintTextured?: boolean;
     }>;
+    /**
+     * The gradient plate the `paintTextured` ranges sample: the layer box
+     * (`width × height`) filled with `fillPaint`, no glyph mask, no padding.
+     * The texture provider rasterises it under `key` (MotionRendererBackend).
+     */
+    paint?: { key: string; fillPaint: FillPaint; fill?: string; width: number; height: number };
     /**
      * An imported glTF material's maps beyond base colour, as this session's
      * object URLs. Present only when the material carries at least one — which

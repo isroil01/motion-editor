@@ -3,9 +3,9 @@ import { applyEffectPreset, listEffectPresets } from './effectClipboard';
 import { EFFECT_DEFS } from './effects';
 
 describe('builtin effect presets', () => {
-  it('ships twenty production starter looks', () => {
-    expect(BUILTIN_EFFECT_PRESETS).toHaveLength(20);
-    expect(new Set(BUILTIN_EFFECT_PRESETS.map((p) => p.name)).size).toBe(20);
+  it('ships forty production starter looks', () => {
+    expect(BUILTIN_EFFECT_PRESETS).toHaveLength(40);
+    expect(new Set(BUILTIN_EFFECT_PRESETS.map((p) => p.name)).size).toBe(40);
   });
 
   it('uses effect types that exist in EFFECT_DEFS', () => {
