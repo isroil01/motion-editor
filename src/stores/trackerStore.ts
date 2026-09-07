@@ -141,6 +141,13 @@ interface TrackerStore {
   /** Human-readable outcome/error line for the section. */
   note: string | null;
 
+  /**
+   * True while the "Advanced tracking" disclosure is open. The overlay keys
+   * manual chrome (seeded handles, feature/search boxes) off this: a person
+   * in the one-click flow has placed nothing, and a crosshair-in-a-box
+   * floating mid-footage before they act reads as a glitch, not a tool.
+   */
+  advancedOpen: boolean;
   /** One-click tracking: waiting for a click, analysing, or neither. */
   autoPhase: AutoPhase;
   /** The last analysis's measurements, kept so the result stays explainable
@@ -158,6 +165,7 @@ interface TrackerStore {
   setProgress: (p: number) => void;
   finishTracking: (result: TrackerResult | null, note: string | null) => void;
   /** Arm (or disarm) the viewport for the one-click target pick. */
+  setAdvancedOpen: (open: boolean) => void;
   setAutoPhase: (phase: AutoPhase) => void;
   setAutoPlan: (plan: AutoPlanSummary | null) => void;
   clear: () => void;
@@ -175,6 +183,7 @@ export const useTrackerStore = create<TrackerStore>((set, get) => ({
   progress: 0,
   result: null,
   note: null,
+  advancedOpen: false,
   autoPhase: 'idle',
   autoPlan: null,
 
@@ -215,6 +224,7 @@ export const useTrackerStore = create<TrackerStore>((set, get) => ({
   setProgress: (p) => set({ progress: p }),
   finishTracking: (result, note) =>
     set({ tracking: false, progress: 0, result, note, autoPhase: 'idle' }),
+  setAdvancedOpen: (advancedOpen) => set({ advancedOpen }),
   setAutoPhase: (autoPhase) => set({ autoPhase }),
   setAutoPlan: (autoPlan) => set({ autoPlan }),
   clear: () =>

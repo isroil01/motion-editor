@@ -33,6 +33,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@components/Button';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
+import { canReparent } from '@core/scene/parenting';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useTrackerStore } from '@stores/trackerStore';
 import { useActiveWorkspace } from '@stores/projectStore';
@@ -73,6 +74,16 @@ export function TrackMotionSection({ nodeId }: { nodeId: string }): JSX.Element 
   const comp = useCompositionStore((c) => c.comp());
   const [targetId, setTargetId] = useState(nodeId);
   const [stabVariant, setStabVariant] = useState<StabVariant>('similarity');
+  // The null the LAST "Create null & apply" made — while it exists, the card
+  // offers to parent a layer to it instead of a note asking the user to.
+  // A new run replaces `result` (a fresh object), which clears the offer;
+  // apply/attach re-use the same result reference, which keeps it.
+  const [createdNullId, setCreatedNullId] = useState<string | null>(null);
+  const [attachId, setAttachId] = useState<string | null>(null);
+  useEffect(() => {
+    setCreatedNullId(null);
+    setAttachId(null);
+  }, [result, nodeId]);
 
   const node = defaultSceneGraph.getNode(nodeId);
   const src = sourceDisplaySize(nodeId);
@@ -132,9 +143,18 @@ export function TrackMotionSection({ nodeId }: { nodeId: string }): JSX.Element 
   const ctx: TrackMotionContext = {
     nodeId, targetId, setTargetId, mode, points, featureHalf, searchHalf, tracking, result, autoPhase,
     time, endCompTime, fps, durationSeconds, comp, src, stabVariant, targets,
+    onNullCreated: setCreatedNullId,
   };
   const actions = trackMotionActions(ctx);
-  const { onArmPick, onTrackAgain, onCancel, onCreateNullAndApply, onApply } = actions;
+  const { onArmPick, onTrackAgain, onCancel, onCreateNullAndApply, onApply, onAttachToNull } = actions;
+
+  // Layers a person can attach to the created null. The tracked video is
+  // deliberately absent: its content is where the motion CAME from, so
+  // parenting it to the null plays that motion twice.
+  const attachCandidates = createdNullId
+    ? targets.filter((t) => t.id !== createdNullId && t.id !== nodeId && canReparent(t.id, createdNullId))
+    : [];
+  const attachValue = attachId ?? attachCandidates[0]?.id ?? '';
 
   const canTrack = mode === 'mask' ? maskPoints > 0 : mode === 'smooth' ? true : points.length > 0;
   const applyLabel =
@@ -187,8 +207,8 @@ export function TrackMotionSection({ nodeId }: { nodeId: string }): JSX.Element 
           <>
             <p className={styles.cardHint}>
               {picking
-                ? 'Click the thing to follow in the viewport. It snaps to the nearest trackable detail, then tracks the whole clip both ways from the playhead. Esc to cancel.'
-                : 'Point at anything in the shot. The feature, both window sizes and the direction are measured from the footage — no boxes to place.'}
+                ? 'Click the thing to follow — or drag a box around it. It locks onto the best trackable detail there, then tracks the whole clip both ways from the playhead. Esc to cancel. Spinning objects (wheels, fans): pick the hub — details on the rim rotate away mid-track.'
+                : 'Point at anything in the shot, or draw a box around it. The feature, both window sizes and the direction are measured from the footage.'}
             </p>
             <Button size="sm" variant={picking ? 'secondary' : 'primary'} onClick={onArmPick} fullWidth>
               {picking ? 'Cancel pick (Esc)' : 'Pick target in viewport'}
@@ -266,6 +286,40 @@ export function TrackMotionSection({ nodeId }: { nodeId: string }): JSX.Element 
                 Apply
               </Button>
             </div>
+            {createdNullId && attachCandidates.length > 0 && (
+              // The step the result note used to ask for. Same-parent layers
+              // only (the dropdown above already established that scope), the
+              // tracked video excluded — see attachCandidates.
+              <div className={styles.actionRow}>
+                <select
+                  className={styles.select}
+                  value={attachValue}
+                  aria-label="Layer to parent to the tracked null"
+                  onChange={(e) => setAttachId(e.target.value)}
+                >
+                  {attachCandidates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name || t.id}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => attachValue && onAttachToNull(attachValue, createdNullId)}
+                  title="Parents the chosen layer to the tracked null without moving it — it starts following the motion from here on."
+                >
+                  Parent to null
+                </Button>
+              </div>
+            )}
+            {/* The overlay deliberately draws only ~1s of path around the
+                playhead (TrackPointOverlay: a full walk read as corruption).
+                Deliberate still needs SAYING, or the short squiggle reads as
+                a track that quit after a second. */}
+            <p className={styles.cardHint}>
+              The viewport shows the path near the playhead — scrub to review it. Applying writes every frame.
+            </p>
           </div>
         )}
       </section>

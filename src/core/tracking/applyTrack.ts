@@ -832,6 +832,14 @@ export function createNullAndApplyTrack(opts: {
   return runDocumentEdit('Create Null & Apply Track', () => {
     const parentId = video.parent ?? opts.comp.rootId ?? 'comp_root';
     const nullId = `null_track_${Math.random().toString(36).slice(2, 8)}`;
+    // "Tracked Null", "Tracked Null 2", … — the button is easy to press
+    // twice, and two layers with byte-identical names cannot be told apart
+    // in the timeline or the parent dropdown.
+    let priorNulls = 0;
+    defaultSceneGraph.traverse((n) => {
+      if (/^Tracked Null( \d+)?$/.test(n.name ?? '')) priorNulls++;
+    });
+    const nullName = priorNulls === 0 ? 'Tracked Null' : `Tracked Null ${priorNulls + 1}`;
     // Seed at the first sample's position in parent space (not a hardcoded corner).
     let x = 160;
     let y = 120;
@@ -856,7 +864,7 @@ export function createNullAndApplyTrack(opts: {
     }
     const node: SceneNode = {
       id: nullId,
-      name: 'Tracked Null',
+      name: nullName,
       parent: parentId,
       children: [],
       transform: { position: { x, y }, rotation: 0, scale: { x: 1, y: 1 } },
