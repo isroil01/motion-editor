@@ -70,9 +70,9 @@
 }
 
 .statusPillLive {
-  background: var(--color-success-subtle);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
   color: var(--color-success);
-  border-color: var(--color-success-border);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 
 .statusDot {
