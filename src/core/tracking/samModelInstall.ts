@@ -44,6 +44,10 @@ export type ModelStatus =
   | { kind: 'absent' }
   | { kind: 'downloading'; receivedBytes: number; totalBytes: number | null }
   | { kind: 'ready'; sourceUrl: string; bytes: number; installedAt: number }
+  /** The encoder/decoder pair that ships inside the app (samBundled.ts) is
+   *  registered. Nothing was downloaded and there is nothing to remove —
+   *  installing a custom model overrides it for the session. */
+  | { kind: 'bundled'; bytes: number }
   | { kind: 'failed'; message: string };
 
 interface SamModelState {
@@ -237,8 +241,14 @@ export const useSamModelStore = create<SamModelState>((set) => ({
  * has never installed a model must not pay for this, log about it, or touch the
  * network because of it.
  */
-export function restoreSamModelAtBoot(): void {
-  void ModelCache.get().then((cached) => {
-    if (cached) void useSamModelStore.getState().restore();
-  });
+export function restoreSamModelAtBoot(): Promise<void> {
+  return ModelCache.get()
+    .then((cached) => {
+      if (cached) return useSamModelStore.getState().restore();
+      return undefined;
+    })
+    // The boot sequence awaits this to decide whether the bundled model should
+    // load instead; a cache read that throws must answer "no user model", not
+    // reject the whole chain.
+    .catch(() => undefined);
 }

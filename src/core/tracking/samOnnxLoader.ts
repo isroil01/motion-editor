@@ -1,13 +1,26 @@
 /**
  * Optional ONNX Runtime Web loader for SAM-class segmentation.
  *
- * Does NOT bundle a model or onnxruntime-web — both are large and optional.
- * Call {@link tryRegisterSamOnnxFromUrl} with a hosted .onnx URL when the host
- * has installed `onnxruntime-web` (dynamic import). On success, clicks go
- * through {@link registerSamOnnxSession}; classical GrabCut remains the fallback.
+ * Two registration shapes:
+ *  - {@link tryRegisterSamPipeline} — an encoder/decoder PAIR speaking the real
+ *    SAM protocol (`samPipeline.ts`). This is what the bundled model uses.
+ *  - {@link tryRegisterSamOnnxFromUrl} / `FromBytes` — the legacy single-file
+ *    path for a user-supplied model, kept for the Settings install flow.
+ * On success, clicks go through {@link registerSamOnnxSession}; classical
+ * GrabCut remains the fallback either way.
+ *
+ * ── WASM delivery ──
+ * onnxruntime-web resolves its .wasm binary relative to its own script URL,
+ * which survives no bundler. The host tells this module where the runtime
+ * lives via {@link setOrtWasmAssets} BEFORE any session is created: either a
+ * URL prefix the runtime can fetch from (dev server / web deploy) or the raw
+ * bytes (packaged Electron, where the page is file:// and fetch cannot reach
+ * disk). Without it, session creation fails on every bundled build — this is
+ * not an optimization.
  */
 
 import { registerSamOnnxSession, type SamSegmentRequest } from './samSegment';
+import { wrapSamPipeline, type SamOrt, type SamSession } from './samPipeline';
 
 export type SamOnnxLoadResult =
   | { status: 'ok' }
@@ -31,13 +44,49 @@ type OrtNamespace = {
     create: (source: string | Uint8Array, opts?: Record<string, unknown>) => Promise<OrtSession>;
   };
   Tensor: new (type: string, data: Float32Array | Uint8Array, dims: number[]) => unknown;
+  env: { wasm: { wasmPaths?: string | { mjs?: string; wasm?: string }; wasmBinary?: Uint8Array } };
 };
+
+/**
+ * Where the ORT wasm runtime comes from — see the module doc.
+ *
+ * The runtime is TWO files, and they travel differently: the .mjs glue is a
+ * module the browser must `import()` (so it needs a URL, never bytes), while
+ * the .wasm binary can be either fetched from a URL or handed over as bytes.
+ * A served build points both at the same prefix; the packaged desktop app
+ * imports the glue from a `file://` URL out of its own bundle and supplies the
+ * binary as bytes over IPC, because `fetch` cannot reach `file://`.
+ */
+export type OrtWasmAssets =
+  | { kind: 'paths'; prefix: string }
+  | { kind: 'electron'; mjsUrl: string; loadBinary: () => Promise<Uint8Array | null> };
+
+let wasmAssets: OrtWasmAssets | null = null;
+
+/**
+ * Declare the wasm runtime's location. Call once at boot, before any model
+ * registration. `loadBinary` is a thunk so the ~27 MB file is only read when
+ * a session is actually created.
+ */
+export function setOrtWasmAssets(assets: OrtWasmAssets | null): void {
+  wasmAssets = assets;
+}
 
 async function importOrt(): Promise<OrtNamespace | null> {
   try {
     // Optional peer — may be absent in the default install.
     const mod = await import(/* @vite-ignore */ 'onnxruntime-web');
-    return mod as unknown as OrtNamespace;
+    const ort = mod as unknown as OrtNamespace;
+    if (wasmAssets?.kind === 'paths') {
+      ort.env.wasm.wasmPaths = wasmAssets.prefix;
+    } else if (wasmAssets?.kind === 'electron') {
+      ort.env.wasm.wasmPaths = { mjs: wasmAssets.mjsUrl };
+      if (!ort.env.wasm.wasmBinary) {
+        const bytes = await wasmAssets.loadBinary();
+        if (bytes) ort.env.wasm.wasmBinary = bytes;
+      }
+    }
+    return ort;
   } catch {
     return null;
   }
@@ -112,6 +161,39 @@ async function registerFrom(source: string | Uint8Array): Promise<SamOnnxLoadRes
       status: 'failed',
       reason: e instanceof Error ? e.message : String(e),
     };
+  }
+}
+
+/**
+ * Register a REAL SAM encoder/decoder pair (see samPipeline.ts).
+ *
+ * This is the bundled-model path. It shares nothing with `registerFrom` on
+ * purpose: the single-session wrapper and the pipeline disagree about what a
+ * model IS, and the shared part — import, provider list, cleanup on failure —
+ * is small enough to state twice and keep each path readable.
+ */
+export async function tryRegisterSamPipeline(
+  encoderBytes: Uint8Array,
+  decoderBytes: Uint8Array,
+): Promise<SamOnnxLoadResult> {
+  const ort = await importOrt();
+  if (!ort) {
+    return {
+      status: 'unavailable',
+      reason: 'onnxruntime-web is not installed. npm i onnxruntime-web, then retry.',
+    };
+  }
+  try {
+    const opts = { executionProviders: ['webgpu', 'wasm'] };
+    const encoder = await ort.InferenceSession.create(encoderBytes, opts);
+    const decoder = await ort.InferenceSession.create(decoderBytes, opts);
+    registerSamOnnxSession(
+      wrapSamPipeline(ort as unknown as SamOrt, encoder as SamSession, decoder as SamSession),
+    );
+    return { status: 'ok' };
+  } catch (e) {
+    registerSamOnnxSession(null);
+    return { status: 'failed', reason: e instanceof Error ? e.message : String(e) };
   }
 }
 

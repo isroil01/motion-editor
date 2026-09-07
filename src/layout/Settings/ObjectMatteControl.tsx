@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@components/Button';
 import { Input } from '@components/Input';
 import { SUGGESTED_MODEL, useSamModelStore } from '@core/tracking/samModelInstall';
+import { registerBundledSamAtBoot } from '@core/tracking/samBundled';
 import { installObjectMatteJob } from './objectMatteJob';
 import styles from './ObjectMatteControl.module.css';
 
@@ -53,12 +54,32 @@ export function ObjectMatteControl(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (status.kind === 'bundled') {
+    return (
+      <div className={styles.root}>
+        <div className={styles.readyRow}>
+          <span className={styles.ready}>Bundled with the app · {megabytes(status.bytes)}</span>
+        </div>
+        {/* No Remove button: there is nothing on this device to reclaim — the
+            model ships inside the app. Installing a custom model below still
+            overrides it (samModelInstall.ts). */}
+        <div className={styles.hint}>
+          Neural one-click selection is ready — nothing to download. Clicks in the
+          Roto tool use it automatically, with the classical matte as fallback.
+        </div>
+      </div>
+    );
+  }
+
   if (status.kind === 'ready') {
     return (
       <div className={styles.root}>
         <div className={styles.readyRow}>
           <span className={styles.ready}>Installed · {megabytes(status.bytes)}</span>
-          <Button variant="secondary" size="sm" onClick={() => { void remove(); }}>
+          {/* Removing the custom model falls back to the bundled one, not to
+              nothing — re-registered immediately so the very next Roto click
+              behaves the way the panel now says it will. */}
+          <Button variant="secondary" size="sm" onClick={() => { void remove().then(() => registerBundledSamAtBoot()); }}>
             Remove
           </Button>
         </div>
@@ -110,8 +131,9 @@ export function ObjectMatteControl(): JSX.Element {
       {status.kind === 'failed' ? <div className={styles.error}>{status.message}</div> : null}
       <div className={styles.hint}>
         Optional. Downloads about {megabytes(SUGGESTED_MODEL.approxBytes)} from the host above, once,
-        and keeps it on this device. Without it the Roto tool still works — clicks
-        use the classical matte.
+        and keeps it on this device. Without it the Roto tool still works — this
+        build bundles a neural model, and clicks fall back to the classical matte
+        only when neither is available.
       </div>
     </div>
   );

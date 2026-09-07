@@ -5,7 +5,8 @@ import { ErrorBoundary } from '@components/ErrorBoundary/ErrorBoundary';
 import { TooltipProvider } from '@components/Tooltip';
 import { setLocalFirst } from '@core/config/flags';
 import { tryRegisterSamOnnxFromUrl } from '@core/tracking/samOnnxLoader';
-import { restoreSamModelAtBoot } from '@core/tracking/samModelInstall';
+import { restoreSamModelAtBoot, useSamModelStore } from '@core/tracking/samModelInstall';
+import { registerBundledSamAtBoot } from '@core/tracking/samBundled';
 import { parseEdition, setEdition } from '@core/config/edition';
 import { setDevRendererBuild } from '@core/rendering/rendererIdentity';
 import { purgeLegacyLocalAiKeys } from '@core/api/purgeLocalKeys';
@@ -76,15 +77,21 @@ setLocalFirst(
     });
   } else {
     /*
-      No build-time URL: look for a model the USER installed.
-
-      This is the path that makes the feature reachable at all. A Vite env var
-      is a thing a packager sets, not a thing a person does, so the model now
-      arrives through Settings ▸ Object Matte — downloaded once, on an explicit
-      press, and cached in IndexedDB. This call touches the network never: it
-      reads the cache, and returns immediately when it is empty.
+      No build-time URL. Precedence: a model the user installed through
+      Settings ▸ Object Matte (IndexedDB cache) wins — it was an explicit
+      choice — then the encoder/decoder pair bundled with the app
+      (samBundled.ts). Neither path touches the network; a checkout without
+      the bundled files (fetch script never run) lands on GrabCut exactly as
+      before. Sequential on purpose: registering the bundle first would create
+      sessions the cached model immediately replaces.
     */
-    restoreSamModelAtBoot();
+    void (async () => {
+      await restoreSamModelAtBoot();
+      if (useSamModelStore.getState().status.kind !== 'ready') {
+        const ok = await registerBundledSamAtBoot();
+        if (ok) console.info('[sam] bundled neural segmenter ready');
+      }
+    })();
   }
 }
 

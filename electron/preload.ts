@@ -17,6 +17,12 @@ const bridge = {
     openBundleDir: () => ipcRenderer.invoke('project:openBundleDir'),
   },
 
+  // Bundled Object Matte model files (allowlisted names only — see main.ts).
+  objectMatte: {
+    read: (name: string) => ipcRenderer.invoke('objectMatte:read', name),
+    url: (name: string) => ipcRenderer.invoke('objectMatte:url', name),
+  },
+
   file: {
     read: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
     write: (filePath: string, contents: string) => ipcRenderer.invoke('file:write', filePath, contents),
