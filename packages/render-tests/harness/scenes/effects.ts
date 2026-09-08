@@ -39,6 +39,10 @@ const EFFECTS: EffectSpec[] = [
   // blur-kernel AA on the ellipse's soft edge, hence the same headroom the
   // drop-shadow scene below documents.
   { type: 'glow', params: { radius: 16, color: '#78b4ff', intensity: 90 }, tolerance: 0.009 },
+  // Deep Glow (2026-09-08): the octave pyramid. Both engines run the same
+  // 33-tap progressive ladder (deepGlowKernel.ts), so this is a parity gate,
+  // not an eyeball. Exposure +1 so the halo is well above the 8-bit floor.
+  { type: 'deep-glow', params: { radius: 40, exposure: 1, threshold: 0, aspect: 0, chromatic: 0, tint: '#ffffff', tintAmount: 0, glowOnly: false, dither: false, quality: 1 }, tolerance: 0.009 },
   // tolerance: the GPU shadow penumbra sits at 0.501% vs the 0.5% default gate —
   // visually identical (soft-edge AA rounding), so give the blurred edge headroom.
   { type: 'drop-shadow', params: { distance: 6, angle: 135, softness: 12, color: '#000000', opacity: 55 }, tolerance: 0.008 },

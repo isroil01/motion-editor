@@ -32,6 +32,7 @@
 
 import type { Effect } from './effects';
 import { effectNumber, paramsOf } from './effects';
+import { deepGlowData, deepGlowSettings } from './deepGlow';
 import { applyKeyData, chokeAlpha, softenAlpha } from './keylight';
 import { waveWarpData, turbulentDisplaceData, curlNoiseData } from './warp';
 import { blurRgba, radialBlurData, blurDimensions, channelBlurData, unsharpMaskData } from './blurs';
@@ -320,6 +321,9 @@ const CANVAS2D_IMPLEMENTED: ReadonlySet<string> = new Set<string>([
   'cc-tiler', 'ripple-pulse', 'radial-scale-wipe', 'glass-wipe', 'image-wipe',
   'color-difference-key', 'wire-removal', 'broadcast-colors', 'noise-hls',
   'block-load', 'kernel', '3d-glasses', 'fractal', 'particle-systems', 'cc-bubbles',
+  // Deep Glow (2026-09-08) — same position: the GPU runs the octave pyramid,
+  // this pass is its parity twin for baked layers.
+  'deep-glow',
   // Round eleven, advanced distort / transition / stylize — same position.
   'polar-coordinates', 'optics-compensation', 'warp', 'page-turn', 'split', 'slant', 'smear', 'rolling-shutter', 'flo-motion', 'lens', 'griddler', 'ball-action', 'drizzle', 'jaws', 'pixel-polly', 'twister', 'card-dance', 'unmult', 'cc-composite', 'cc-scatterize', 'radial-fast-blur', 'scale-wipe', 'texturize', 'threads', 'hex-tile', 'radial-shadow', 'cross-blur', 'plastic', 'glass', 'vector-blur', 'cc-repetile',
   // Round ten, neighbourhood passes + drawn generators — same position.
@@ -691,6 +695,8 @@ export function applyCanvas2dEffect(
       return applyWriteOn(oc, w, h, e);
     case 'light-burst':
       return applyLightBurst(oc, w, h, e);
+    case 'deep-glow':
+      return applyRemapEffect(oc, w, h, (d) => deepGlowData(d, w, h, deepGlowSettings(e)));
     case 'glass':
       return applyGlass(oc, w, h, e);
     case 'texturize':

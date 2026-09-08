@@ -8,10 +8,11 @@ import { RenderPass, type RenderPassContext } from '../RenderPass';
 import { beginViewportPass, beginSizedPass, emitSolid, emitTextured, emitSilhouette, emitMaskedTextured, emitLutTextured, emitMatteCombine, emitBlendCombine, modelFromRect, mvpFor, writeAttachment, emitLayerTexture, screenMvp, targetSampleUv, mvp3dFor, emitSolid3D, emitTextured3D, emitMaskedTextured3D, emitMesh3D, emitShadowCaster, emitSsao, emitSsaoBlur } from './passUtils';
 import { addTransformedBox, boxIsEmpty, emptyBox, shadowCameraFor, shadowMapSizeOf, type ShadowCamera, type WorldBox } from './shadowMap';
 import { ssaoBufferSize, ssaoCameraFor, ssaoFarFor, ssaoIntensityOf, ssaoRadiusOf, SSAO_SAMPLES } from './ssao';
-import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL } from '../../shaders/Material';
+import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL, DEEP_GLOW_ACC_FX_MATERIAL, DEEP_GLOW_BLUR_FX_MATERIAL, DEEP_GLOW_COMPOSITE_FX_MATERIAL } from '../../shaders/Material';
 import { roundElevenSinglePass } from './roundElevenFx';
 import { roundTwelveSinglePass, roundTwelveFieldPass } from './roundTwelveFx';
 import { roundFifteenSinglePass } from './roundFifteenFx';
+import { deepGlowInv, deepGlowOctaves, deepGlowStep } from '../../shaders/deepGlowKernel';
 import { packBlur, packBokeh, packCocBlur, packDofGather, packGlass, packGradientRamp, packFractalNoise, packDisplacementMap, packCompoundBlur, packApplyColorLut, packSetMatte, packMotionTile, packFill, packStroke, packSharpen, packNoise, packBeam, packLightSweep, packLensFlare, packLightRays, packBend, packPerspective, packSpotlight, packArithmetic, packVignetteFx, packBlackAndWhite, packTritone, packPhotoFilter, packThreshold, packVibrance, packFxBlock, packPluginEffect } from '../../pipeline/uniforms';
 import { ENV_SPEC_LEVELS } from '../../pipeline/uniforms';
 import { Mat4 } from '../../core/math/Mat4';
@@ -202,6 +203,8 @@ function effectSpreadPx(effects: readonly RenderableEffect[]): number {
       ? Math.max(e.radiusPx, ...e.cocCorners)
       : e.radiusPx) * BLUR_TAIL;
     else if (e.type === 'glow') s = (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
+    // The widest octave is a Gaussian of `radiusPx`; the pyramid's tail is its tail.
+    else if (e.type === 'deep-glow') s = e.radiusPx * Math.max(e.aspect[0], e.aspect[1]) * Math.max(e.chroma[0], e.chroma[1], e.chroma[2]) * BLUR_TAIL;
     else if (e.type === 'drop-shadow') {
       s = Math.hypot(e.offsetX, e.offsetY) + (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
     }
@@ -829,6 +832,91 @@ export class CompositionPass extends RenderPass {
         encC.end();
         const outTex = texOf(f1);
         if (outTex) { curTex = outTex; curName = f1; }
+        continue;
+      }
+
+      /*
+        Deep Glow — the octave pyramid (fxDeepGlow.ts / deepGlowKernel.ts).
+
+        Targets: the chain's source stays in `curName` for the composite;
+        each octave runs H (level → f1) then V (f1 → f0), so the level lives
+        in f0 and the NEXT octave blurs it further — the progressive pyramid.
+        The third slot (f2) accumulates: each level drawn once with the `add`
+        blend at its weight, cleared on the first octave. A pool without a
+        third slot (plugin and matte chains) degrades to a single Gaussian at
+        the full radius, which is still a glow rather than nothing.
+      */
+      if (effect.type === 'deep-glow') {
+        const f2 = free[2] as string | undefined;
+        const octs = deepGlowOctaves(effect.radiusPx, f2 ? effect.octaves : 1);
+        const weight = 1 / octs.length;
+        const maxChroma = Math.max(effect.chroma[0], effect.chroma[1], effect.chroma[2]);
+        const blurPass = (
+          src: TextureHandle, dest: string, label: string,
+          dirX: number, dirY: number, sigmaTexels: number, first: boolean,
+        ): TextureHandle | null => {
+          const step = deepGlowStep(sigmaTexels * maxChroma);
+          const inv: [number, number, number] = [
+            deepGlowInv(sigmaTexels * effect.chroma[0]),
+            deepGlowInv(sigmaTexels * effect.chroma[1]),
+            deepGlowInv(sigmaTexels * effect.chroma[2]),
+          ];
+          const cmdsB = new CommandBuffer();
+          cmdsB.add({
+            batchKey: 'deep-glow-blur', material: DEEP_GLOW_BLUR_FX_MATERIAL, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [
+              [dirX * step / viewport.pixelSize.width, dirY * step / viewport.pixelSize.height, step, first ? effect.threshold : 0],
+              [inv[0], inv[1], inv[2], first ? 1 : 0],
+            ], fxBox),
+            texture: src, sampler: clampSampler(),
+          });
+          const encB = beginViewportPass(ctx, label, writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(encB, cmdsB);
+          encB.end();
+          return texOf(dest);
+        };
+        let level: TextureHandle = curTex;
+        let accTex: TextureHandle | null = null;
+        for (let k = 0; k < octs.length; k++) {
+          const d = octs[k]!.delta;
+          const h = blurPass(level, f1, 'deep-glow-h', 1, 0, d * effect.aspect[0] * kx, k === 0);
+          if (!h) break;
+          const v = blurPass(h, f0, 'deep-glow-v', 0, 1, d * effect.aspect[1] * ky, false);
+          if (!v) break;
+          level = v;
+          if (f2) {
+            const cmdsA = new CommandBuffer();
+            cmdsA.add({
+              batchKey: 'deep-glow-acc', material: DEEP_GLOW_ACC_FX_MATERIAL, blend: 'add',
+              uniforms: packFxBlock(mvp, targetUv, [[weight, 0, 0, 0]], fxBox),
+              texture: level, sampler: clampSampler(),
+            });
+            // Clear on the first octave only; the rest load and add.
+            const encA = beginViewportPass(ctx, 'deep-glow-acc', writeAttachment(ctx, f2, k === 0 ? Color.transparent() : undefined));
+            services.quad.execute(encA, cmdsA);
+            encA.end();
+            accTex = texOf(f2);
+          } else {
+            accTex = level;
+          }
+        }
+        if (accTex) {
+          // Composite into f1: distinct from the source (curName), the level (f0) and the accumulator (f2).
+          const cmdsC = new CommandBuffer();
+          cmdsC.add({
+            batchKey: 'deep-glow-composite', material: DEEP_GLOW_COMPOSITE_FX_MATERIAL, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [
+              [effect.gain, effect.tint[0], effect.tint[1], effect.tint[2]],
+              [effect.tintAmount, effect.glowOnly ? 1 : 0, effect.dither ? viewport.pixelSize.width : 0, viewport.pixelSize.height],
+            ], fxBox),
+            texture: curTex, sampler: clampSampler(), maskTexture: accTex,
+          });
+          const encC = beginViewportPass(ctx, 'deep-glow-composite', writeAttachment(ctx, f1, Color.transparent()));
+          services.quad.execute(encC, cmdsC);
+          encC.end();
+          const outTex = texOf(f1);
+          if (outTex) { curTex = outTex; curName = f1; }
+        }
         continue;
       }
 

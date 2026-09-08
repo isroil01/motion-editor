@@ -97,6 +97,22 @@ export type RenderableEffect =
       dofSource?: boolean;
     }
   | { type: 'glow'; radiusPx: number; color?: Color; /** Comp-px alpha dilate before blur (Spread). */ spreadPx?: number }
+  | {
+      /** Octave-pyramid glow (fxDeepGlow.ts). Numbers resolved by `deepGlowSettings`; `radiusPx` is the widest octave's sigma. */
+      type: 'deep-glow';
+      radiusPx: number;
+      gain: number;
+      threshold: number;
+      aspect: readonly [number, number];
+      chroma: readonly [number, number, number];
+      /** Linear-light tint. */
+      tint: readonly [number, number, number];
+      tintAmount: number;
+      glowOnly: boolean;
+      /** Screen-space one-code noise on the glow (the 8-bit tail band). */
+      dither: boolean;
+      octaves: number;
+    }
   | { type: 'drop-shadow'; radiusPx: number; color?: Color; offsetX: number; offsetY: number; spreadPx?: number }
   | {
       type: 'gradient-ramp';

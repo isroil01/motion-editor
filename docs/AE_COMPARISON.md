@@ -72,7 +72,7 @@
 
 | Feature | Premation | AE 26.3 | Status |
 |---|---|---|---|
-| Effect stack | **201** effects (`EffectType` union, completeness-tested) incl. **Unmult**, **CC Composite**, **CC RepeTile**, **CC Scatterize**, **CC Radial Fast Blur**, **CC Cross Blur**, **CC Scale Wipe**, **CC Plastic**, **Curl Noise**; round seven (2026-09-06) adds **CC Particle Systems II**, **CC Bubbles**, **Fractal**, **3D Glasses**, **CC Kernel**, **CC Block Load**, **Color Difference Key**, **CC Simple Wire Removal**, **Broadcast Colors**, **Noise HLS**, **CC Color Offset**, **CC Threshold RGB**, **Cineon Converter**, **CC Tiler**, **CC Ripple Pulse**, **CC Radial ScaleWipe**, **CC Glass Wipe**, **CC Image Wipe** | 400+ (26.0 adds **Unmult** with 32-bit HDR) + third-party | High coverage of the used set |
+| Effect stack | **202** effects (`EffectType` union, completeness-tested) incl. **Unmult**, **CC Composite**, **CC RepeTile**, **CC Scatterize**, **CC Radial Fast Blur**, **CC Cross Blur**, **CC Scale Wipe**, **CC Plastic**, **Curl Noise**; round seven (2026-09-06) adds **CC Particle Systems II**, **CC Bubbles**, **Fractal**, **3D Glasses**, **CC Kernel**, **CC Block Load**, **Color Difference Key**, **CC Simple Wire Removal**, **Broadcast Colors**, **Noise HLS**, **CC Color Offset**, **CC Threshold RGB**, **Cineon Converter**, **CC Tiler**, **CC Ripple Pulse**, **CC Radial ScaleWipe**, **CC Glass Wipe**, **CC Image Wipe** | 400+ (26.0 adds **Unmult** with 32-bit HDR) + third-party | High coverage of the used set |
 | Keying | Full Keylight parameter set (`keylight.ts`) | Keylight 1.2 | Parity |
 | Content-Aware Fill | PatchMatch still + **video bake with bidirectional temporal polish** | Content-Aware Fill | Classical foothold; Adobe quality open |
 | Color spaces | ACEScg, linear sRGB, 16/32-bpc intermediates, ACES ODT, CUBE LUT (working-space sample; **not** full OCIO roles/displays/views); viewer LUT (session, post-ODT); **HDR10/HLG export with MaxCLL/MaxFALL + master-display SEI**; float EXR → GPU (`rgba32float`) | OCIO, 32-bpc, HDR delivery | Strong; libx265 availability still host-dependent |
@@ -162,7 +162,7 @@
 
 *Sources for the AE side: Adobe release notes and coverage of AE 26.0–26.3
 (January–June 2026). Premation side: this repository; counts are pinned by tests
-(`blendMode.test.ts` = 38, `EffectType` = 201, AI tools = 65, `PathOpType` = 9,
+(`blendMode.test.ts` = 38, `EffectType` = 202, AI tools = 65, `PathOpType` = 9,
 `MaskMode` = 7, layer styles = 9+1). The `EffectType` and AI-tool figures were
 both stale here on 2026-09-02 — 174 and 61 — which is the drift
 `docPropagatedCounts.test.ts` exists to stop; that guard covers

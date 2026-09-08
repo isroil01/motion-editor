@@ -101,6 +101,10 @@ function bakedEffectSpread(layer: RenderLayer): number {
       case 'glow':
         s = effectNumber(e, 'radius') * BLUR_EXTENT;
         break;
+      // The widest octave's sigma; the pyramid's tail is that Gaussian's.
+      case 'deep-glow':
+        s = effectNumber(e, 'radius') * BLUR_EXTENT;
+        break;
       case 'drop-shadow':
         s = effectNumber(e, 'distance') + effectNumber(e, 'softness') * BLUR_EXTENT;
         break;

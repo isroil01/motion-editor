@@ -472,6 +472,10 @@ export const BEVEL_FX_MATERIAL = twoTextureMaterial('bevel');
 export const FX_HISTOGRAM_FX_MATERIAL = perspectiveMaterial('fx-histogram');
 export const FX_AUTO_TABLE_FX_MATERIAL = perspectiveMaterial('fx-auto-table');
 export const FX_AUTO_APPLY_FX_MATERIAL = twoTextureMaterial('fx-auto-apply');
+// Deep Glow (fxDeepGlow.ts): separable per-channel blur, weighted accumulate, two-texture composite.
+export const DEEP_GLOW_BLUR_FX_MATERIAL = perspectiveMaterial('deep-glow-blur');
+export const DEEP_GLOW_ACC_FX_MATERIAL = perspectiveMaterial('deep-glow-acc');
+export const DEEP_GLOW_COMPOSITE_FX_MATERIAL = twoTextureMaterial('deep-glow-composite');
 
 /** Same binding shape as motion-tile: one source texture, warped in place. */
 export const BEND_MATERIAL: MaterialDescriptor = {

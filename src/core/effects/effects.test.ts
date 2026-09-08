@@ -234,6 +234,8 @@ describe('EFFECT_DEFS', () => {
     'chromatic-aberration', 'magnify', 'mosaic', 'find-edges', 'emboss', 'color-emboss', 'halftone',
     // Round seven (2026-09-06): the footage set.
     'gaussian-blur', 'fast-box-blur', 'radial-blur', 'corner-pin', 'transform',
+    // Deep Glow (2026-09-08): a multi-pass in CompositionPass, no CSS form.
+    'deep-glow',
     // Round fourteen (2026-09-06): histogram colour autos.
     'equalize', 'auto-levels', 'auto-contrast', 'auto-color',
     // Rounds twelve + thirteen (2026-09-06).

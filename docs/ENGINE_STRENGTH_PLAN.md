@@ -34,7 +34,7 @@ document is either already at parity or is a finishing item.
 Sources: [Digital Production](https://digitalproduction.com/2026/01/23/adobe-after-effects-2026-lands-with-3d-text-and-performance-boosts/), [Newsshooter](https://www.newsshooter.com/2026/01/22/whats-new-in-adobe-after-effects-26-0/), [CG Channel on 26.3](https://www.cgchannel.com/2026/06/adobe-releases-after-effects-26-3/), [Plugin Play](https://www.pluginplay.app/blog/whats-new-in-adobe-after-effects-2026), [Adobe release notes](https://helpx.adobe.com/after-effects/release-note/release-notes-after-effects.html).
 
 ### The plugins people keep installed
-Every 2026 round-up converges on the same core: **Trapcode Particular** (3D particles, now with a fluids engine), **Element 3D**, **Saber** (free — energy beams along masks and text), **Deep Glow** (physically based glow), **Plexus / Stardust** (point-line networks, node particles), **Mocha** (planar tracking), **Duik** (rigging), **Newton** (2D physics), **Animation Composer / FX Console** (workflow). Of these, Premation already covers Element 3D (extrusion + glTF + PBR), Duik (bones/IK/ARAP — natively better), Newton (2D rigid bodies), Mocha's common cases (planar + mesh + RANSAC), and Animation Composer's role (presets + Quick Apply). **The uncovered four are Deep Glow, Saber, Particular and Plexus** — and they are all *looks*, which is why users perceive "our effects are weaker" even with 201 effects on the list.
+Every 2026 round-up converges on the same core: **Trapcode Particular** (3D particles, now with a fluids engine), **Element 3D**, **Saber** (free — energy beams along masks and text), **Deep Glow** (physically based glow), **Plexus / Stardust** (point-line networks, node particles), **Mocha** (planar tracking), **Duik** (rigging), **Newton** (2D physics), **Animation Composer / FX Console** (workflow). Of these, Premation already covers Element 3D (extrusion + glTF + PBR), Duik (bones/IK/ARAP — natively better), Newton (2D rigid bodies), Mocha's common cases (planar + mesh + RANSAC), and Animation Composer's role (presets + Quick Apply). **The uncovered four are Deep Glow, Saber, Particular and Plexus** — and they are all *looks*, which is why users perceive "our effects are weaker" even with 202 effects on the list.
 
 Sources: [School of Motion](https://schoolofmotion.com/blog/best-after-effects-plugins-and-effect-packs-you-need-in-2026), [Maxon](https://www.maxon.net/en/article/best-after-effects-plugins), [Vagon](https://vagon.io/blog/top-10-plugins-for-after-effects), [Creative Dojo — Deep Glow review](https://creativedojo.net/deep-glow-review/), [Plugin Everything — Deep Glow](https://www.plugineverything.com/deep-glow), [ProVideo Coalition — Saber](https://www.provideocoalition.com/saber-new-free-effects-plug-video-copilot/), [Motion Array — Saber review](https://motionarray.com/learn/post-production/video-copilots-free-saber-plug-in-review/), [Lesterbanks — Stardust vs Particular](https://lesterbanks.com/2017/07/stardust-compare-trapcode-particular/).
 
@@ -56,7 +56,7 @@ the commit messages of `f4651302`, `94db94be`, `632f52be`.
 
 | Area | Finding | Evidence |
 |---|---|---|
-| Glow | `glow` is a single-scale CSS `drop-shadow` (radius ≤ 60 px, no falloff model, no aspect, no HDR) — this is the single biggest *look* gap next to AE + Deep Glow | `effects.ts` glow def (`css: drop-shadow(...)`) |
+| Glow | `glow` is a single-scale CSS `drop-shadow` (radius ≤ 60 px, no falloff model, no aspect, no HDR) — was the single biggest *look* gap next to AE + Deep Glow. **Closed 2026-09-08 by `deep-glow` (A1)**; `glow` stays for existing documents | `effects.ts` glow + deep-glow defs, `deepGlow.ts`, `fxDeepGlow.ts` |
 | Energy beams | Path effects exist since 09-07 (Write-on/Vegas along masks) and `lightning` is start→end only; there is no core-plus-glow-plus-distortion beam that follows a mask or text — the Saber use case that started this whole thread | `effects.ts` write-on / vegas / lightning defs |
 | Particles | Deterministic closed-form 2D system with point/box/circle emitters and 4 sprite shapes; stateful mode adds floor bounce. No 3D emitters, no camera/light awareness, no sprite/texture particles, no turbulence fields as a first-class force, no parent/child emitters, no fluids | `src/core/particles/particleSim.ts` header |
 | Motion blur | Layer motion blur is an N-sample additive accumulation in `CompositionPass` (correct, film-like at high N, ghosts at low N); no adaptive sample count and no per-layer shutter phase UI | `CompositionPass.ts:2162, 3679`, `forceMotionBlur.ts` |
@@ -83,6 +83,24 @@ sources bloom correctly. Keep the existing `glow` untouched (documents depend
 on it).
 Verify: render-test golden on a small bright disc — falloff should follow
 1/r² within tolerance at 4 radii; no banding at 8-bit output.
+
+**A1 — DONE 2026-09-08.** `deep-glow` ships in Stylize: a PROGRESSIVE octave
+pyramid (level k = level k−1 blurred by √(σ_k²−σ_{k−1}²), sigmas doubling up
+to Radius, 4/6/8 octaves by Quality) summed with equal weights — which on
+energy-normalised Gaussians *is* the inverse-square falloff, no exponent to
+tune. Linear light, premultiplied, on the GPU's f16 chain. Params: Radius,
+Exposure (stops), Threshold (soft knee), Aspect Ratio, Chromatic Aberration
+(per-channel sigma multipliers), Tint + amount, Glow Only, Dither, Quality.
+Dither earned its place in the live check: a 1/r² tail crosses the 8-bit floor
+over a wide band, which rendered as a faint disc with an edge on a dark ground
+— ±1 output code of hashed noise on the glow (only where there is glow)
+breaks it. GPU = three small passes (`fxDeepGlow.ts`: per-channel
+separable blur, weighted additive accumulate into BLUR_TARGET3, two-texture
+composite) driven from `CompositionPass`; CPU twin `deepGlow.ts` mirrors the
+same 33-tap (±4σ) integer-stride ladder from `deepGlowKernel.ts`, so the
+`effect-deep-glow` golden is a parity gate. Verified: `deepGlow.test.ts`
+measures the log-log slope between 12/24/48/96 px at −1.5…−2.7 and monotone
+outward; the pyramid is >5× the single Gaussian at the core.
 
 **A2. Energy beam (`beam-path`, the Saber class)** — new effect building on
 the 09-07 path resolver. Geometry: mask path (`pathMaskId`), text outline (via

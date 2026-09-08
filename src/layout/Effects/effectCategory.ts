@@ -221,6 +221,7 @@ export const EFFECT_CATEGORY: Record<EffectType, string> = {
   rainfall: 'Generate',
   'write-on': 'Generate',
   'light-burst': 'Generate',
+  'deep-glow': 'Stylize',
   glass: 'Stylize',
   texturize: 'Stylize',
   threads: 'Stylize',

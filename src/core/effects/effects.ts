@@ -239,6 +239,7 @@ export type EffectType =
   | 'write-on'
   | 'light-burst'
   // Stylize — surface shading and per-cell resamples.
+  | 'deep-glow'
   | 'glass'
   | 'texturize'
   | 'threads'
@@ -3297,6 +3298,37 @@ export const EFFECT_DEFS: EffectDef[] = [
   },
 
   // ── Round five · Stylize ──────────────────────────────────────────
+  {
+    /*
+      Deep Glow — the physically based glow (the Plugin Everything class):
+      an octave pyramid of Gaussians summed with equal weight, which IS an
+      inverse-square falloff, in linear light. The built-in `glow` above is a
+      single Gaussian ring and stays as it is — documents depend on it.
+      Exposure is in stops so it composes like a light; Aspect stretches the
+      glow (positive = wider than tall, the anamorphic-streak convention);
+      Chromatic Aberration widens red and narrows blue. See deepGlow.ts.
+    */
+    type: 'deep-glow',
+    label: 'Deep Glow',
+    params: [
+      { key: 'radius', label: 'Radius', type: 'number', unit: 'px', min: 0, max: 500, default: 60 },
+      { key: 'exposure', label: 'Exposure', type: 'number', unit: 'EV', min: -4, max: 4, default: 0 },
+      { key: 'threshold', label: 'Threshold', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'aspect', label: 'Aspect Ratio', type: 'number', unit: '%', min: -100, max: 100, default: 0 },
+      { key: 'chromatic', label: 'Chromatic Aberration', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'tint', label: 'Tint', type: 'color', default: '#ffffff' },
+      { key: 'tintAmount', label: 'Tint Amount', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'glowOnly', label: 'Glow Only', type: 'checkbox', default: false },
+      // One output code of per-pixel noise on the glow: a 1/r² tail crosses the
+      // 8-bit floor over a wide band, and without this that band is a visible disc.
+      { key: 'dither', label: 'Dither', type: 'checkbox', default: true },
+      {
+        key: 'quality', label: 'Quality', type: 'enum', default: 1,
+        options: [{ value: 0, label: 'Low (4 octaves)' }, { value: 1, label: 'Medium (6 octaves)' }, { value: 2, label: 'High (8 octaves)' }],
+      },
+    ],
+    css: () => '',
+  },
   {
     /*
       CC Glass — the layer's own luminance as a bump map: refract, then a

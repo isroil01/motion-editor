@@ -26,6 +26,7 @@ import { isLutEffect } from '@core/effects/colorLut';
 import { readCubeLutParam } from '@core/effects/cubeLut';
 import { readMatte } from '@core/effects/matte';
 import { effectNumber, effectParam, paramsOf, withAlpha, isGpuOnlyEffect } from '@core/effects/effects';
+import { deepGlowSettings } from '@core/effects/deepGlow';
 import { effectById, beginEffectDraw, endEffectDraw } from '@core/plugins/pluginEffects';
 import { layerParamNames, packParameters, effectSpreadFor } from '@core/plugins/effectSchema';
 import { layerIsBaked, cpuBakeStats } from '@core/effects/effectBake';
@@ -527,6 +528,24 @@ export function extractSpatialEffects(
         ...(spread01 > 0 ? { spreadPx: size * spread01 } : {}),
         color: c('color', n('intensity') / 100),
       });
+    }
+    if (e.type === 'deep-glow') {
+      const s = deepGlowSettings(e);
+      if (s.radius > 0 || s.glowOnly) {
+        spatial.push({
+          type: 'deep-glow',
+          radiusPx: s.radius,
+          gain: s.gain,
+          threshold: s.threshold,
+          aspect: s.aspect,
+          chroma: s.chroma,
+          tint: s.tint,
+          tintAmount: s.tintAmount,
+          glowOnly: s.glowOnly,
+          dither: s.dither,
+          octaves: s.octaves,
+        });
+      }
     }
     if (e.type === 'drop-shadow') {
       const rad = (n('angle') * Math.PI) / 180;
