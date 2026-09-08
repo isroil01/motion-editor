@@ -143,6 +143,13 @@
 
 **Removed from earlier drafts (shipped):** ExactVideoSource; point / stabilize / corner / mask tracking; disk cache; Wiggle Transform; Dissolve modes; field separation; variable-font weight; Pixel Motion; variable mask feather; Smooth Stabilize; Clone Stamp; subspace / RS; SfM + BA; Roto / GrabCut / SAM-class; CAF video; float EXR GPU + HDR10/HLG + MaxCLL; EXR/DPX/PSD; EDL/OTIO/FCPXML/**ALE**; mogrt.zip; font wdth/slnt; **WebGPU float RT readback**; **glTF import + skinning + morphs + PBR maps**; **environment reflections / IBL**; **curved primitives**; **timeline edit tools + per-cut transitions**; **source monitor**; **scopes**; **transcript editing**; **silence removal + ducking**; **render-queue pause/resume**; **one graph editor**; **modifier stacks**; **audio drivers**; **bake dynamics**; **knife + pathfinder**; **on-canvas gradient editor**; **smart guides**.
 
+## 3b. Addendum — 2026-09-07/08
+
+- **Object Matte is bundled**: the SlimSAM encoder/decoder pair ships inside the app (`samBundled.ts`, `samPipeline.ts`); neural segmentation works with no download. Tier 1 item 1 is closed. The slimsam export has no box embeddings — a drawn box prompts with its centre and constrains the mask (`promptsForSam`, `segmentSam`).
+- **Tracker instrument** at AE parity: marquee pick (box → search region), on-footage feature/search box resize, magnifier loupe, "Parent to null" after apply, numbered nulls; the dead-pick state bug (overlay required the source layer in the selection) is fixed.
+- **Path-following effects**: Write-on and Vegas take a mask path (`pathMaskId`, resolved per frame from the animated mask) — tracked masks move the effect. **Draw around object → mask** produces a decimated (≤48-pt) `none`-mode path from the exact frame.
+- The next-step argument (glow, energy beam, particles v2, plexus, displacement) lives in [`ENGINE_STRENGTH_PLAN.md`](ENGINE_STRENGTH_PLAN.md).
+
 ## 4. Roadmap (corrected)
 
 **Phase 1 — neural priors:** host a SAM ONNX decoder and set `VITE_SAM_MODEL_URL` — the runtime and the boot call are in.
