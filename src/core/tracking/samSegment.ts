@@ -159,6 +159,24 @@ export async function segmentSam(req: SamSegmentRequest): Promise<SamSegmentResu
     try {
       const neural = await onnxInfer(req);
       if (neural && neural.length === req.width * req.height) {
+        // A drawn box means TWO things: "the object is roughly here" (the
+        // prompt — see promptsForSam) and "nothing outside this is wanted"
+        // (the constraint). The neural mask honours the second half here, the
+        // same way the classical path already does, with a small margin so an
+        // object grazing the box edge keeps its edge pixels.
+        if (req.box) {
+          const mx = Math.abs(req.box.x1 - req.box.x0) * 0.08 + 4;
+          const my = Math.abs(req.box.y1 - req.box.y0) * 0.08 + 4;
+          const x0 = Math.min(req.box.x0, req.box.x1) - mx;
+          const x1 = Math.max(req.box.x0, req.box.x1) + mx;
+          const y0 = Math.min(req.box.y0, req.box.y1) - my;
+          const y1 = Math.max(req.box.y0, req.box.y1) + my;
+          for (let y = 0; y < req.height; y++) {
+            for (let x = 0; x < req.width; x++) {
+              if (x < x0 || x > x1 || y < y0 || y > y1) neural[y * req.width + x] = 0;
+            }
+          }
+        }
         const soft = softFeatherMask(neural, req.width, req.height, req.featherPx ?? 2);
         return { mask: neural, soft, engine: 'onnx' };
       }

@@ -87,7 +87,7 @@ import {
 } from './aeTransitionsAdvanced';
 // ── Round five kernels ──
 import {
-  starBurstData, snowfallData, rainfallData, writeOnData, lightBurstData,
+  starBurstData, snowfallData, rainfallData, writeOnData, writeOnPathData, lightBurstData,
 } from './generateRoundFive';
 import {
   glassData, texturizeData, threadsData, chromaticAberrationData, hexTileData, vectorBlurData,
@@ -2906,6 +2906,19 @@ function applyRainfall(oc: CanvasRenderingContext2D, w: number, h: number, e: Ef
 }
 
 function applyWriteOn(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  // A resolved mask-path polyline switches the geometry: the brush follows the
+  // path (buildSnapshot filled `pathPoints` from `pathMaskId` at this frame's
+  // time), and Start/End/Wobble stop meaning anything — the path is the shape.
+  const flat = paramsOf(e).pathPoints;
+  if (Array.isArray(flat) && flat.length >= 4) {
+    applyRemapEffect(oc, w, h, (d) => writeOnPathData(
+      d, w, h, flat as number[],
+      effectNumber(e, 'completion'), effectNumber(e, 'brushSize'),
+      parseHex(str(e, 'brushColor', '#ffffff')),
+      effectNumber(e, 'taper'),
+    ));
+    return;
+  }
   applyRemapEffect(oc, w, h, (d) => writeOnData(
     d, w, h,
     effectNumber(e, 'startX'), effectNumber(e, 'startY'),

@@ -59,10 +59,16 @@ describe('promptsForSam', () => {
     expect(p!.count).toBe(2);
   });
 
-  it("encodes a box as SAM's corner labels 2 and 3, normalized to min/max", () => {
+  it('turns a box into its centre as a foreground point (the slimsam export has no box embeddings)', () => {
     const p = promptsForSam({ box: { x0: 30, y0: 40, x1: 10, y1: 20 } }, 2);
-    expect(Array.from(p!.coords)).toEqual([20, 40, 60, 80]);
-    expect(Array.from(p!.labels)).toEqual([2n, 3n]);
+    expect(Array.from(p!.coords)).toEqual([40, 60]);
+    expect(Array.from(p!.labels)).toEqual([1n]);
+  });
+
+  it('explicit points win over the box-derived centre', () => {
+    const p = promptsForSam({ points: [{ x: 5, y: 5 }], box: { x0: 0, y0: 0, x1: 100, y1: 100 } }, 1);
+    expect(p!.count).toBe(1);
+    expect(Array.from(p!.coords)).toEqual([5, 5]);
   });
 
   it('returns null with nothing to prompt — the classical path decides then', () => {

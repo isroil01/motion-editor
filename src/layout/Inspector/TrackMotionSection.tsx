@@ -66,6 +66,7 @@ export function TrackMotionSection({ nodeId }: { nodeId: string }): JSX.Element 
   const result = useTrackerStore((s) => s.result);
   const note = useTrackerStore((s) => s.note);
   const autoPhase = useTrackerStore((s) => s.autoPhase);
+  const pickIntent = useTrackerStore((s) => s.pickIntent);
   const autoPlan = useTrackerStore((s) => s.autoPlan);
   const store = useTrackerStore;
   const time = useActiveWorkspace()?.time ?? 0;
@@ -207,11 +208,25 @@ export function TrackMotionSection({ nodeId }: { nodeId: string }): JSX.Element 
           <>
             <p className={styles.cardHint}>
               {picking
-                ? 'Click the thing to follow — or drag a box around it. It locks onto the best trackable detail there, then tracks the whole clip both ways from the playhead. Esc to cancel. Spinning objects (wheels, fans): pick the hub — details on the rim rotate away mid-track.'
+                ? pickIntent === 'object'
+                  ? 'Draw a box around the object (or click it) and it becomes a mask path — cut from this exact frame. Esc to cancel.'
+                  : 'Click the thing to follow — or drag a box around it. It locks onto the best trackable detail there, then tracks the whole clip both ways from the playhead. Esc to cancel. Spinning objects (wheels, fans): pick the hub — details on the rim rotate away mid-track.'
                 : 'Point at anything in the shot, or draw a box around it. The feature, both window sizes and the direction are measured from the footage.'}
             </p>
-            <Button size="sm" variant={picking ? 'secondary' : 'primary'} onClick={onArmPick} fullWidth>
-              {picking ? 'Cancel pick (Esc)' : 'Pick target in viewport'}
+            <Button size="sm" variant={picking && pickIntent === 'track' ? 'secondary' : 'primary'} onClick={onArmPick} fullWidth>
+              {picking && pickIntent === 'track' ? 'Cancel pick (Esc)' : 'Pick target in viewport'}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => store.getState().setAutoPhase(
+                picking && pickIntent === 'object' ? 'idle' : 'picking',
+                'object',
+              )}
+              fullWidth
+              title="Draw a box around (or click) an object; the bundled segmentation model traces it into a mask path. Track mask makes the path follow; Write-on and Vegas can draw along it via their Path option."
+            >
+              {picking && pickIntent === 'object' ? 'Cancel object mask (Esc)' : 'Draw around object → mask'}
             </Button>
             {autoPlan && (
               <Button size="sm" variant="secondary" onClick={onTrackAgain} fullWidth>

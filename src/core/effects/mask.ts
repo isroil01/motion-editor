@@ -252,6 +252,36 @@ export function maskSegments(path: MaskPath): MaskSegment[] {
 }
 
 /**
+ * A mask path flattened to a polyline, in layer-local CENTRED px.
+ *
+ * This is the geometry hand-off to path-following EFFECTS (Write-on's brush,
+ * Vegas's lights): they consume arc length, and a polyline is the one form
+ * whose arc length is exact rather than approximated per consumer. Sixteen
+ * samples per cubic keeps a full-frame circle within a small fraction of a
+ * pixel of the true curve — flat segments cost nothing extra because the
+ * cubic through them IS the straight line.
+ *
+ * Returned FLAT ([x0,y0,x1,y1,…]) because the callers store it in an effect's
+ * `resolved` param, which must survive a JSON round-trip untouched.
+ */
+export function maskPathPolyline(path: MaskPath, samplesPerSegment = 16): number[] {
+  const segs = maskSegments(path);
+  if (segs.length === 0) return [];
+  const out: number[] = [segs[0]!.x0, segs[0]!.y0];
+  for (const sg of segs) {
+    for (let i = 1; i <= samplesPerSegment; i++) {
+      const t = i / samplesPerSegment;
+      const u = 1 - t;
+      // Cubic Bézier, expanded — no intermediate points allocated.
+      const x = u * u * u * sg.x0 + 3 * u * u * t * sg.cx1 + 3 * u * t * t * sg.cx2 + t * t * t * sg.x1;
+      const y = u * u * u * sg.y0 + 3 * u * u * t * sg.cy1 + 3 * u * t * t * sg.cy2 + t * t * t * sg.y1;
+      out.push(x, y);
+    }
+  }
+  return out;
+}
+
+/**
  * One mask path as a Path2D in layer-local (centred) space.
  *
  * An inverted path covers everything EXCEPT its outline, which even-odd gives

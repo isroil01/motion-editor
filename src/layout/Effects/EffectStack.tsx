@@ -459,6 +459,37 @@ function EffectParamRow({
     );
   }
 
+  if (param.type === 'maskPath') {
+    // One of THIS layer's mask paths — the spine a path-following effect
+    // (Write-on, Vegas) draws along. `mode: 'none'` paths are the intended
+    // partners (geometry without a cut — see mask.ts), but any path works:
+    // the effect reads only the outline. '' = the effect's own default
+    // geometry (alpha contour / Start→End line).
+    const paths = getNodeMask(nodeId).paths;
+    const current = typeof value === 'string' ? value : '';
+    const stale = current !== '' && !paths.some((mp) => mp.id === current);
+    return (
+      <ParamLine>
+        <div className={row.paramRow}>
+        <div style={{ width: 14 }} />
+        <span className={row.paramLabel}>{param.label}</span>
+        <select
+          value={current}
+          onChange={(e) => updateEffectParam(nodeId, effect.id, param.key, e.currentTarget.value)}
+          aria-label={label}
+          className={panel.paramSelect}
+        >
+          <option value="">None</option>
+          {stale && <option value={current}>Missing mask ({current})</option>}
+          {paths.map((mp, i) => (
+            <option key={mp.id} value={mp.id}>{mp.name || `Mask ${i + 1}`}</option>
+          ))}
+        </select>
+        </div>
+      </ParamLine>
+    );
+  }
+
   if (param.type === 'enum') {
     /*
       A named choice stored as a NUMBER (see EffectParamDef). AE renders these

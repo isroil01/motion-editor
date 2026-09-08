@@ -18,7 +18,7 @@ import { resolveGlass } from '@core/effects/glassResolve';
 import { resolveGlobalLight } from '@stores/projectStore';
 import { readNodeBlend } from '@core/effects/blendMode';
 import { readNodePreserveTransparency } from '@core/effects/preserveTransparency';
-import { readNodeMaskAt, roundedRectMask, applyMaskPropertyTracks, type LayerMask } from '@core/effects/mask';
+import { readNodeMask, readNodeMaskAt, maskPathPolyline, roundedRectMask, applyMaskPropertyTracks, type LayerMask } from '@core/effects/mask';
 import {
   clampCornerRadii,
   hasIndependentCornerRadii,
@@ -1045,7 +1045,7 @@ export function buildSnapshot(
     // what keeps preview and export identical — and the per-frame magnitudes are
     // what correctly make the content hash vary for this layer, and only this
     // layer. Same mechanism as the Timecode clock above.
-    const all = layerTimeSec === undefined
+    const withAudio = layerTimeSec === undefined
       ? resolved
       : resolved.map((e) => {
           if (e.type !== 'audio-spectrum') return e;
@@ -1061,6 +1061,24 @@ export function buildSnapshot(
           );
           return { ...e, params: { ...p, magnitudes } };
         });
+
+    // Path-following effects (Write-on / Vegas with a mask path assigned):
+    // the referenced path is flattened HERE, at the frame's time, into the
+    // effect's `pathPoints` resolved param — same hand-off as the audio
+    // magnitudes above, and for the same reasons: the drawing kernel stays a
+    // pure function of its params, and a TRACKED mask (maskAnim) yields a
+    // different polyline per frame, which both follows the object and varies
+    // the content hash so cached frames re-render.
+    const all = withAudio.map((e) => {
+      const p = paramsOf(e);
+      const pathMaskId = p.pathMaskId;
+      if (typeof pathMaskId !== 'string' || pathMaskId === '') return e;
+      const m = (layerTimeSec !== undefined ? readNodeMaskAt(node, layerTimeSec) : undefined)
+        ?? readNodeMask(node);
+      const path = m?.paths.find((mp) => mp.id === pathMaskId);
+      const pathPoints = path ? maskPathPolyline(path) : [];
+      return { ...e, params: { ...p, pathPoints } };
+    });
 
     return { own: all.slice(0, ownRaw.length), all };
   };

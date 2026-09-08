@@ -400,8 +400,25 @@ export function drawVegas(oc: CanvasRenderingContext2D, w: number, h: number, e:
   const threshold = clamp(effectNumber(e, 'threshold'), 1, 254);
   const color = str(e, 'color', '#ffffff');
 
-  const img = oc.getImageData(0, 0, w, h);
-  const contours = extractAlphaContours(alphaPlane(img.data, w, h), w, h, threshold);
+  // A resolved mask-path polyline replaces the alpha contour outright — the
+  // AE "Stroke: Mask/Path" reading. It arrives in layer-local centred px
+  // (buildSnapshot fills it from `pathMaskId` at this frame's time, so a
+  // TRACKED mask moves the lights with the object); shift to raster space and
+  // the arc-length machinery below neither knows nor cares where it came from.
+  const flat = paramsOf(e).pathPoints;
+  const contours: ContourPoint[][] = [];
+  if (Array.isArray(flat) && flat.length >= 6) {
+    const loop: ContourPoint[] = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const x = flat[i];
+      const y = flat[i + 1];
+      if (typeof x === 'number' && typeof y === 'number') loop.push({ x: w / 2 + x, y: h / 2 + y });
+    }
+    if (loop.length >= 3) contours.push(loop);
+  } else {
+    const img = oc.getImageData(0, 0, w, h);
+    contours.push(...extractAlphaContours(alphaPlane(img.data, w, h), w, h, threshold));
+  }
   if (contours.length === 0) return;
 
   oc.save();

@@ -42,6 +42,7 @@ import { getWorkspaceController } from '@core/workspace/WorkspaceController';
 import { readGeometry } from '@core/workspace/geometry';
 import { trackSampleToComp } from '@core/tracking/applyTrack';
 import { runAutoTrack } from '@core/tracking/autoTrackCommand';
+import { runObjectMaskPick } from '@core/tracking/objectMask';
 import { sourceDisplaySize } from '@core/tracking/trackerSource';
 import { layerScreenMapping } from './layerScreen';
 
@@ -85,6 +86,7 @@ export function TrackPointOverlay(): JSX.Element | null {
   const searchHalf = useTrackerStore((s) => s.searchHalf);
   const result = useTrackerStore((s) => s.result);
   const autoPhase = useTrackerStore((s) => s.autoPhase);
+  const pickIntent = useTrackerStore((s) => s.pickIntent);
   const autoPlan = useTrackerStore((s) => s.autoPlan);
   const advancedOpen = useTrackerStore((s) => s.advancedOpen);
   const setPoint = useTrackerStore((s) => s.setPoint);
@@ -206,15 +208,25 @@ export function TrackPointOverlay(): JSX.Element | null {
       pickStartRef.current = null;
       pickDraggingRef.current = false;
       setMarquee(null);
+      // One crosshair, two verbs — the armed INTENT decides what the gesture
+      // means (trackerStore.pickIntent): 'track' feeds the one-click tracker,
+      // 'object' feeds SAM segmentation and lands a mask path.
+      const intent = useTrackerStore.getState().pickIntent;
       if (wasDrag) {
         const a = toSource(start.x, start.y);
         const b = toSource(p.x, p.y);
+        if (intent === 'object') {
+          void runObjectMaskPick({ nodeId: active, box: { x0: a.x, y0: a.y, x1: b.x, y1: b.y } });
+          return;
+        }
         const hint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         // The larger half-side: the region is what was CIRCLED, and a thin
         // box around a wide object still means the whole object. Floored at
         // 12 px so a tiny box is a precise pick, not an unsearchable one.
         const radius = Math.max(12, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2);
         void runAutoTrack({ nodeId: active, hint, radius });
+      } else if (intent === 'object') {
+        void runObjectMaskPick({ nodeId: active, point: toSource(p.x, p.y) });
       } else {
         void runAutoTrack({ nodeId: active, hint: toSource(p.x, p.y) });
       }
@@ -488,7 +500,9 @@ export function TrackPointOverlay(): JSX.Element | null {
             y={Math.min(marquee.y0, marquee.y1)}
             width={Math.abs(marquee.x1 - marquee.x0)}
             height={Math.abs(marquee.y1 - marquee.y0)}
-            fill="rgba(102, 217, 132, 0.08)"
+            // Track = green (the path colour), object mask = amber (the mask
+            // colour family) — the box says what release will do.
+            fill={pickIntent === 'object' ? 'rgba(255, 209, 102, 0.10)' : 'rgba(102, 217, 132, 0.08)'}
             stroke="rgba(0,0,0,0.7)"
             strokeWidth={2.5}
           />

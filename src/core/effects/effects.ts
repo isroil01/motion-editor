@@ -398,7 +398,17 @@ export interface EffectParamDef {
    * like every other numeric param; only the CONTROL differs. Requires
    * `options`, which `effectRegistryComplete.test.ts` enforces.
    */
-  type: 'number' | 'color' | 'checkbox' | 'curve' | 'layer' | 'resolved' | 'enum';
+  /**
+   * `'maskPath'` is a reference to one of THIS layer's mask paths (stored as
+   * the path id, '' = none) — the spine a path-following effect draws along.
+   * Rendered as a dropdown of the layer's masks; the render pipeline resolves
+   * the referenced path into the companion `resolved` polyline param at
+   * snapshot time (buildSnapshot), the same hand-off Audio Spectrum uses, so
+   * the drawing kernels stay pure functions of their params — and a TRACKED
+   * mask (maskAnim) re-resolves per frame, which is what makes an effect
+   * follow a tracked object for free.
+   */
+  type: 'number' | 'color' | 'checkbox' | 'curve' | 'layer' | 'resolved' | 'enum' | 'maskPath';
   /** The choices for an `'enum'` param, in menu order. Ignored for other types. */
   options?: ReadonlyArray<{ value: number; label: string }>;
   /**
@@ -1709,6 +1719,11 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'threshold', label: 'Threshold', type: 'number', unit: '', min: 1, max: 254, default: 128 },
       { key: 'color', label: 'Color', type: 'color', default: '#ffffff' },
       { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      // A mask path as the contour instead of the alpha silhouette — the AE
+      // "Stroke: Mask/Path" reading of this effect. With a TRACKED mask the
+      // lights chase around a moving object.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
     ],
     css: () => '',
   },
@@ -3256,6 +3271,11 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'brushColor', label: 'Color', type: 'color', default: '#ffffff' },
       { key: 'wobble', label: 'Wobble', type: 'number', unit: '%', min: 0, max: 100, default: 25 },
       { key: 'taper', label: 'Taper', type: 'number', unit: '%', min: 0, max: 100, default: 40 },
+      // Draw along a mask path instead of the Start→End line (Start/End/Wobble
+      // are ignored then — the path IS the shape). Keyframe `completion` to
+      // reveal the stroke along it; with a tracked mask, along the OBJECT.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
     ],
     css: () => '',
   },
