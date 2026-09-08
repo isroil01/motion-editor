@@ -215,27 +215,44 @@ export const UNSHARP_MASK_FX = withSecondTexture(fxShader('unsharp-mask', 1,
 // ── Shadow / Highlight (combine) ─────────────────────────────────────────────
 
 /** tex = original, tex2 = blurred local-brightness map. p0 = shadow amount, highlight amount, 1/tonal width. Rec.601 luma, as `toneEffects` uses. */
-export const SHADOW_HIGHLIGHT_FX = withSecondTexture(fxShader('shadow-highlight', 1,
+/** Premultiplied linear chain sample → straight display sRGB (fxRoundEleven's `decodeS`, local so this round does not import the next). */
+const DECODE_WGSL = `fn decodeS(s : vec4<f32>) -> vec4<f32> {
+  let a = max(s.a, 0.00001);
+  let c = select(s.rgb / a, vec3<f32>(0.0), s.a <= 0.0);
+  return vec4<f32>(linearToSrgbRgb(c), s.a);
+}
+`;
+const DECODE_GLSL = `vec4 decodeS(vec4 s) {
+  float a = max(s.a, 0.00001);
+  vec3 c = (s.a <= 0.0) ? vec3(0.0) : s.rgb / a;
+  return vec4(linearToSrgbRgb(c), s.a);
+}
+`;
+
+export const SHADOW_HIGHLIGHT_FX = withHelpers(withSecondTexture(fxShader('shadow-highlight', 1,
   `  let s = textureSampleLevel(tex, smp, uv, 0.0);
   if (s.a <= 0.00001) { return s; }
+  // Straight-byte shading: the CPU pass reads the blurred luma and applies the
+  // gain to DISPLAY sRGB bytes. Doing both in linear moved the tonal ranges
+  // and the gain curve — 23 % of pixels on the golden.
   let b = textureSampleLevel(tex2, smp, uv, 0.0);
-  let mb = select(b.rgb / b.a, vec3<f32>(0.0), b.a <= 0.00001);
+  let mb = select(decodeS(b).rgb, vec3<f32>(0.0), b.a <= 0.00001);
   let local = dot(mb, vec3<f32>(0.299, 0.587, 0.114));
   let ds = local * obj.p0.z;
   let dh = (1.0 - local) * obj.p0.z;
   let gain = 1.0 + obj.p0.x * exp(-ds * ds) - obj.p0.y * exp(-dh * dh);
-  let c = clamp(select(s.rgb / s.a, vec3<f32>(0.0), s.a <= 0.00001) * gain, vec3<f32>(0.0), vec3<f32>(1.0));
-  return vec4<f32>(c * s.a, s.a);`,
+  let c = clamp(decodeS(s).rgb * gain, vec3<f32>(0.0), vec3<f32>(1.0));
+  return encodeOut(c, s.a);`,
   `  vec4 s = textureLod(uTex, vUv, 0.0);
   if (s.a <= 0.00001) { frag = s; return; }
   vec4 b = textureLod(uMaskTex, vUv, 0.0);
-  vec3 mb = (b.a <= 0.00001) ? vec3(0.0) : b.rgb / b.a;
+  vec3 mb = (b.a <= 0.00001) ? vec3(0.0) : decodeS(b).rgb;
   float local = dot(mb, vec3(0.299, 0.587, 0.114));
   float ds = local * p0.z;
   float dh = (1.0 - local) * p0.z;
   float gain = 1.0 + p0.x * exp(-ds * ds) - p0.y * exp(-dh * dh);
-  vec3 c = clamp(((s.a > 0.00001) ? s.rgb / s.a : vec3(0.0)) * gain, 0.0, 1.0);
-  frag = vec4(c * s.a, s.a);`));
+  vec3 c = clamp(decodeS(s).rgb * gain, 0.0, 1.0);
+  frag = encodeOut(c, s.a);`)), DECODE_WGSL, DECODE_GLSL);
 
 // ── Checkerboard ─────────────────────────────────────────────────────────────
 

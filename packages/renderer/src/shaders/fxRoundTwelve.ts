@@ -376,8 +376,8 @@ export const ADD_GRAIN_FX = fx('add-grain', 2,
 
 /**
  * p0 = lw, lh, radius, mode (0 median · 1 dust & scratches); p1 = threshold
- * (0..1). r = 1 is the exact 3×3 median; larger radii take the median of 25
- * taps strided r/2 apart. Componentwise selection sort over straight storage
+ * (0..1). r ≤ 3 is the EXACT (2r+1)² median (the CPU pass's window); larger
+ * radii take the median of 25 taps strided r/2 apart. Componentwise selection sort over straight storage
  * values — a median commutes with the (monotonic) sRGB transfer, so the
  * decode happens once, after.
  */
@@ -386,22 +386,27 @@ export const MEDIAN_FX = fx('median', 2,
   if (s0.a <= 0.0) { return s0; }
   let r = obj.p0.z;
   let xy = floor(pp) + 0.5;
-  let nine = r < 1.5;
-  let n = select(25, 9, nine);
-  let stride = select(r * 0.5, 1.0, nine);
-  var v : array<vec3<f32>, 25>;
+  // r ≤ 3: the EXACT (2r+1)² window the CPU pass takes (up to 49 taps), so
+  // the two routes agree to the byte. Beyond that the window is strided to 25
+  // taps — the approximation, kept where an exact 17×17 would be 289 taps.
+  let ri = i32(r + 0.5);
+  let exact = ri <= 3;
+  let reach = select(2, ri, exact);
+  let n = select(25, (2 * ri + 1) * (2 * ri + 1), exact);
+  let stride = select(r * 0.5, 1.0, exact);
+  var v : array<vec3<f32>, 49>;
   var k = 0;
-  for (var j = -2; j <= 2; j = j + 1) {
-    for (var i = -2; i <= 2; i = i + 1) {
-      if (nine && (abs(i) > 1 || abs(j) > 1)) { continue; }
+  for (var j = -3; j <= 3; j = j + 1) {
+    for (var i = -3; i <= 3; i = i + 1) {
+      if (abs(i) > reach || abs(j) > reach) { continue; }
       v[k] = tapStraight(xy + vec2<f32>(f32(i), f32(j)) * stride, lwh, true).rgb;
       k = k + 1;
     }
   }
   let mid = n / 2;
-  for (var i = 0; i <= 12; i = i + 1) {
+  for (var i = 0; i <= 24; i = i + 1) {
     if (i > mid) { break; }
-    for (var j = i + 1; j < 25; j = j + 1) {
+    for (var j = i + 1; j < 49; j = j + 1) {
       if (j >= n) { break; }
       let lo = min(v[i], v[j]); let hi = max(v[i], v[j]);
       v[i] = lo; v[j] = hi;
@@ -417,22 +422,24 @@ export const MEDIAN_FX = fx('median', 2,
   if (s0.a <= 0.0) { frag = s0; return; }
   float r = p0.z;
   vec2 xy = floor(pp) + 0.5;
-  bool nine = r < 1.5;
-  int n = nine ? 9 : 25;
-  float stride = nine ? 1.0 : r * 0.5;
-  vec3 v[25];
+  int ri = int(r + 0.5);
+  bool exact = ri <= 3;
+  int reach = exact ? ri : 2;
+  int n = exact ? (2 * ri + 1) * (2 * ri + 1) : 25;
+  float stride = exact ? 1.0 : r * 0.5;
+  vec3 v[49];
   int k = 0;
-  for (int j = -2; j <= 2; j++) {
-    for (int i = -2; i <= 2; i++) {
-      if (nine && (abs(i) > 1 || abs(j) > 1)) continue;
+  for (int j = -3; j <= 3; j++) {
+    for (int i = -3; i <= 3; i++) {
+      if (abs(i) > reach || abs(j) > reach) continue;
       v[k] = tapStraight(xy + vec2(float(i), float(j)) * stride, lwh, true).rgb;
       k++;
     }
   }
   int mid = n / 2;
-  for (int i = 0; i <= 12; i++) {
+  for (int i = 0; i <= 24; i++) {
     if (i > mid) break;
-    for (int j = i + 1; j < 25; j++) {
+    for (int j = i + 1; j < 49; j++) {
       if (j >= n) break;
       vec3 lo = min(v[i], v[j]); vec3 hi = max(v[i], v[j]);
       v[i] = lo; v[j] = hi;

@@ -456,13 +456,14 @@ export const KERNEL_FX = fx('kernel', 4,
 
 /** p0 = lw, lh, convergence shift, view; p1 = balance. */
 export const GLASSES_3D_FX = fx('3d-glasses', 2,
+  // `halfW`, not `half`: reserved in GLSL ES — the shader failed to compile on WebGL2.
   `${wp(0)}
   let view = i32(obj.p0.w + 0.5);
   let sh = obj.p0.z;
   if (view == 4) {
-    let half = lwh.x * 0.5;
-    let srcX = select(((pp.x - half) / half) * lwh.x, (pp.x / half) * lwh.x, pp.x < half);
-    let eye = select(sh * 0.5, -sh * 0.5, pp.x < half);
+    let halfW = lwh.x * 0.5;
+    let srcX = select(((pp.x - halfW) / halfW) * lwh.x, (pp.x / halfW) * lwh.x, pp.x < halfW);
+    let eye = select(sh * 0.5, -sh * 0.5, pp.x < halfW);
     return tapStraight(vec2<f32>(srcX + eye, pp.y), lwh, true);
   }
   let l = decodeS(tapStraight(vec2<f32>(pp.x - sh * 0.5, pp.y), lwh, true));
@@ -484,9 +485,9 @@ export const GLASSES_3D_FX = fx('3d-glasses', 2,
   int view = int(p0.w + 0.5);
   float sh = p0.z;
   if (view == 4) {
-    float half = lwh.x * 0.5;
-    float srcX = (pp.x < half) ? (pp.x / half) * lwh.x : ((pp.x - half) / half) * lwh.x;
-    float eye = (pp.x < half) ? -sh * 0.5 : sh * 0.5;
+    float halfW = lwh.x * 0.5;
+    float srcX = (pp.x < halfW) ? (pp.x / halfW) * lwh.x : ((pp.x - halfW) / halfW) * lwh.x;
+    float eye = (pp.x < halfW) ? -sh * 0.5 : sh * 0.5;
     frag = tapStraight(vec2(srcX + eye, pp.y), lwh, true);
     return;
   }

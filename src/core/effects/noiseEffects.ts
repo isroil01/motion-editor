@@ -11,26 +11,18 @@
  * content hash meaningful and scrubbing reproducible.
  */
 
+import { vnoiseF } from './noiseHash';
+
 const clamp255 = (v: number): number => (v < 0 ? 0 : v > 255 ? 255 : v);
 
-/** Deterministic value hash → 0..1. */
-function hash01(x: number, y: number, seed: number): number {
-  const n = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453;
-  return n - Math.floor(n);
-}
-
-/** Smooth (bilinear-interpolated, smoothstepped) value noise at one octave. */
-function valueNoise(x: number, y: number, seed: number): number {
-  const xi = Math.floor(x), yi = Math.floor(y);
-  const xf = x - xi, yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf);
-  const v = yf * yf * (3 - 2 * yf);
-  const a = hash01(xi, yi, seed);
-  const b = hash01(xi + 1, yi, seed);
-  const c = hash01(xi, yi + 1, seed);
-  const d = hash01(xi + 1, yi + 1, seed);
-  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
-}
+/*
+  Noise comes from `noiseHash.ts` — the u32 family the shaders use, so the CPU
+  bake and the GPU produce the SAME grain. `valueNoise` keeps its old name and
+  signature; the float `seed` glides between integer seeds exactly as the
+  shaders' `vnoiseF` does (Turbulent Noise's `evolution + o·13.7`, Add Grain's
+  `seed + 1.7` per channel).
+*/
+const valueNoise = (x: number, y: number, seed: number): number => vnoiseF(x, y, seed);
 
 /**
  * Turbulent Noise — fractal noise built from the ABSOLUTE value of each octave.

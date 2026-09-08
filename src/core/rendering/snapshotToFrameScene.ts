@@ -1858,14 +1858,15 @@ export function extractSpatialEffects(
           const glow = e.type === 'inner-glow';
           const size = Math.max(0, glow ? n('size') : n('softness'));
           const dist = glow ? 0 : Math.max(0, n('distance')); const a = rad(glow ? 0 : n('angle'));
-          const col = lin3('color', glow ? '#ffd070' : '#000000');
+          // Display sRGB, not linear: the kernels shade in the CPU pass's space (fxRoundThirteen).
+          const col = unit3('color', glow ? '#ffd070' : '#000000');
           spatial.push({ type: e.type, p: [[Math.cos(a) * dist, Math.sin(a) * dist, opacity, glow ? 1 : 0], [col[0], col[1], col[2], 0], [lw, lh, 0, 0]], sigmaPx: size });
         }
       }
       if (e.type === 'satin') {
         const opacity = clamp01(n('opacity') / 100); const size = Math.max(0, n('size')); const dist = Math.max(0, n('distance'));
         if (opacity > 0 && (size > 0 || dist > 0)) {
-          const a = rad(n('angle')); const col = lin3('color', '#000000');
+          const a = rad(n('angle')); const col = unit3('color', '#000000');
           spatial.push({ type: 'satin', p: [[Math.cos(a) * dist, Math.sin(a) * dist, opacity, flag('invert', false)], [col[0], col[1], col[2], 0], [lw, lh, 0, 0]], sigmaPx: size });
         }
       }
@@ -1875,7 +1876,7 @@ export function extractSpatialEffects(
         if (depth > 0 && (hiOp > 0 || loOp > 0)) {
           const down = effectParam(e, 'direction') === 'down';
           const a = rad(n('angle') + (down ? 180 : 0)); const alt = rad(Math.max(0, Math.min(90, n('altitude'))));
-          const hi = lin3('highlightColor', '#ffffff'); const lo = lin3('shadowColor', '#000000');
+          const hi = unit3('highlightColor', '#ffffff'); const lo = unit3('shadowColor', '#000000');
           spatial.push({ type: 'bevel', p: [[Math.cos(a) * Math.cos(alt), Math.sin(a) * Math.cos(alt), Math.sin(alt), depth * 8], [hi[0], hi[1], hi[2], hiOp], [lo[0], lo[1], lo[2], loOp], [lw, lh, 0, 0]], sigmaPx: Math.max(0.5, size) });
         }
       }

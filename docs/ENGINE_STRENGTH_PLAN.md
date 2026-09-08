@@ -148,7 +148,21 @@ output path (session-only today).
 
 ### Phase D — the bug ledger (do alongside A)
 
-**D0. The golden gate is red on `dev` — fix before A1 lands on it.** The
+**D0 — DONE 2026-09-08.** Fixed, not re-blessed, except where the old golden
+was itself the approximation. What it took: (1) the CPU noise family now uses
+the shaders' u32 hash (`noiseHash.ts`), so Add Grain / Turbulent Noise / Cell
+Pattern render the same grain on every route; (2) the interior layer styles,
+bevel and Shadow/Highlight shaders now shade in display sRGB like the CPU pass
+(they added in linear — the wrong hue and curve); (3) `blurA` no longer
+hard-zeroes samples past the layer box (it saturated Inner Shadow to black
+edge lines and doubled Satin's rim); bevel taps read the padding likewise;
+(4) the GPU median takes the exact (2r+1)² window for r ≤ 3; (5) **3D Glasses
+never compiled on WebGL2** — its GLSL used the reserved word `half`; (6) the 17
+round-seven scenes + particle-systems got their first references, and the
+noise family and bevel-above-cap were re-blessed on those grounds. Gate:
+29 regressions → 0. The original finding follows for the record.
+
+**D0 (original finding). The golden gate is red on `dev` — fix before A1 lands on it.** The
 full `npm run render-tests` run of 2026-09-08 fails: 11 WebGPU ratchet
 breaks and 29 visual regressions. Cause, traced: the 2026-09-06 batch
 (`e8b8707b`) ported rounds 10/12/13 — the interior layer styles, bevel, the

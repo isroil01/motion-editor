@@ -30,13 +30,18 @@ import { BASE_GLSL, BASE_WGSL, gp, wp } from './fxRoundEleven';
 import { NOISE_GLSL, NOISE_WGSL } from './fxRoundTwelve';
 
 /** Blurred-silhouette alpha at a layer px (0 outside the layer, as the padded Canvas2D scratch is). */
+// NO outside-the-layer guard, on purpose. The reference copy is a blur of the
+// SPREAD-PADDED layer (bakedEffectSpread lists every effect that reaches
+// here), so a sample past the layer box lands in real padding — the blur's
+// own soft falloff — which is what the CPU pass's padded inverse gives. A
+// hard 0 there saturated the band to 1 wherever an offset reached past the
+// edge: pure-black edge lines on Inner Shadow, a rim twice as dark on Satin.
+// Beyond the padding the sampler clamps to transparent, which is the same 0.
 const BLURA_WGSL = `fn blurA(px : vec2<f32>, lwh : vec2<f32>) -> f32 {
-  if (px.x < 0.0 || px.y < 0.0 || px.x > lwh.x || px.y > lwh.y) { return 0.0; }
   return textureSampleLevel(tex2, smp, layerUv(px, lwh), 0.0).a;
 }
 `;
 const BLURA_GLSL = `float blurA(vec2 px, vec2 lwh) {
-  if (px.x < 0.0 || px.y < 0.0 || px.x > lwh.x || px.y > lwh.y) return 0.0;
   return textureLod(uMaskTex, layerUv(px, lwh), 0.0).a;
 }
 `;
@@ -107,17 +112,22 @@ export const INTERIOR_STYLE_FX = fxTwo('interior-style', 3,
   `${wp(2)}
   let sil = s0.a;
   if (sil <= 0.0) { return s0; }
+  // Straight-byte shading, like every kernel in this round: the CPU pass
+  // composites the tinted band in DISPLAY sRGB, so decode, composite there
+  // (colour arrives as display sRGB too), encode. Adding in linear and then
+  // encoding gave the glow a different hue and curve — 16 % of pixels on the
+  // interior-inner-glow golden.
+  let c = decodeS(s0);
   let band = (1.0 - blurA(pp - obj.p0.xy, lwh)) * sil * obj.p0.z;
-  let bp = vec4<f32>(obj.p1.xyz * band, band);
-  if (obj.p0.w > 0.5) { return min(s0 + bp, vec4<f32>(1.0)); }
-  return bp + s0 * (1.0 - band);`,
+  if (obj.p0.w > 0.5) { return encodeOut(min(c.rgb + obj.p1.xyz * band, vec3<f32>(1.0)), sil); }
+  return encodeOut(obj.p1.xyz * band + c.rgb * (1.0 - band), sil);`,
   `${gp(2)}
   float sil = s0.a;
   if (sil <= 0.0) { frag = s0; return; }
+  vec4 c = decodeS(s0);
   float band = (1.0 - blurA(pp - p0.xy, lwh)) * sil * p0.z;
-  vec4 bp = vec4(p1.xyz * band, band);
-  if (p0.w > 0.5) { frag = min(s0 + bp, vec4(1.0)); return; }
-  frag = bp + s0 * (1.0 - band);`);
+  if (p0.w > 0.5) { frag = encodeOut(min(c.rgb + p1.xyz * band, vec3(1.0)), sil); return; }
+  frag = encodeOut(p1.xyz * band + c.rgb * (1.0 - band), sil);`);
 
 // ── Satin (two-texture) ──────────────────────────────────────────────────────
 
@@ -132,8 +142,9 @@ export const SATIN_FX = fxTwo('satin', 3,
   if (obj.p0.w > 0.5) { band = A * B; }
   else { let a2 = A * (1.0 - B); let b2 = B * (1.0 - A); band = a2 + b2 * (1.0 - a2); }
   band = band * sil * obj.p0.z;
-  let bp = vec4<f32>(obj.p1.xyz * band, band);
-  return bp + s0 * (1.0 - band);`,
+  // Display-sRGB composite, as INTERIOR_STYLE_FX above.
+  let c = decodeS(s0);
+  return encodeOut(obj.p1.xyz * band + c.rgb * (1.0 - band), sil);`,
   `${gp(2)}
   float sil = s0.a;
   if (sil <= 0.0) { frag = s0; return; }
@@ -143,8 +154,8 @@ export const SATIN_FX = fxTwo('satin', 3,
   if (p0.w > 0.5) band = A * B;
   else { float a2 = A * (1.0 - B); float b2 = B * (1.0 - A); band = a2 + b2 * (1.0 - a2); }
   band *= sil * p0.z;
-  vec4 bp = vec4(p1.xyz * band, band);
-  frag = bp + s0 * (1.0 - band);`);
+  vec4 c = decodeS(s0);
+  frag = encodeOut(p1.xyz * band + c.rgb * (1.0 - band), sil);`);
 
 // ── Bevel (two-texture) ──────────────────────────────────────────────────────
 
@@ -154,40 +165,45 @@ export const BEVEL_FX = fxTwo('bevel', 4,
   let sil = s0.a;
   if (sil <= 0.0) { return s0; }
   let xy = floor(pp) + 0.5;
-  let hx1 = blurA(clamp(xy + vec2<f32>(1.0, 0.0), vec2<f32>(0.5), lwh - 0.5), lwh);
-  let hx0 = blurA(clamp(xy - vec2<f32>(1.0, 0.0), vec2<f32>(0.5), lwh - 0.5), lwh);
-  let hy1 = blurA(clamp(xy + vec2<f32>(0.0, 1.0), vec2<f32>(0.5), lwh - 0.5), lwh);
-  let hy0 = blurA(clamp(xy - vec2<f32>(0.0, 1.0), vec2<f32>(0.5), lwh - 0.5), lwh);
+  // Unclamped: at the layer edge the slope needs the padding's falloff (see
+  // blurA); clamping the taps into the box flattened the ramp on the outermost
+  // row and drew a stray highlight line there.
+  let hx1 = blurA(xy + vec2<f32>(1.0, 0.0), lwh);
+  let hx0 = blurA(xy - vec2<f32>(1.0, 0.0), lwh);
+  let hy1 = blurA(xy + vec2<f32>(0.0, 1.0), lwh);
+  let hy0 = blurA(xy - vec2<f32>(0.0, 1.0), lwh);
   let nx = -(hx1 - hx0) * 0.5 * obj.p0.w; let ny = -(hy1 - hy0) * 0.5 * obj.p0.w;
   let len = sqrt(nx * nx + ny * ny + 1.0);
   let shade = (nx * obj.p0.x + ny * obj.p0.y + obj.p0.z) / len - obj.p0.z;
   if (shade == 0.0) { return s0; }
+  // Display-sRGB shading (see INTERIOR_STYLE_FX): highlight adds, shadow
+  // multiplies — the CPU pass's Screen/Multiply pair, in the CPU pass's space.
+  let c = decodeS(s0);
   if (shade > 0.0) {
-    let ba = min(shade, 1.0) * obj.p1.w * sil;
-    return min(s0 + vec4<f32>(obj.p1.xyz * ba, ba), vec4<f32>(1.0));
+    let ba = min(shade, 1.0) * obj.p1.w;
+    return encodeOut(min(c.rgb + obj.p1.xyz * ba, vec3<f32>(1.0)), sil);
   }
-  let ba = min(-shade, 1.0) * obj.p2.w * sil;
-  let lo = vec4<f32>(obj.p2.xyz * ba, ba);
-  return lo * s0 + lo * (1.0 - s0.a) + s0 * (1.0 - ba);`,
+  let ba = min(-shade, 1.0) * obj.p2.w;
+  return encodeOut(mix(c.rgb, c.rgb * obj.p2.xyz, ba), sil);`,
   `${gp(3)}
   float sil = s0.a;
   if (sil <= 0.0) { frag = s0; return; }
   vec2 xy = floor(pp) + 0.5;
-  float hx1 = blurA(clamp(xy + vec2(1.0, 0.0), vec2(0.5), lwh - 0.5), lwh);
-  float hx0 = blurA(clamp(xy - vec2(1.0, 0.0), vec2(0.5), lwh - 0.5), lwh);
-  float hy1 = blurA(clamp(xy + vec2(0.0, 1.0), vec2(0.5), lwh - 0.5), lwh);
-  float hy0 = blurA(clamp(xy - vec2(0.0, 1.0), vec2(0.5), lwh - 0.5), lwh);
+  float hx1 = blurA(xy + vec2(1.0, 0.0), lwh);
+  float hx0 = blurA(xy - vec2(1.0, 0.0), lwh);
+  float hy1 = blurA(xy + vec2(0.0, 1.0), lwh);
+  float hy0 = blurA(xy - vec2(0.0, 1.0), lwh);
   float nx = -(hx1 - hx0) * 0.5 * p0.w; float ny = -(hy1 - hy0) * 0.5 * p0.w;
   float len = sqrt(nx * nx + ny * ny + 1.0);
   float shade = (nx * p0.x + ny * p0.y + p0.z) / len - p0.z;
   if (shade == 0.0) { frag = s0; return; }
+  vec4 c = decodeS(s0);
   if (shade > 0.0) {
-    float ba = min(shade, 1.0) * p1.w * sil;
-    frag = min(s0 + vec4(p1.xyz * ba, ba), vec4(1.0)); return;
+    float ba = min(shade, 1.0) * p1.w;
+    frag = encodeOut(min(c.rgb + p1.xyz * ba, vec3(1.0)), sil); return;
   }
-  float ba = min(-shade, 1.0) * p2.w * sil;
-  vec4 lo = vec4(p2.xyz * ba, ba);
-  frag = lo * s0 + lo * (1.0 - s0.a) + s0 * (1.0 - ba);`);
+  float ba = min(-shade, 1.0) * p2.w;
+  frag = encodeOut(mix(c.rgb, c.rgb * p2.xyz, ba), sil);`);
 
 // ── Write-on ─────────────────────────────────────────────────────────────────
 

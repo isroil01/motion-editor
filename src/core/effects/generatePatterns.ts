@@ -12,6 +12,7 @@
  * exception and does own a pixel loop — Worley noise has no vector form.
  */
 
+import { hash01u, mix } from './noiseHash';
 import type { Effect } from './effects';
 import { effectNumber, paramsOf } from './effects';
 
@@ -112,12 +113,6 @@ export function drawGrid(oc: CanvasRenderingContext2D, w: number, h: number, e: 
 
 // ── Cell Pattern ──────────────────────────────────────────────────
 
-/** Deterministic hash → 0..1. No Math.random: playback must be reproducible
- *  and scrubbing back to a frame must give the same pattern. */
-function hash01(x: number, y: number, seed: number): number {
-  const n = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453;
-  return n - Math.floor(n);
-}
 
 /**
  * Cell Pattern — Worley (cellular) noise.
@@ -143,6 +138,9 @@ export function cellPatternData(
 ): Uint8ClampedArray {
   const cell = Math.max(2, size);
   const gain = Math.max(0.01, contrast / 100);
+  const e0 = Math.floor(evolution);
+  const ef = evolution - e0;
+  const ei = e0;
 
   for (let py = 0; py < h; py++) {
     for (let px = 0; px < w; px++) {
@@ -159,8 +157,13 @@ export function cellPatternData(
           // The feature point for this cell, jittered inside it. Evolution
           // moves the jitter, so animating it makes the cells drift rather
           // than the whole field slide.
-          const fx = (cx + hash01(cx, cy, evolution)) * cell;
-          const fy = (cy + hash01(cx, cy, evolution + 17.3)) * cell;
+          // Mirrors CELL_PATTERN_FX: integer seeds either side of `evolution`,
+          // blended by its fraction, y offset by 17 — the same u32 hash the
+          // shader runs, so both routes place the same feature points.
+          const jx = mix(hash01u(cx, cy, ei), hash01u(cx, cy, ei + 1), ef);
+          const jy = mix(hash01u(cx, cy, ei + 17), hash01u(cx, cy, ei + 18), ef);
+          const fx = (cx + jx) * cell;
+          const fy = (cy + jy) * cell;
           const d = Math.hypot(px - fx, py - fy);
           if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
         }
