@@ -236,6 +236,8 @@ describe('EFFECT_DEFS', () => {
     'gaussian-blur', 'fast-box-blur', 'radial-blur', 'corner-pin', 'transform',
     // Deep Glow (2026-09-08): a multi-pass in CompositionPass, no CSS form.
     'deep-glow',
+    // Energy Beam (2026-09-08): a Generate shader in the round-twelve single-pass table.
+    'beam-path',
     // Round fourteen (2026-09-06): histogram colour autos.
     'equalize', 'auto-levels', 'auto-contrast', 'auto-color',
     // Rounds twelve + thirteen (2026-09-06).

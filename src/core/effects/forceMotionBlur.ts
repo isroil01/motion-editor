@@ -28,6 +28,8 @@ export interface ForcedMotionBlur {
   shutterAngle: number;
   /** Sub-frame samples across that shutter. */
   samples: number;
+  /** Shutter phase in degrees, this layer only — the per-layer phase row. */
+  shutterPhase: number;
 }
 
 /**
@@ -45,5 +47,6 @@ export function readForceMotionBlur(effects: ReadonlyArray<Effect>): ForcedMotio
   // A zero-degree shutter is an open-for-no-time camera: no blur, and sampling
   // it would produce N copies of one instant.
   if (shutterAngle <= 0) return null;
-  return { shutterAngle, samples };
+  const shutterPhase = Math.max(-360, Math.min(360, effectNumber(e, 'shutterPhase')));
+  return { shutterAngle, samples, shutterPhase };
 }

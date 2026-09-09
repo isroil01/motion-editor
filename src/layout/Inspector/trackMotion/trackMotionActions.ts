@@ -41,6 +41,8 @@ import { densifyQuad } from '@core/tracking/planarFit';
 import { readNodeKind } from '@core/scene/sceneDerive';
 import { readGeometry } from '@core/workspace/geometry';
 import type { SceneNode } from '@core/types';
+import { customConfirm } from '@components/Modal';
+import { needsSelfApplyConfirm, selfApplyConfirmCopy } from './applyTargetGuard';
 
 export type StabVariant = 'similarity' | 'subspace' | 'rolling-shutter';
 
@@ -185,7 +187,9 @@ export function trackMotionActions(ctx: TrackMotionContext) {
         });
         store.getState().finishTracking(
           null,
-          `Tracked ${r.vertices} mask vertices, wrote ${r.keyframes} mask keyframes (${r.status}).`,
+          r.sampled < r.vertices
+            ? `Tracked ${r.sampled} of ${r.vertices} mask vertices (the rest follow their neighbours), wrote ${r.keyframes} mask keyframes (${r.status}).`
+            : `Tracked ${r.vertices} mask vertices, wrote ${r.keyframes} mask keyframes (${r.status}).`,
         );
         return;
       }
@@ -235,8 +239,18 @@ export function trackMotionActions(ctx: TrackMotionContext) {
     }
   };
 
-  const onApply = (): void => {
+  const onApply = async (): Promise<void> => {
     if (!result) return;
+    // Applying the forward track to the FOOTAGE itself moves the footage
+    // under its own track — the accident applyTargetGuard.ts describes. One
+    // confirm, offering the null; every other target applies as before.
+    if (needsSelfApplyConfirm({ mode, targetId, sourceId: nodeId })) {
+      const copy = selfApplyConfirmCopy({ mode, layerName: targetName(targetId) });
+      const makeNull = await customConfirm(copy.title, copy.message, { confirmLabel: copy.confirmLabel });
+      if (makeNull) onCreateNullAndApply();
+      else store.getState().finishTracking(result, 'Not applied — choose another layer to receive the track.');
+      return;
+    }
     let n = 0;
     let what = '';
     if (mode === 'follow') {

@@ -102,10 +102,11 @@ export async function segmentObjectMask(req: ObjectMaskRequest): Promise<ObjectM
       throw new Error('Could not find an object there — try a tighter box, or a click on the object itself.');
     }
     // Decimate: the tracer emits a vertex roughly per pixel, and a hundred-
-    // point outline is worse at every next step — Track mask refuses masks
-    // over 64 vertices (its per-vertex trackers need features, not a shape),
-    // hand-editing needs graspable anchors, and the path effects only see the
-    // resampled polyline anyway. 48 keeps a safety margin under that cap.
+    // point outline is worse at every next step — Track mask tracks at most
+    // 64 vertices and interpolates the rest (its per-vertex trackers need
+    // features, not a shape), hand-editing needs graspable anchors, and the
+    // path effects only see the resampled polyline anyway. 48 keeps every
+    // vertex of this path a tracked one, with margin under that cap.
     const MAX_POINTS = 48;
     const stride = Math.max(1, Math.ceil(traced.length / MAX_POINTS));
     const contour = traced.filter((_, i) => i % stride === 0);

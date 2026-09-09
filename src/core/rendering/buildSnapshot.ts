@@ -7,7 +7,7 @@ import type SceneGraph from '@core/scene/SceneGraph';
 import { renderComponentsOf, renderTransformOf } from '@core/scene/SceneGraph';
 import type { SceneNode } from '@core/types';
 import { flattenComposition, readNodeKind, KIND_FILL } from '@core/scene/sceneDerive';
-import { readNodeRenderEffects, effectsToFilter, resolveEffectParams, paramsOf, type Effect } from '@core/effects/effects';
+import { readNodeRenderEffects, effectsToFilter, resolveEffectParams, paramsOf, effectNumber, type Effect } from '@core/effects/effects';
 import { readNodeLayerStyles, layerStylesToEffects, layerStyleEffectId, styledSurfaceFill } from '@core/effects/layerStyles';
 
 /** Prop-path prefix every layer-style keyframe track shares —
@@ -19,6 +19,8 @@ import { resolveGlobalLight } from '@stores/projectStore';
 import { readNodeBlend } from '@core/effects/blendMode';
 import { readNodePreserveTransparency } from '@core/effects/preserveTransparency';
 import { readNodeMask, readNodeMaskAt, maskPathPolyline, roundedRectMask, applyMaskPropertyTracks, type LayerMask } from '@core/effects/mask';
+import { BEAM_PEN_UP, BEAM_SOURCE } from '@core/effects/beamPath';
+import { traceTextRuns } from '@core/scene/shapesFromText';
 import {
   clampCornerRadii,
   hasIndependentCornerRadii,
@@ -27,7 +29,15 @@ import {
 } from '@core/scene/cornerRadii';
 import { readNodeMatte, readMatte } from '@core/effects/matte';
 import { readNodeAdjustment } from '@core/effects/adjustment';
-import { readNodeMotionBlur, motionBlurSampleTimes, adaptiveMotionBlurSamples, type MotionBlurConfig } from '@core/effects/motionBlur';
+import {
+  readNodeMotionBlur,
+  motionBlurSampleTimes,
+  adaptiveMotionBlurSamples,
+  affineTravelPx,
+  motionBlurTravelPx,
+  type MotionProbe,
+  type MotionBlurConfig,
+} from '@core/effects/motionBlur';
 import { readNodeFill, readNodeFills, sampleFillAt, type FillPaint } from '@core/paint/fill';
 import { readNodeStroke, readNodeRenderStrokes } from '@core/paint/stroke';
 import { useAssetStore } from '@stores/assetStore';
@@ -1071,6 +1081,20 @@ export function buildSnapshot(
     // the content hash so cached frames re-render.
     const all = withAudio.map((e) => {
       const p = paramsOf(e);
+      // Energy Beam on the layer's OWN text outline: the traced runs, each a
+      // closed cubic loop, flattened like a mask path and separated by the
+      // kernel's pen-up sentinel so every letter is its own stroke.
+      if (e.type === 'beam-path' && Math.round(effectNumber(e, 'source')) === BEAM_SOURCE.text) {
+        const runs = readNodeKind(node) === 'text' ? traceTextRuns(node) : null;
+        const pathPoints: number[] = [];
+        for (const run of runs ?? []) {
+          if (pathPoints.length > 0) pathPoints.push(BEAM_PEN_UP, 0);
+          pathPoints.push(...maskPathPolyline({
+            id: 'text', mode: 'none', closed: true, points: run.points, feather: 0, opacity: 1, expansion: 0, inverted: false,
+          }, 6));
+        }
+        return { ...e, params: { ...p, pathPoints } };
+      }
       const pathMaskId = p.pathMaskId;
       if (typeof pathMaskId !== 'string' || pathMaskId === '') return e;
       const m = (layerTimeSec !== undefined ? readNodeMaskAt(node, layerTimeSec) : undefined)
@@ -3303,7 +3327,7 @@ export function buildSnapshot(
     */
     const forcedBlur = readForceMotionBlur(resolvedEffects);
     const blurCfg = forcedBlur && motionBlur
-      ? { ...motionBlur, enabled: true, shutterAngle: forcedBlur.shutterAngle, samples: forcedBlur.samples }
+      ? { ...motionBlur, enabled: true, shutterAngle: forcedBlur.shutterAngle, samples: forcedBlur.samples, shutterPhase: forcedBlur.shutterPhase }
       : motionBlur;
     const blurOptIn = forcedBlur ? true : (motionBlur?.enabled === true && readNodeMotionBlur(node));
     // A 3D layer also moves ON SCREEN when the camera does — a static card
@@ -4741,24 +4765,35 @@ function sampleMotion(
   // near-static layers; AE's adaptive limit exists for the same reason.
   const probe = motionBlurSampleTimes(t, cfg.fps, cfg.shutterAngle, 2, cfg.shutterPhase ?? -90, limit);
   let travelPx = 0;
+  const boxW = base.width ?? 0;
+  const boxH = base.height ?? 0;
   if (probe.length >= 2 && matrixAt) {
     // 3D: measure PROJECTED travel — it is what lands on screen. The raw x/y
     // probe below reads zero for a card flip (rotationY only), a depth push
     // (z only) and every camera move, so exactly the showiest 3D motion was
-    // sampled at the static-layer floor and strobed.
+    // sampled at the static-layer floor and strobed. Measured at the box's
+    // CORNERS, not its centre: a flip moves the edges and not the centre.
     const ta = probe[0]!;
     const tb = probe[probe.length - 1]!;
     const ma = matrixAt(remap(ta), ta);
     const mb = matrixAt(remap(tb), tb);
-    travelPx = Math.hypot(mb[4]! - ma[4]!, mb[5]! - ma[5]!);
+    travelPx = affineTravelPx(ma, mb, boxW, boxH);
   } else if (probe.length >= 2) {
     const a = remap(probe[0]!);
     const b = remap(probe[probe.length - 1]!);
-    const xa = anim.sample(nodeId, 'x', a) ?? base.x;
-    const ya = anim.sample(nodeId, 'y', a) ?? base.y;
-    const xb = anim.sample(nodeId, 'x', b) ?? base.x;
-    const yb = anim.sample(nodeId, 'y', b) ?? base.y;
-    travelPx = Math.hypot(xb - xa, yb - ya);
+    const at = (tt: number): MotionProbe => {
+      const sc = anim.sample(nodeId, 'scale', tt);
+      return {
+        x: anim.sample(nodeId, 'x', tt) ?? base.x,
+        y: anim.sample(nodeId, 'y', tt) ?? base.y,
+        rotation: anim.sample(nodeId, 'rotation', tt) ?? base.rotation,
+        scaleX: sc ?? anim.sample(nodeId, 'scaleX', tt) ?? base.scaleX,
+        scaleY: sc ?? anim.sample(nodeId, 'scaleY', tt) ?? base.scaleY,
+      };
+    };
+    // Silhouette travel: the anchor's path plus what rotation and scale do to
+    // the far corner. A spinning title has no anchor travel at all.
+    travelPx = motionBlurTravelPx(at(a), at(b), Math.hypot(boxW, boxH) / 2);
   }
   const samples = adaptiveMotionBlurSamples(cfg.samples, travelPx, limit);
   const times = motionBlurSampleTimes(t, cfg.fps, cfg.shutterAngle, samples, cfg.shutterPhase ?? -90, limit);

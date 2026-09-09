@@ -62,6 +62,9 @@ export function isGpuUnbakeableEffect(type: string): boolean {
  *  through the CPU chain: the GPU shader draws the straight-line/contour form
  *  and knows nothing of polylines. Same shape of gate as `maskId` below. */
 function effectFollowsPath(e: Effect): boolean {
+  // Energy Beam carries its spine to the GPU in the uniform block — the one
+  // path effect with a polyline-aware shader, so it stays on the fast route.
+  if (e.type === 'beam-path') return false;
   const v = (e.params as Record<string, unknown> | undefined)?.pathMaskId;
   return typeof v === 'string' && v !== '';
 }

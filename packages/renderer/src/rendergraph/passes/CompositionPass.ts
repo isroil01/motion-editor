@@ -205,6 +205,7 @@ function effectSpreadPx(effects: readonly RenderableEffect[]): number {
     else if (e.type === 'glow') s = (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
     // The widest octave is a Gaussian of `radiusPx`; the pyramid's tail is its tail.
     else if (e.type === 'deep-glow') s = e.radiusPx * Math.max(e.aspect[0], e.aspect[1]) * Math.max(e.chroma[0], e.chroma[1], e.chroma[2]) * BLUR_TAIL;
+    else if (e.type === 'beam-path') s = e.spreadPx;
     else if (e.type === 'drop-shadow') {
       s = Math.hypot(e.offsetX, e.offsetY) + (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
     }

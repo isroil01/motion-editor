@@ -10,6 +10,7 @@
  */
 
 import { defineScene, node, type Scene } from '../sceneKit';
+import { ellipseMask } from '@core/effects/mask';
 
 const COMP = { width: 320, height: 220, background: '#0c0c12' };
 const SIZE = { w: 320, h: 220 };
@@ -43,6 +44,10 @@ const EFFECTS: EffectSpec[] = [
   // 33-tap progressive ladder (deepGlowKernel.ts), so this is a parity gate,
   // not an eyeball. Exposure +1 so the halo is well above the 8-bit floor.
   { type: 'deep-glow', params: { radius: 40, exposure: 1, threshold: 0, aspect: 0, chromatic: 0, tint: '#ffffff', tintAmount: 0, glowOnly: false, dither: false, quality: 1 }, tolerance: 0.009 },
+  // Energy Beam (2026-09-08) on its Start→End line, with the reveal window,
+  // a taper and curl distortion all engaged so every branch of the field is
+  // gated; the mask-path form is `beamPathMaskScene` below.
+  { type: 'beam-path', params: { source: 1, startX: -130, startY: -60, endX: 130, endY: 60, start: 10, end: 90, coreWidth: 8, coreSoftness: 30, startSize: 40, endSize: 120, glowSpread: 24, glowIntensity: 120, glowBias: 33, distortion: 10, distortionScale: 60, evolution: 12 }, tolerance: 0.009 },
   // tolerance: the GPU shadow penumbra sits at 0.501% vs the 0.5% default gate —
   // visually identical (soft-edge AA rounding), so give the blurred edge headroom.
   { type: 'drop-shadow', params: { distance: 6, angle: 135, softness: 12, color: '#000000', opacity: 55 }, tolerance: 0.008 },
@@ -833,12 +838,50 @@ const particleSystemsScene: Scene = defineScene({
   },
 });
 
+/**
+ * Energy Beam along a MASK PATH — the "lightning around the wheel" shape
+ * the whole path-effects thread set out to draw. An ellipse mask on the
+ * subject; the beam rides its outline through the resolved `pathPoints`
+ * param, on the GPU (the one path effect that does not force a CPU bake).
+ */
+const beamPathMaskScene: Scene = defineScene({
+  id: 'effect-beam-path-mask',
+  description: 'Energy Beam following an ellipse mask path around a gradient ellipse (beam only).',
+  size: SIZE,
+  comp: COMP,
+  fps: 30,
+  frames: [0],
+  gpuParity: 'expect-pass',
+  tolerance: 0.009,
+  build(graph) {
+    graph.addNode(node('subj', {
+      kind: 'shape',
+      position: { x: 160, y: 110 },
+      transform: { width: 220, height: 170, shapeType: 'ellipse' },
+      style: { fill: '#000' },
+    }));
+    graph.setFill('subj', {
+      type: 'linear',
+      angle: 30,
+      stops: [
+        { id: 'a', offset: 0, color: '#2b3cff' },
+        { id: 'b', offset: 1, color: '#ff7a1a' },
+      ],
+    } as never);
+    graph.setMask('subj', { paths: [{ ...ellipseMask(160, 110), id: 'ring', mode: 'none' }] });
+    graph.setEffects('subj', [
+      { id: 'beam', type: 'beam-path', params: { source: 0, pathMaskId: 'ring', coreWidth: 5, coreSoftness: 30, coreColor: '#ffffff', glowColor: '#35e04a', glowSpread: 18, glowIntensity: 140, glowBias: 40, start: 0, end: 80 } },
+    ]);
+  },
+});
+
 export const effectScenes: Scene[] = [
   ...EFFECTS.map(effectScene),
   displacementMapLayerScene,
   applyColorLutScene,
   compoundBlurScene,
   medianDenoiseScene,
+  beamPathMaskScene,
   vegasContourScene,
   liquifyScene,
   meshWarpScene,

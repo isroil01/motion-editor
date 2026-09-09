@@ -425,6 +425,8 @@ export type RenderableEffect =
   | { type: 'cell-pattern'; p: readonly FxVec4[] }
   | { type: 'radio-waves'; p: readonly FxVec4[] }
   | { type: 'light-burst'; p: readonly FxVec4[] }
+  /** Energy Beam (fxBeamPath.ts): rows from `beamPathRows`; `spreadPx` is how far the glow leaves the spine. */
+  | { type: 'beam-path'; p: readonly FxVec4[]; spreadPx: number }
   | { type: 'write-on'; p: readonly FxVec4[] }
   | { type: 'star-burst'; p: readonly FxVec4[] }
   | { type: 'snowfall'; p: readonly FxVec4[] }

@@ -231,6 +231,7 @@ const PORTED: ReadonlyArray<{ type: string; params: Record<string, unknown> }> =
   { type: 'radio-waves', params: { centerX: 0, centerY: 0, waveCount: 5, maxRadius: 0, phase: 0, thickness: 2, color: '#7dd3fc', opacity: 100, fadeOut: 50, composite: 0 } },
   { type: 'light-burst', params: { centerX: 0, centerY: 0, intensity: 100, rayLength: 50 } },
   { type: 'deep-glow', params: { radius: 60, exposure: 0, threshold: 0, aspect: 0, chromatic: 0, tint: '#ffffff', tintAmount: 0, glowOnly: false, dither: false, quality: 1 } },
+  { type: 'beam-path', params: { source: 1, startX: -80, startY: 0, endX: 80, endY: 0, coreWidth: 6, glowSpread: 30, glowIntensity: 100 } },
   { type: 'write-on', params: { startX: -40, startY: 0, endX: 40, endY: 0, completion: 60, brushSize: 8, brushColor: '#ffffff', wobble: 20, taper: 30 } },
   { type: 'star-burst', params: { phase: 0, amount: 50, size: 3, starColor: '#ffffff', blend: 50, seed: 1 } },
   { type: 'snowfall', params: { amount: 50, size: 3, evolution: 0, wind: 0, opacity: 100, flakeColor: '#ffffff', seed: 1 } },

@@ -236,6 +236,7 @@ const PACKERS: ReadonlyArray<{ shader: string; pack: () => Float32Array }> = [
   { shader: 'deep-glow-blur', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
   { shader: 'deep-glow-acc', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0]], RECT) },
   { shader: 'deep-glow-composite', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
+  { shader: 'beam-path', pack: () => packFxBlock(MVP, RECT, Array.from({ length: 39 }, () => [0, 0, 0, 0] as [number, number, number, number]), RECT) },
   { shader: 'cartoon', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
   { shader: 'interior-style', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },
   { shader: 'satin', pack: () => packFxBlock(MVP, RECT, [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], RECT) },

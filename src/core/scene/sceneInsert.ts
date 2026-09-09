@@ -1574,6 +1574,83 @@ async function readSvgText(src: string): Promise<string | null> {
 }
 
 /**
+ * Insert an SVG DOCUMENT (markup text) into the active composition — the one
+ * router behind both dropping an `.svg` file and pasting SVG markup from the
+ * clipboard (Illustrator, Figma, a browser), so the two land identically.
+ *
+ * SVG routing (hybrid architecture).
+ *
+ * The default is DEFERRED PARSING: the document is stored intact as one SVG
+ * layer, rasterized faithfully, and parsed only when the user explicitly asks
+ * for editable shapes (Convert to Editable Shapes). That is what makes import
+ * instant, keeps a 300-path illustration to one layer, and reproduces
+ * gradients, masks, filters, clip paths and patterns instead of approximating
+ * them.
+ *
+ * The ONE exception is an ANIMATED document. Our compositor is texture-based
+ * (createRenderBackend: "exactly ONE rendering engine: the GPU-backed
+ * MotionRendererBackend"), so a stored SVG can only be rasterized, and a
+ * rasterized animation is a dead frame 0. The existing translator turns SMIL
+ * and CSS `@keyframes` into real keyframe tracks, which is a WORKING animation
+ * the user can edit — so animated documents keep taking that path. Losing the
+ * animation to gain fidelity is not a trade worth making; the reverse is
+ * exactly what the shape path already does well.
+ *
+ * `sizeHint` is the source's probed pixel size (largest side), used only to
+ * size an animated shape group; a clipboard paste has none and gets the
+ * importer's 400px default.
+ *
+ * Returns the new layer id, or null when the markup cannot be read at all
+ * (the file importer then falls back to a plain image; paste reports nothing
+ * to paste).
+ */
+export function insertSvgDocument(
+  svgText: string,
+  name: string,
+  opts?: { sizeHint?: number },
+): string | null {
+  const caps = scanSvgCapabilities(new DOMParser().parseFromString(svgText, 'image/svg+xml'));
+
+  if (!isAnimatedSvg(caps)) {
+    // Static: store it intact. No parser, no keyframes, one layer.
+    return insertSvgLayer(svgText, name, { capabilities: caps });
+  }
+
+  // Animated: prefer editable keyframes only when the conversion is lossless
+  // (`isSimpleSvg`). Otherwise keep the intact document and play it via Live
+  // SVG time-rasterization — matching the Assets preview instead of
+  // flattening gradients/masks/filters.
+  const unsupported = new Set<string>();
+  const shapes = parseSvgToShapes(svgText, {
+    maxDurationSeconds: useCompositionStore.getState().durationSeconds,
+    unsupportedOut: unsupported,
+    measureText: measureSvgText,
+    intersectPaths: intersectSvgPaths,
+  });
+  const convertible = shapes.some((s) => s.animation);
+  const simple = isSimpleSvg(svgText);
+  if (simple && convertible && !isOversizedSvg(shapes.length, name)) {
+    const size = opts?.sizeHint || 400;
+    const id = insertSvgShapeGroup(svgText, name, { targetSize: size, shapes });
+    if (id) {
+      reportSvgAnimation(name, convertible, unsupported);
+      return id;
+    }
+  }
+  // Live SVG: full visual fidelity + time-scrubbed playback.
+  const blockers = unsupported.size > 0 ? [...unsupported] : svgAnimationBlockers(svgText);
+  return insertSvgLayer(svgText, name, {
+    capabilities: caps,
+    livePlayback: true,
+    extraWarning: convertible && !simple
+      ? 'playing as a Live SVG so gradients, masks and filters stay intact (not editable shapes). Convert to Editable Shapes when you need per-path control.'
+      : !convertible
+        ? `playing as a Live SVG (${blockers.slice(0, 3).join(', ') || 'complex animation'}). Convert to Editable Shapes only if you need keyframes.`
+        : 'playing as a Live SVG for full animated fidelity.',
+  });
+}
+
+/**
  * Insert an imported media asset (image or video), auto-fitted to the frame.
  *
  * **Contain, not native.** This placed footage at its stored pixel size, so a
@@ -1593,69 +1670,15 @@ export async function insertMedia(asset: ImportedAsset): Promise<void> {
     return;
   }
 
-  // SVG routing (hybrid architecture).
-  //
-  // The default is DEFERRED PARSING: the file is stored intact as one SVG
-  // layer, rasterized faithfully, and parsed only when the user explicitly
-  // asks for editable shapes. That is what makes import instant, keeps a
-  // 300-path illustration to one layer, and reproduces gradients, masks,
-  // filters, clip paths and patterns instead of approximating them.
-  //
-  // The ONE exception is an ANIMATED file. Our compositor is texture-based
-  // (createRenderBackend: "exactly ONE rendering engine: the GPU-backed
-  // MotionRendererBackend"), so a stored SVG can only be rasterized, and a
-  // rasterized animation is a dead frame 0. The existing translator turns SMIL
-  // and CSS `@keyframes` into real keyframe tracks, which is a WORKING
-  // animation the user can edit — so animated files keep taking that path.
-  // Losing the animation to gain fidelity is not a trade worth making; the
-  // reverse is exactly what the shape path already does well.
+  // SVG: one router shared with clipboard paste (see `insertSvgDocument`).
+  // Falls through to the plain image path only when the markup is unreadable.
   if (isSvgAsset(asset)) {
     const svgText = await readSvgText(asset.src);
     if (svgText) {
-      const caps = scanSvgCapabilities(new DOMParser().parseFromString(svgText, 'image/svg+xml'));
-
-      if (!isAnimatedSvg(caps)) {
-        // Static: store it intact. No parser, no keyframes, one layer.
-        const id = insertSvgLayer(svgText, asset.name, { capabilities: caps });
-        if (id) return;
-        // Unreadable markup — fall through to the plain image path.
-      } else {
-        // Animated: prefer editable keyframes only when the conversion is
-        // lossless (`isSimpleSvg`). Otherwise keep the intact document and
-        // play it via Live SVG time-rasterization — matching the Assets
-        // preview instead of flattening gradients/masks/filters.
-        const unsupported = new Set<string>();
-        const shapes = parseSvgToShapes(svgText, {
-          maxDurationSeconds: useCompositionStore.getState().durationSeconds,
-          unsupportedOut: unsupported,
-          measureText: measureSvgText,
-          intersectPaths: intersectSvgPaths,
-        });
-        const convertible = shapes.some((s) => s.animation);
-        const simple = isSimpleSvg(svgText);
-        if (simple && convertible && !isOversizedSvg(shapes.length, asset.name)) {
-          const size = Math.max(asset.metadata?.width ?? 0, asset.metadata?.height ?? 0) || 400;
-          const id = insertSvgShapeGroup(svgText, asset.name, { targetSize: size, shapes });
-          if (id) {
-            reportSvgAnimation(asset.name, convertible, unsupported);
-            return;
-          }
-        }
-        // Live SVG: full visual fidelity + time-scrubbed playback.
-        const blockers = unsupported.size > 0 ? [...unsupported] : svgAnimationBlockers(svgText);
-        const id = insertSvgLayer(svgText, asset.name, {
-          capabilities: caps,
-          livePlayback: true,
-          extraWarning: convertible && !simple
-            ? 'playing as a Live SVG so gradients, masks and filters stay intact (not editable shapes). Convert to Editable Shapes when you need per-path control.'
-            : !convertible
-              ? `playing as a Live SVG (${blockers.slice(0, 3).join(', ') || 'complex animation'}). Convert to Editable Shapes only if you need keyframes.`
-              : 'playing as a Live SVG for full animated fidelity.',
-        });
-        if (id) return;
-      }
+      const sizeHint = Math.max(asset.metadata?.width ?? 0, asset.metadata?.height ?? 0) || undefined;
+      const id = insertSvgDocument(svgText, asset.name, { sizeHint });
+      if (id) return;
     }
-    // Falls through to the plain image path only when the markup is unreadable.
   }
 
   const kind = asset.type === 'video' ? 'video' : 'image';

@@ -4,8 +4,8 @@ import { EFFECT_DEFS } from './effects';
 
 describe('builtin effect presets', () => {
   it('ships forty production starter looks', () => {
-    expect(BUILTIN_EFFECT_PRESETS).toHaveLength(40);
-    expect(new Set(BUILTIN_EFFECT_PRESETS.map((p) => p.name)).size).toBe(40);
+    expect(BUILTIN_EFFECT_PRESETS).toHaveLength(60);
+    expect(new Set(BUILTIN_EFFECT_PRESETS.map((p) => p.name)).size).toBe(60);
   });
 
   it('uses effect types that exist in EFFECT_DEFS', () => {

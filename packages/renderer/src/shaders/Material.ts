@@ -476,6 +476,8 @@ export const FX_AUTO_APPLY_FX_MATERIAL = twoTextureMaterial('fx-auto-apply');
 export const DEEP_GLOW_BLUR_FX_MATERIAL = perspectiveMaterial('deep-glow-blur');
 export const DEEP_GLOW_ACC_FX_MATERIAL = perspectiveMaterial('deep-glow-acc');
 export const DEEP_GLOW_COMPOSITE_FX_MATERIAL = twoTextureMaterial('deep-glow-composite');
+// Energy Beam (fxBeamPath.ts): single pass, the spine rides in the uniform block.
+export const BEAM_PATH_FX_MATERIAL = perspectiveMaterial('beam-path');
 
 /** Same binding shape as motion-tile: one source texture, warped in place. */
 export const BEND_MATERIAL: MaterialDescriptor = {

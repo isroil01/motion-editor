@@ -23,7 +23,18 @@ import {
   type OutputFormat,
   type RenderJobSpec,
 } from '@core/export/renderJob';
+import {
+  hadFramesInFlight,
+  isPersistedJob,
+  isPersistedStatus,
+  lostFramesMessage,
+  missingCompositionMessage,
+  parkedStatusFor,
+  toPersistedJob,
+  type PersistedRenderJob,
+} from '@core/export/renderQueuePersist';
 import { readPersisted, writePersisted } from '@core/settings/persistedValue';
+import { useProjectStore } from './projectStore';
 import { useUIStore } from './uiStore';
 
 /** The tray/toast job a queue entry runs under. */
@@ -162,11 +173,23 @@ export interface RenderJob extends RenderJobSpec {
    */
   resumeFrame?: number;
   /**
+   * Something the user should know before this job runs — set by a restore
+   * that found the record and the disk disagreeing.
+   *
+   * Two cases: the frames a previous session staged are gone (the job renders
+   * again from frame 0), or the composition it was queued from is not in the
+   * open project. Neither is a failure yet — the job is still queued and still
+   * runs — so it is not `error`, which belongs to `failed`. Cleared the moment
+   * the job starts rendering, is discarded, or is duplicated.
+   */
+  attention?: string;
+  /**
    * A paused render's live state: the open sink (staged frames intact on disk)
    * and the offset the loop stops resuming at. Present only between a pause and
    * the resume/removal that consumes it; never serialized — the sink is an
-   * in-memory handle, so quitting the app still loses a partial render (as AE's
-   * queue does), but a PAUSE no longer does.
+   * in-memory handle. What DOES survive a quit is `stagingJobId`, `status` and
+   * `resumeFrame` (see `@core/export/renderQueuePersist`), which is how the
+   * next session finds these frames again.
    */
   _resume?: JobResume;
   /**
@@ -193,81 +216,71 @@ export interface RenderJob extends RenderJobSpec {
 }
 
 /**
- * What a job looks like once the app has quit: its SPEC, and where its frames
- * are. No status, no progress, no elapsed time.
- *
- * Progress is deliberately not persisted. The frames on disk are the only
- * honest record of how far a render got — a remembered "68%" that no longer has
- * a staging dir behind it is a lie the user cannot check, and one that survived
- * a directory being deleted would send the queue to resume nothing.
+ * What a job looks like once the app has quit — its spec, its staging dir, and
+ * the status and frame it was at — is `PersistedRenderJob`, defined with the
+ * pure serialize/revive helpers in `@core/export/renderQueuePersist`. This
+ * store only decides WHEN to write and how a revived record meets the disk.
  */
-type PersistedJob = RenderJobSpec & { id: string; stagingJobId?: string };
 
-/** Where the queue's specs live between sessions. See `persistedValue.ts`. */
+/** Where the queue's jobs live between sessions. See `persistedValue.ts`. */
 const QUEUE_KEY = 'renderQueue.jobs';
 /** And the folder they are written to, so a restored queue needs no dialog. */
 const OUTPUT_DIR_KEY = 'renderQueue.outputDir';
 
 /**
- * Statuses whose jobs are worth remembering.
- *
- * `done` and `skipped` are finished business. `rendering` is remembered as work
- * still outstanding — the app was quit or crashed mid-render, which is exactly
- * the case this whole feature exists for — and comes back `queued`, or
- * `stopped` if its frames are still on disk.
- */
-function worthPersisting(status: RenderStatus): boolean {
-  return status !== 'done' && status !== 'skipped';
-}
-
-/** Strip a live job down to what may be written to disk. */
-function toPersisted(job: RenderJob): PersistedJob {
-  const {
-    id, status, progress, elapsedMs, error, resumeFrame, _resume, _adopt, stagingJobId,
-    ...spec
-  } = job;
-  void status; void progress; void elapsedMs; void error; void resumeFrame; void _resume; void _adopt;
-  return { ...spec, id, ...(stagingJobId ? { stagingJobId } : {}) };
-}
-
-/**
- * Is this thing from disk actually a job?
- *
- * The settings blob is a plain JSON file on the user's machine, editable by
- * hand and written by older versions of this app. A restore that trusted it
- * would put objects with no format and no size into the queue and fail at
- * render time, long after the bad data arrived.
- */
-function isPersistedJob(v: unknown): v is PersistedJob {
-  if (!v || typeof v !== 'object') return false;
-  const j = v as Record<string, unknown>;
-  return (
-    typeof j['id'] === 'string'
-    && typeof j['compositionName'] === 'string'
-    && typeof j['outputPath'] === 'string'
-    && typeof j['format'] === 'string'
-    && typeof j['width'] === 'number'
-    && typeof j['height'] === 'number'
-    && typeof j['fps'] === 'number'
-    && typeof j['durationSec'] === 'number'
-  );
-}
-
-/**
- * Write the queue's specs down, but only when they actually changed.
+ * Write the queue down, but only when what is written actually changed.
  *
  * A render fires progress dozens of times a second and every one of those is a
  * store write. Serializing the whole queue on each would put a JSON encode and
  * a localStorage write between frames, on the same thread that is rasterising
  * them. Comparing the serialized form first means the common case — progress
- * moved, nothing else — costs one string compare.
+ * moved, nothing else — costs one string compare. `resumeFrame` and `status`
+ * are in the payload but change only on pause/stop/start, never per frame.
  */
 let lastPersisted: string | null = null;
 function persistJobs(jobs: RenderJob[]): void {
-  const payload = JSON.stringify(jobs.filter((j) => worthPersisting(j.status)).map(toPersisted));
+  const payload = JSON.stringify(jobs.filter((j) => isPersistedStatus(j.status)).map(toPersistedJob));
   if (payload === lastPersisted) return;
   lastPersisted = payload;
-  writePersisted(QUEUE_KEY, JSON.parse(payload) as PersistedJob[]);
+  writePersisted(QUEUE_KEY, JSON.parse(payload) as PersistedRenderJob[]);
+}
+
+/**
+ * Is the composition this job renders in the open project?
+ *
+ * A job whose comp is gone does not fail loudly — the exporter filters the
+ * scene by root id and finds nothing, so it renders a blank file with the right
+ * name and duration. Jobs queued before `compositionId` existed cannot be
+ * checked and are let through, as they always were.
+ */
+function compositionMissing(job: RenderJobSpec): boolean {
+  if (!job.compositionId) return false;
+  return !(job.compositionId in useProjectStore.getState().comps);
+}
+
+/**
+ * Stamp `attention` on every runnable job whose composition is gone, and
+ * return how many there are. Writes to the store only when a flag actually
+ * changes, so calling it once per runner iteration costs a scan and nothing
+ * else.
+ */
+function flagMissingCompositions(
+  get: () => { jobs: RenderJob[] },
+  set: (patch: { jobs: RenderJob[] }) => void,
+): number {
+  let count = 0;
+  let changed = false;
+  const jobs = get().jobs.map((j) => {
+    if (j.status !== 'queued' && !isResumable(j.status)) return j;
+    if (!compositionMissing(j)) return j;
+    count++;
+    const message = missingCompositionMessage(j.compositionName);
+    if (j.attention?.includes(message)) return j;
+    changed = true;
+    return { ...j, attention: j.attention ? `${j.attention} ${message}` : message };
+  });
+  if (changed) set({ jobs });
+  return count;
 }
 
 interface RenderQueueState {
@@ -368,25 +381,30 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
     if (get()._restored) return;
     set({ _restored: true });
 
-    // The specs first: a job that was QUEUED and never started has nothing on
+    // The records first: a job that was QUEUED and never started has nothing on
     // disk to find, and losing those was half of what quitting the app cost.
+    // Every record comes back `queued` at 0 until the disk says otherwise —
+    // nothing renders on launch, whatever status it was written in.
     const stored = readPersisted<unknown[]>(QUEUE_KEY, []);
-    const restored: RenderJob[] = (Array.isArray(stored) ? stored : [])
-      .filter(isPersistedJob)
-      .map((p): RenderJob => {
-        const { id, stagingJobId, ...spec } = p;
-        return {
-          ...spec,
-          id,
-          ...(stagingJobId ? { stagingJobId } : {}),
-          status: 'queued',
-          progress: 0,
-        };
-      });
+    const records = (Array.isArray(stored) ? stored : []).filter(isPersistedJob);
+    const recordOf = new Map<string, PersistedRenderJob>();
+    const restored: RenderJob[] = records.map((p): RenderJob => {
+      recordOf.set(p.id, p);
+      const { id, stagingJobId, status, resumeFrame, ...spec } = p;
+      void status; void resumeFrame;
+      return {
+        ...spec,
+        id,
+        ...(stagingJobId ? { stagingJobId } : {}),
+        status: 'queued',
+        progress: 0,
+      };
+    });
 
     // Then the frames. Every dir here belongs to a render this app started and
     // did not finish — the manifest inside it says what it was.
     const listed = (await window.motionEditor?.render?.listResumableJobs?.().catch(() => [])) ?? [];
+    const found = new Set<string>();
     for (const entry of listed) {
       const spec = isPersistedJob({ id: 'x', ...(entry.spec as object) })
         ? (entry.spec as RenderJobSpec)
@@ -414,8 +432,14 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
       // it comes back as an ordinary queued job that will render from zero, and
       // saying otherwise would promise a Resume that silently starts over.
       if (!isResumableAcrossRestart(job.format) || entry.stagedFrames <= 0) continue;
+      found.add(job.id);
       job.stagingJobId = entry.jobId;
-      job.status = 'stopped';
+      // The record says whether the user paused it or the queue stopped it;
+      // the DISK says how far it got. A recorded `resumeFrame` is never the
+      // resume point — frames can have gone missing since it was written, and
+      // resuming past a gap writes a video that ends early.
+      const record = recordOf.get(job.id);
+      job.status = record ? parkedStatusFor(record) : 'stopped';
       job.resumeFrame = entry.stagedFrames;
       job.progress = entry.totalFrames > 0 ? entry.stagedFrames / entry.totalFrames : 0;
       job._adopt = {
@@ -423,6 +447,31 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
         stagedFrames: entry.stagedFrames,
         nextFrame: entry.stagedFrames,
       };
+    }
+
+    /*
+      Where the record and the disk disagree, say so.
+
+      A job written down as paused at frame 400 whose staging dir is no longer
+      there is not a job that was never started — it is a job that LOST 400
+      frames, and it must not come back looking like the first. It still runs,
+      from frame 0; `attention` is what tells the user why the progress they
+      remember is gone. A job whose composition is not in the open project gets
+      the same treatment: the runner will refuse it, and saying so here means
+      the user finds out before pressing Render All rather than after.
+    */
+    for (const job of restored) {
+      const record = recordOf.get(job.id);
+      const notes: string[] = [];
+      if (record && hadFramesInFlight(record) && !found.has(job.id)) {
+        notes.push(lostFramesMessage(record));
+        // A staging id that names nothing must not be carried forward: the next
+        // pause would write it down again, and the next launch would look for
+        // it again.
+        job.stagingJobId = undefined;
+      }
+      if (compositionMissing(job)) notes.push(missingCompositionMessage(job.compositionName));
+      if (notes.length > 0) job.attention = notes.join(' ');
     }
 
     if (restored.length === 0) return;
@@ -471,7 +520,7 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
       // ways to NAME that dir go with it, for exactly the same reason — a copy
       // that inherited `stagingJobId` would, after a restart, be offered the
       // original's frames as its own.
-      jobs: [...s.jobs, { ...src, id: newId, status: 'queued', progress: 0, elapsedMs: undefined, error: undefined, _resume: undefined, resumeFrame: undefined, stagingJobId: undefined, _adopt: undefined }],
+      jobs: [...s.jobs, { ...src, id: newId, status: 'queued', progress: 0, elapsedMs: undefined, error: undefined, attention: undefined, _resume: undefined, resumeFrame: undefined, stagingJobId: undefined, _adopt: undefined }],
     }));
   },
 
@@ -516,25 +565,42 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
         }
       }
 
+      let leftBehind = 0;
       for (;;) {
         if (abort.signal.aborted) break;
+        /*
+          A job whose composition is not in the open project is left where it
+          is, flagged, and never picked. Rendering it would not fail — the
+          exporter filters the scene by root id, finds nothing, and writes a
+          blank file of the right length — so refusing is the only way the user
+          learns the project they meant is not open. Checked per iteration, not
+          once at Start: a restored queue is the common case, and the project
+          it belongs to may be opened while an unrelated job is rendering.
+        */
+        leftBehind = flagMissingCompositions(get, set);
         // Half-rendered work first, always: a paused/stopped job is holding a
         // staging dir and an open encoder, and starting an unrelated job ahead
         // of it means two sinks alive at once for no reason. A job the user
         // explicitly pressed Resume on jumps even that queue.
         const all = get().jobs;
         const target = get()._resumeTarget;
+        const runnable = (j: RenderJob): boolean => !compositionMissing(j);
         const job =
-          (target ? all.find((j) => j.id === target && isResumable(j.status)) : undefined)
-          ?? all.find((j) => isResumable(j.status))
-          ?? all.find((j) => j.status === 'queued');
+          (target ? all.find((j) => j.id === target && isResumable(j.status) && runnable(j)) : undefined)
+          ?? all.find((j) => isResumable(j.status) && runnable(j))
+          ?? all.find((j) => j.status === 'queued' && runnable(j));
         if (!job) break;
         if (job.id === target) set({ _resumeTarget: null });
         const started = Date.now();
         // Progress SURVIVES: a resumed job is already 40% encoded, and showing
         // 0% while ffmpeg's staging dir holds 400 frames was the visible half
-        // of pause meaning "start over".
-        get().updateJob(job.id, { status: 'rendering', progress: job._resume || job._adopt ? job.progress : 0 });
+        // of pause meaning "start over". Whatever needed attention has now
+        // been looked at — the job is running.
+        get().updateJob(job.id, {
+          status: 'rendering',
+          progress: job._resume || job._adopt ? job.progress : 0,
+          attention: undefined,
+        });
         // The tray and a progress toast follow the render from here on; before
         // this only plugins were told anything about a queued render.
         useUIStore.getState().startJob({
@@ -704,6 +770,16 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
         }
       }
       if (get()._abort === myAbort) set({ isRunning: false, _abort: null });
+      // Render All that rendered nothing needs to say why, or it looks broken.
+      if (leftBehind > 0 && !abort.signal.aborted) {
+        useUIStore.getState().notify({
+          level: 'warning',
+          message: leftBehind === 1
+            ? '1 queued render was skipped: its composition is not in the open project'
+            : `${leftBehind} queued renders were skipped: their compositions are not in the open project`,
+          durationMs: 5000,
+        });
+      }
     })();
   },
 
@@ -770,7 +846,7 @@ export const useRenderQueueStore = create<RenderQueueState>((set, get) => ({
     releaseStaging(job);
     get().updateJob(id, {
       status: 'queued', progress: 0, _resume: undefined, resumeFrame: undefined,
-      _adopt: undefined, stagingJobId: undefined,
+      _adopt: undefined, stagingJobId: undefined, attention: undefined,
     });
   },
 

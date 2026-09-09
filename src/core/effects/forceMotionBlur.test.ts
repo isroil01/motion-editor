@@ -26,11 +26,11 @@ describe('readForceMotionBlur', () => {
 
   it('reads the shutter and sample count', () => {
     expect(readForceMotionBlur([fx({ shutterAngle: 360, samples: 16 })]))
-      .toEqual({ shutterAngle: 360, samples: 16 });
+      .toEqual({ shutterAngle: 360, samples: 16, shutterPhase: -90 });
   });
 
   it('falls back to registry defaults for omitted params', () => {
-    expect(readForceMotionBlur([fx({})])).toEqual({ shutterAngle: 180, samples: 12 });
+    expect(readForceMotionBlur([fx({})])).toEqual({ shutterAngle: 180, samples: 12, shutterPhase: -90 });
   });
 
   it('is null at a zero-degree shutter, not a run of identical samples', () => {
@@ -43,11 +43,24 @@ describe('readForceMotionBlur', () => {
     // A forced layer must not be able to ask the sampler for something the comp
     // could never request.
     expect(readForceMotionBlur([fx({ shutterAngle: 5000, samples: 999 })]))
-      .toEqual({ shutterAngle: 720, samples: 32 });
+      .toEqual({ shutterAngle: 720, samples: 32, shutterPhase: -90 });
     expect(readForceMotionBlur([fx({ shutterAngle: 90, samples: 1 })])!.samples).toBe(2);
   });
 
   it('rounds the sample count — it indexes sub-frame times', () => {
     expect(readForceMotionBlur([fx({ shutterAngle: 180, samples: 8.7 })])!.samples).toBe(9);
+  });
+});
+
+describe('readForceMotionBlur — per-layer shutter phase (B3)', () => {
+  it('reads the phase and clamps it to ±360', () => {
+    const fx = (phase: number): Effect => ({ id: 'f', type: 'force-motion-blur', params: { shutterAngle: 180, samples: 8, shutterPhase: phase } });
+    expect(readForceMotionBlur([fx(0)])?.shutterPhase).toBe(0);
+    expect(readForceMotionBlur([fx(-500)])?.shutterPhase).toBe(-360);
+  });
+
+  it('defaults to −90 (exposure centred on the frame) when omitted', () => {
+    const e: Effect = { id: 'f', type: 'force-motion-blur', params: { shutterAngle: 180, samples: 8 } };
+    expect(readForceMotionBlur([e])?.shutterPhase).toBe(-90);
   });
 });

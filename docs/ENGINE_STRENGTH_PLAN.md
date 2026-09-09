@@ -34,7 +34,7 @@ document is either already at parity or is a finishing item.
 Sources: [Digital Production](https://digitalproduction.com/2026/01/23/adobe-after-effects-2026-lands-with-3d-text-and-performance-boosts/), [Newsshooter](https://www.newsshooter.com/2026/01/22/whats-new-in-adobe-after-effects-26-0/), [CG Channel on 26.3](https://www.cgchannel.com/2026/06/adobe-releases-after-effects-26-3/), [Plugin Play](https://www.pluginplay.app/blog/whats-new-in-adobe-after-effects-2026), [Adobe release notes](https://helpx.adobe.com/after-effects/release-note/release-notes-after-effects.html).
 
 ### The plugins people keep installed
-Every 2026 round-up converges on the same core: **Trapcode Particular** (3D particles, now with a fluids engine), **Element 3D**, **Saber** (free — energy beams along masks and text), **Deep Glow** (physically based glow), **Plexus / Stardust** (point-line networks, node particles), **Mocha** (planar tracking), **Duik** (rigging), **Newton** (2D physics), **Animation Composer / FX Console** (workflow). Of these, Premation already covers Element 3D (extrusion + glTF + PBR), Duik (bones/IK/ARAP — natively better), Newton (2D rigid bodies), Mocha's common cases (planar + mesh + RANSAC), and Animation Composer's role (presets + Quick Apply). **The uncovered four are Deep Glow, Saber, Particular and Plexus** — and they are all *looks*, which is why users perceive "our effects are weaker" even with 202 effects on the list.
+Every 2026 round-up converges on the same core: **Trapcode Particular** (3D particles, now with a fluids engine), **Element 3D**, **Saber** (free — energy beams along masks and text), **Deep Glow** (physically based glow), **Plexus / Stardust** (point-line networks, node particles), **Mocha** (planar tracking), **Duik** (rigging), **Newton** (2D physics), **Animation Composer / FX Console** (workflow). Of these, Premation already covers Element 3D (extrusion + glTF + PBR), Duik (bones/IK/ARAP — natively better), Newton (2D rigid bodies), Mocha's common cases (planar + mesh + RANSAC), and Animation Composer's role (presets + Quick Apply). **The uncovered four are Deep Glow, Saber, Particular and Plexus** — and they are all *looks*, which is why users perceive "our effects are weaker" even with 203 effects on the list.
 
 Sources: [School of Motion](https://schoolofmotion.com/blog/best-after-effects-plugins-and-effect-packs-you-need-in-2026), [Maxon](https://www.maxon.net/en/article/best-after-effects-plugins), [Vagon](https://vagon.io/blog/top-10-plugins-for-after-effects), [Creative Dojo — Deep Glow review](https://creativedojo.net/deep-glow-review/), [Plugin Everything — Deep Glow](https://www.plugineverything.com/deep-glow), [ProVideo Coalition — Saber](https://www.provideocoalition.com/saber-new-free-effects-plug-video-copilot/), [Motion Array — Saber review](https://motionarray.com/learn/post-production/video-copilots-free-saber-plug-in-review/), [Lesterbanks — Stardust vs Particular](https://lesterbanks.com/2017/07/stardust-compare-trapcode-particular/).
 
@@ -57,7 +57,7 @@ the commit messages of `f4651302`, `94db94be`, `632f52be`.
 | Area | Finding | Evidence |
 |---|---|---|
 | Glow | `glow` is a single-scale CSS `drop-shadow` (radius ≤ 60 px, no falloff model, no aspect, no HDR) — was the single biggest *look* gap next to AE + Deep Glow. **Closed 2026-09-08 by `deep-glow` (A1)**; `glow` stays for existing documents | `effects.ts` glow + deep-glow defs, `deepGlow.ts`, `fxDeepGlow.ts` |
-| Energy beams | Path effects exist since 09-07 (Write-on/Vegas along masks) and `lightning` is start→end only; there is no core-plus-glow-plus-distortion beam that follows a mask or text — the Saber use case that started this whole thread | `effects.ts` write-on / vegas / lightning defs |
+| Energy beams | Path effects existed since 09-07 (Write-on/Vegas along masks) and `lightning` was start→end only; there was no core-plus-glow-plus-distortion beam that follows a mask or text. **Closed 2026-09-08 by `beam-path` (A2)**; `lightning` follows a mask path too | `beamPath.ts`, `fxBeamPath.ts`, `generateAdvanced.ts` |
 | Particles | Deterministic closed-form 2D system with point/box/circle emitters and 4 sprite shapes; stateful mode adds floor bounce. No 3D emitters, no camera/light awareness, no sprite/texture particles, no turbulence fields as a first-class force, no parent/child emitters, no fluids | `src/core/particles/particleSim.ts` header |
 | Motion blur | Layer motion blur is an N-sample additive accumulation in `CompositionPass` (correct, film-like at high N, ghosts at low N); no adaptive sample count and no per-layer shutter phase UI | `CompositionPass.ts:2162, 3679`, `forceMotionBlur.ts` |
 | 3D | Displacement (AE 26.2) not started; one shadow-mapped light per run; SSAO shipped | `ROADMAP.md`, `AE_COMPARISON.md` §3 item 13 |
@@ -113,6 +113,24 @@ lightsaber…). Add `pathMaskId` to `lightning` as well (path-guided bolts).
 Verify: golden on a circle mask; determinism test that two renders at the same
 `t` are byte-identical.
 
+**A2 — DONE 2026-09-08.** `beam-path` ("Energy Beam", Generate). Geometry:
+mask path via the 09-07 resolver, the layer's text outline (`traceTextRuns`,
+flattened per letter with a pen-up sentinel), or Start→End. Field: signed
+distance to the spine with the Start/End window applied per segment (exact
+ends), a Start/End Size taper, inverse-power glow `(1 + d/spread)^-e` with
+Bias → e ∈ [1, 4] and a smooth cut at 10·spread, curl-noise domain warp (the
+Curl Noise effect's own fbm + hash), keyframed Evolution / Flicker Phase
+(the repo's TIME_DEPENDENT rule — no wall clock). The spine is resampled by
+arc length to ≤64 points and carried in the uniform block (`beamPathRows`,
+39 rows), so it is the one path effect exempt from the CPU-bake gate and the
+first that runs on the GPU with a polyline. CPU twin `beamPath.ts` mirrors
+`fxBeamPath.ts` formula for formula. Twenty presets; `lightning` gained
+`pathMaskId` (path-guided bolt: midpoint displacement along the spine's
+normal). Verified: `beamPath.test.ts` (resample keeps the circle to <1 px,
+window/taper/glow values exact, byte-identical renders, deterministic
+flicker); goldens `effect-beam-path` and `effect-beam-path-mask` on both
+backends.
+
 **A3. Particles v2 (the Particular class)** — extend `particleSim` rather than
 replace it, keeping determinism (closed-form where possible, cached stateful
 sim where not — `statefulParticleCache.ts` already exists):
@@ -151,6 +169,18 @@ Verify: golden on a subdivided plane with a ramp height map.
 **B3. Motion blur quality** — adaptive sample count from screen-space velocity
 (cap at 32, floor at 4), and a per-layer *shutter phase* row; cheap and it is
 what makes A3's particles and fast 2D motion stop ghosting.
+
+**B3 — DONE 2026-09-08.** The adaptive count already existed (`adaptiveMotionBlurSamples`,
+~1 sample per 2 px, floor = comp Samples, cap = comp Limit) but was sized
+from the ANCHOR's travel, which reads zero for a spin, a scale pop and a 3D
+card flip — exactly the motion that strobed. It is now sized from the
+SILHOUETTE's travel: `motionBlurTravelPx` adds `Δθ·halfDiagonal` and
+`Δscale·halfDiagonal` to the anchor path in 2D, and `affineTravelPx` takes
+the farthest corner of the projected box in 3D (`buildSnapshot.sampleMotion`).
+The per-layer shutter phase is the `Shutter Phase` row on Force Motion Blur
+(`forceMotionBlur.ts`, threaded into `blurCfg`), so one layer can lead or
+trail the frame while the comp keeps its own phase. Tests in
+`motionBlur.test.ts` / `forceMotionBlur.test.ts`.
 
 ### Phase C — video editing & compositing finishing · ~1 week
 

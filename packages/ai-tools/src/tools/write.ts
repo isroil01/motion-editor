@@ -512,7 +512,7 @@ export const addEffectDef: AiToolDef = {
           // Round five — Generate / weather
           'star-burst', 'snowfall', 'rainfall', 'write-on', 'light-burst',
           // Round five — Stylize & Blur
-          'deep-glow', 'glass', 'texturize', 'threads', 'chromatic-aberration', 'hex-tile', 'vector-blur',
+          'deep-glow', 'beam-path', 'glass', 'texturize', 'threads', 'chromatic-aberration', 'hex-tile', 'vector-blur',
           // Round five — Distort
           'flo-motion', 'lens', 'griddler', 'ball-action', 'drizzle',
           // Round five — Transition

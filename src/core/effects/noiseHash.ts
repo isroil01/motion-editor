@@ -50,3 +50,14 @@ export function vnoiseF(px: number, py: number, seed: number): number {
 export function mix(a: number, b: number, t: number): number {
   return a * (1 - t) + b * t;
 }
+
+/** `fbm(p, seed, octaves)` — six-octave cap, seed + i·101 per octave, amplitude halving, normalised. */
+export function fbmU(px: number, py: number, seed: number, octaves: number): number {
+  let total = 0; let amp = 1; let freq = 1; let maxA = 0;
+  for (let i = 0; i < 6; i++) {
+    if (i >= octaves) break;
+    total += (vnoiseU(px * freq, py * freq, seed + i * 101) * 2 - 1) * amp;
+    maxA += amp; amp *= 0.5; freq *= 2;
+  }
+  return total / maxA;
+}

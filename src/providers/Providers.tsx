@@ -1217,7 +1217,7 @@ function buildBuiltinCommands(): ReadonlyArray<Command> {
       enabled: () => true,
       execute: () => {
         void pasteSelection().then((kind) => {
-          if (kind === 'svg') notify('Pasted SVG as shapes', 'success');
+          if (kind === 'svg') notify('Pasted SVG', 'success');
           else if (kind) notify('Pasted', 'success');
           else notify('Nothing to paste', 'info');
         });

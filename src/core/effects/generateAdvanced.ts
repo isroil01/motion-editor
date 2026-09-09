@@ -271,6 +271,9 @@ export function drawLightning(
   opacity: number,
   seed: number,
   composite: number,
+  /** Optional spine in RASTER px (flat [x,y,…]): the bolt forks around this
+   *  polyline instead of the Start→End segment. */
+  pathPts?: readonly number[],
 ): void {
   const a = clamp01(opacity / 100);
   if (a <= 0) return;
@@ -312,10 +315,49 @@ export function drawLightning(
     oc.stroke();
   };
 
+  /*
+    Path-guided bolt: the same midpoint displacement, but the "segment" is
+    the arc-length parameter along the spine and the displacement is carried
+    as an OFFSET along the local normal — so the bolt crawls around a curve
+    (a tracked mask around a wheel) with the same self-similar jitter it has
+    on a straight line. The recursion depth is the same `detail`; a spine
+    with many vertices is simply sampled finer than its vertices.
+  */
+  const spine = pathPts && pathPts.length >= 4 ? pathPts : null;
+  const spineLen: number[] = [0];
+  if (spine) {
+    for (let i = 2; i + 1 < spine.length; i += 2) {
+      spineLen.push(spineLen[spineLen.length - 1]! + Math.hypot(spine[i]! - spine[i - 2]!, spine[i + 1]! - spine[i - 1]!));
+    }
+  }
+  const spineAt = (s: number): { x: number; y: number; nx: number; ny: number } => {
+    const total = spineLen[spineLen.length - 1]!;
+    const target = Math.max(0, Math.min(1, s)) * total;
+    let i = 0;
+    while (i < spineLen.length - 2 && spineLen[i + 1]! < target) i++;
+    const l0 = spineLen[i]!; const l1 = spineLen[i + 1]!;
+    const t = l1 > l0 ? (target - l0) / (l1 - l0) : 0;
+    const ax = spine![i * 2]!; const ay = spine![i * 2 + 1]!; const bx = spine![i * 2 + 2]!; const by = spine![i * 2 + 3]!;
+    const dx = bx - ax; const dy = by - ay; const len = Math.hypot(dx, dy) || 1;
+    return { x: ax + dx * t, y: ay + dy * t, nx: -dy / len, ny: dx / len };
+  };
+  const boltAlong = (s0: number, s1: number, off0: number, off1: number, amp: number, d: number, out: number[][]): void => {
+    if (d <= 0) {
+      const p0 = spineAt(s0); const p1 = spineAt(s1);
+      out.push([p0.x + p0.nx * off0, p0.y + p0.ny * off0], [p1.x + p1.nx * off1, p1.y + p1.ny * off1]);
+      return;
+    }
+    const sm = (s0 + s1) / 2;
+    const offm = (off0 + off1) / 2 + (rand() - 0.5) * amp;
+    boltAlong(s0, sm, off0, offm, amp / 2, d - 1, out);
+    boltAlong(sm, s1, offm, off1, amp / 2, d - 1, out);
+  };
+
   withComposite(oc, composite, () => {
     oc.save();
     const main: number[][] = [];
-    bolt(x0, y0, x1, y1, amplitude, depth, main);
+    if (spine && spineLen[spineLen.length - 1]! > 0) boltAlong(0, 1, 0, 0, amplitude, depth, main);
+    else bolt(x0, y0, x1, y1, amplitude, depth, main);
 
     // Glow first, under the core, as a wide soft pass. Two strokes rather than
     // a shadow so the core stays crisp at any glow radius.

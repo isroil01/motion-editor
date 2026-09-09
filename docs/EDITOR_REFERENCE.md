@@ -61,7 +61,7 @@ rediscovered in git history and believed a second time.
 
 | Registry | Count | Source of truth |
 |---|---|---|
-| Effects | 202 | `src/core/effects/effects.ts` → `EffectType` |
+| Effects | 203 | `src/core/effects/effects.ts` → `EffectType` |
 | Blend modes | 38 | `src/core/effects/blendMode.ts` → `LayerBlendMode` |
 | Layer styles | 10 | `layerStyles.ts` → `LAYER_STYLE_LABEL` + `BACKDROP_STYLES` |
 | Path operators | 9 | `src/core/scene/pathOps.ts` → `PathOpType` (less `none`) |
@@ -837,8 +837,8 @@ output.
 
 ### Tier 2 — ceilings on visual density
 
-**Effect breadth: 202 effects vs AE's 400+.** The raw count misleads in both
-directions — nobody uses 400, and the 202 effects present are properly
+**Effect breadth: 203 effects vs AE's 400+.** The raw count misleads in both
+directions — nobody uses 400, and the 203 effects present are properly
 parameterised (Levels, Curves, Channel Mixer, Keylight with
 despill/choke/softness). What matters is the missing *classes*, not the delta:
 no 3D Stroke, no Form/Plexus, no Element 3D. The dense, expensive-looking AE
@@ -851,7 +851,7 @@ written against this document inherited. And the missing *classes* named "no
 volumetric light rays (Shine)" and "no optical-flare system worth the name":
 `light-rays`, `lens-flare`, `light-sweep` and `beam` all ship, each with a
 registry def, a Canvas2D reference, a Generate entry, and (as of 2026-08-14) a
-GPU shader. The count is now phrased as "202 effects" rather than as a bare
+GPU shader. The count is now phrased as "203 effects" rather than as a bare
 figure specifically so that `docPropagatedCounts.test.ts` can check it.
 
 **Variable-width mask feather LANDED** (2026-08-20). `MaskPoint` gained an
@@ -2057,7 +2057,7 @@ needing a 39-entry allow-list is one that gets silenced the first time it fires.
 The cost of the narrowness is that an oblique phrasing still escapes, and §4's
 did — "Effect breadth: 73 vs AE's 400+" puts no noun after the number. That was
 rewritten into the checkable form rather than the regex being widened to chase
-it. Prose stating a count should say "202 effects".
+it. Prose stating a count should say "203 effects".
 
 Ledger table ROWS in this section are exempt, structurally rather than by a list
 of phrases: quoting a superseded number is what a corrections ledger is for, and
@@ -2597,10 +2597,27 @@ features and are not this.
 makes a simulation art-directable, but turbulence, particle–particle collisions,
 sub-emitters, trails, 3D particles and layer-as-particle remain absent.
 
-### Built 2026-09-08 — Deep Glow (`deep-glow`)
+### Built 2026-09-08 — Deep Glow (`deep-glow`) and Energy Beam (`beam-path`)
 
-One effect, `EffectType` 201 → **202 effects**: the physically based glow from
-`docs/ENGINE_STRENGTH_PLAN.md` A1. An octave pyramid — Gaussians whose sigmas
+Two effects, `EffectType` 201 → **203 effects**: the physically based glow and the Saber-class beam from
+`docs/ENGINE_STRENGTH_PLAN.md` A1 and A2.
+
+**Energy Beam** (`beam-path`, Generate) draws a lit core stroke with an
+inverse-power glow along a mask path (a tracked mask makes it follow the
+object), the layer's own text outline, or a Start→End line. Start/End reveal
+it by arc length (exact per segment, not faded), Start/End Size taper it,
+Distortion bends it with the Curl Noise field, Flicker breathes it; Evolution
+and Flicker Phase are keyframed phases (an expression such as `time * 10`
+animates them), never the wall clock. The spine is resampled to ≤64 points and
+rides in the uniform block, so this is the ONE path effect that stays on the
+GPU (`effectFollowsPath` exempts it); `src/core/effects/beamPath.ts` is the CPU
+twin and `fxBeamPath.ts` the shader, gated by `effect-beam-path` (line, window,
+taper, distortion) and `effect-beam-path-mask` (ellipse mask). Twenty presets
+(Lightsaber, Neon, Electric Arc, Plasma, Fire Trail, Tracer, Halo Ring…) sit
+beside the forty existing ones. `lightning` gained the same `pathMaskId`: the
+bolt forks around the mask path instead of the Start→End segment.
+
+**Deep Glow.** An octave pyramid — Gaussians whose sigmas
 double up to Radius, each level blurred from the previous one, summed with
 equal weights — gives the inverse-square falloff a single Gaussian cannot
 (the built-in `glow` is unchanged). Linear light, premultiplied. GPU: three
@@ -2614,7 +2631,7 @@ Quality (4/6/8 octaves).
 
 ### Built 2026-09-07 — effects round seven, and a miscount inside the counter
 
-Eighteen effects, taking `EffectType` from 183 to 201 (Deep Glow, 2026-09-08, makes it **202 effects**). Fifteen ship
+Eighteen effects, taking `EffectType` from 183 to 201 (Deep Glow and Energy Beam, 2026-09-08, make it **203 effects**). Fifteen ship
 as a GPU shader in both dialects plus a retained Canvas2D kernel, which is the
 shape every port since round six has held; three ship as per-channel transfer
 tables and no shader at all.

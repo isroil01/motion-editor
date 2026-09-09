@@ -238,6 +238,7 @@ export type EffectType =
   | 'rainfall'
   | 'write-on'
   | 'light-burst'
+  | 'beam-path'
   // Stylize — surface shading and per-cell resamples.
   | 'deep-glow'
   | 'glass'
@@ -850,6 +851,9 @@ export const EFFECT_DEFS: EffectDef[] = [
     params: [
       { key: 'shutterAngle', label: 'Shutter Angle', type: 'number', unit: '°', min: 0, max: 720, default: 180 },
       { key: 'samples', label: 'Samples', type: 'number', min: 2, max: 32, default: 12 },
+      // Per-layer shutter phase (AE's is comp-wide): −90 centres the exposure
+      // on the frame, 0 trails it, −180 leads it — the streak's direction.
+      { key: 'shutterPhase', label: 'Shutter Phase', type: 'number', unit: '°', min: -360, max: 360, default: -90 },
     ],
     css: () => '',
   },
@@ -2734,6 +2738,11 @@ export const EFFECT_DEFS: EffectDef[] = [
       // content hash is useless and the export flickers. Keyframe to re-strike.
       { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
       { key: 'composite', label: 'Composite', type: 'number', min: 0, max: 4, precision: 0, default: 1 },
+      // Path-guided bolt: the mask path is the baseline the midpoint
+      // displacement forks around instead of the Start→End segment, so a
+      // tracked mask makes the lightning crawl around the object.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
     ],
     css: () => '',
   },
@@ -3293,6 +3302,50 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'centerY', label: 'Center Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
       { key: 'intensity', label: 'Intensity', type: 'number', unit: '%', min: 0, max: 300, default: 100 },
       { key: 'rayLength', label: 'Ray Length', type: 'number', unit: '%', min: 0, max: 100, default: 30 },
+    ],
+    css: () => '',
+  },
+
+  {
+    /*
+      Energy Beam — the Saber class. A lit core stroke with an inverse-power
+      glow along a MASK PATH (a tracked mask makes it follow the object), the
+      layer's own text outline, or a Start→End line; Start/End reveal it,
+      Start/End Size taper it, Distortion bends it with curl noise, Flicker
+      breathes it. Evolution and Flicker Phase are KEYFRAMED phases (an
+      expression such as `time * 10` animates them) rather than the wall
+      clock — the rule every generator here follows, see TIME_DEPENDENT.
+      See beamPath.ts for the model; fxBeamPath.ts is its GPU twin.
+    */
+    type: 'beam-path',
+    label: 'Energy Beam',
+    params: [
+      { key: 'source', label: 'Path', type: 'enum', default: 0, options: [{ value: 0, label: 'Mask path (or line)' }, { value: 1, label: 'Start → End line' }, { value: 2, label: 'Text outline' }] },
+      { key: 'pathMaskId', label: 'Mask Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
+      { key: 'startX', label: 'Start X', type: 'number', unit: 'px', min: -4000, max: 4000, default: -200 },
+      { key: 'startY', label: 'Start Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'endX', label: 'End X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 200 },
+      { key: 'endY', label: 'End Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'start', label: 'Start', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'end', label: 'End', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      { key: 'coreWidth', label: 'Core Size', type: 'number', unit: 'px', min: 0, max: 200, default: 6 },
+      { key: 'coreSoftness', label: 'Core Softness', type: 'number', unit: '%', min: 0, max: 100, default: 30 },
+      { key: 'coreColor', label: 'Core Color', type: 'color', default: '#ffffff' },
+      { key: 'startSize', label: 'Start Size', type: 'number', unit: '%', min: 0, max: 400, default: 100 },
+      { key: 'endSize', label: 'End Size', type: 'number', unit: '%', min: 0, max: 400, default: 100 },
+      { key: 'glowColor', label: 'Glow Color', type: 'color', default: '#3fa8ff' },
+      { key: 'glowIntensity', label: 'Glow Intensity', type: 'number', unit: '%', min: 0, max: 400, default: 100 },
+      { key: 'glowSpread', label: 'Glow Spread', type: 'number', unit: 'px', min: 1, max: 400, default: 30 },
+      { key: 'glowBias', label: 'Glow Bias', type: 'number', unit: '%', min: 0, max: 100, default: 33 },
+      { key: 'distortion', label: 'Distortion', type: 'number', unit: 'px', min: 0, max: 200, default: 0 },
+      { key: 'distortionScale', label: 'Distortion Scale', type: 'number', unit: 'px', min: 4, max: 800, default: 80 },
+      { key: 'evolution', label: 'Evolution', type: 'number', min: -100000, max: 100000, default: 0 },
+      { key: 'flicker', label: 'Flicker', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'flickerRate', label: 'Flicker Rate', type: 'number', unit: 'Hz', min: 0, max: 120, default: 12 },
+      { key: 'flickerPhase', label: 'Flicker Phase', type: 'number', unit: 's', min: -86400, max: 86400, precision: 3, default: 0 },
+      { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
+      { key: 'composite', label: 'Composite', type: 'enum', default: 0, options: [{ value: 0, label: 'Add over layer' }, { value: 1, label: 'Beam only' }] },
     ],
     css: () => '',
   },

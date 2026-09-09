@@ -32,6 +32,7 @@ import { FX_ROUND_THIRTEEN_SHADERS } from './fxRoundThirteen';
 import { FX_ROUND_FOURTEEN_SHADERS } from './fxRoundFourteen';
 import { FX_ROUND_FIFTEEN_SHADERS } from './fxRoundFifteen';
 import { FX_DEEP_GLOW_SHADERS } from './fxDeepGlow';
+import { FX_BEAM_PATH_SHADERS } from './fxBeamPath';
 export { GLASS_COMPOSITE };
 
 import {
@@ -6678,6 +6679,8 @@ export const BUILTIN_SHADERS: readonly ShaderSource[] = [
   ...FX_ROUND_FIFTEEN_SHADERS,
   // Deep Glow: the octave-pyramid glow's blur / accumulate / composite passes (fxDeepGlow.ts).
   ...FX_DEEP_GLOW_SHADERS,
+  // Energy Beam: the Saber-class beam along a mask path / text outline / line (fxBeamPath.ts).
+  ...FX_BEAM_PATH_SHADERS,
   SOLID3D,
   // Shadow-map casters. No `-linear` twin and no premultiply handling: neither
   // samples a texture — they write a packed distance, not a colour.

@@ -33,6 +33,7 @@
 import type { Effect } from './effects';
 import { effectNumber, paramsOf } from './effects';
 import { deepGlowData, deepGlowSettings } from './deepGlow';
+import { beamPathData, beamPathSettings } from './beamPath';
 import { applyKeyData, chokeAlpha, softenAlpha } from './keylight';
 import { waveWarpData, turbulentDisplaceData, curlNoiseData } from './warp';
 import { blurRgba, radialBlurData, blurDimensions, channelBlurData, unsharpMaskData } from './blurs';
@@ -324,6 +325,7 @@ const CANVAS2D_IMPLEMENTED: ReadonlySet<string> = new Set<string>([
   // Deep Glow (2026-09-08) — same position: the GPU runs the octave pyramid,
   // this pass is its parity twin for baked layers.
   'deep-glow',
+  'beam-path',
   // Round eleven, advanced distort / transition / stylize — same position.
   'polar-coordinates', 'optics-compensation', 'warp', 'page-turn', 'split', 'slant', 'smear', 'rolling-shutter', 'flo-motion', 'lens', 'griddler', 'ball-action', 'drizzle', 'jaws', 'pixel-polly', 'twister', 'card-dance', 'unmult', 'cc-composite', 'cc-scatterize', 'radial-fast-blur', 'scale-wipe', 'texturize', 'threads', 'hex-tile', 'radial-shadow', 'cross-blur', 'plastic', 'glass', 'vector-blur', 'cc-repetile',
   // Round ten, neighbourhood passes + drawn generators — same position.
@@ -697,6 +699,8 @@ export function applyCanvas2dEffect(
       return applyLightBurst(oc, w, h, e);
     case 'deep-glow':
       return applyRemapEffect(oc, w, h, (d) => deepGlowData(d, w, h, deepGlowSettings(e)));
+    case 'beam-path':
+      return applyRemapEffect(oc, w, h, (d) => beamPathData(d, w, h, beamPathSettings(e, w, h)));
     case 'glass':
       return applyGlass(oc, w, h, e);
     case 'texturize':
@@ -2764,6 +2768,18 @@ function applyRadioWaves(oc: CanvasRenderingContext2D, w: number, h: number, e: 
 }
 
 function applyLightning(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  // A resolved mask-path polyline (centred px, from buildSnapshot) is the
+  // spine the bolt forks around; shift it to raster space here.
+  const flat = paramsOf(e).pathPoints;
+  let spine: number[] | undefined;
+  if (Array.isArray(flat) && flat.length >= 4) {
+    spine = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const x = flat[i]; const y = flat[i + 1];
+      if (typeof x === 'number' && typeof y === 'number' && x < 1e9) spine.push(w / 2 + x, h / 2 + y);
+    }
+    if (spine.length < 4) spine = undefined;
+  }
   drawLightning(
     oc, w, h,
     effectNumber(e, 'startX'), effectNumber(e, 'startY'),
@@ -2771,6 +2787,7 @@ function applyLightning(oc: CanvasRenderingContext2D, w: number, h: number, e: E
     effectNumber(e, 'detail'), effectNumber(e, 'amplitude'), effectNumber(e, 'branches'),
     effectNumber(e, 'thickness'), str(e, 'color', '#cfe8ff'), effectNumber(e, 'glow'),
     effectNumber(e, 'opacity'), effectNumber(e, 'seed'), effectNumber(e, 'composite'),
+    spine,
   );
 }
 

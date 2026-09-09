@@ -27,6 +27,7 @@ import { readCubeLutParam } from '@core/effects/cubeLut';
 import { readMatte } from '@core/effects/matte';
 import { effectNumber, effectParam, paramsOf, withAlpha, isGpuOnlyEffect } from '@core/effects/effects';
 import { deepGlowSettings } from '@core/effects/deepGlow';
+import { beamPathRows, beamPathSettings, beamPathSpreadPx } from '@core/effects/beamPath';
 import { effectById, beginEffectDraw, endEffectDraw } from '@core/plugins/pluginEffects';
 import { layerParamNames, packParameters, effectSpreadFor } from '@core/plugins/effectSchema';
 import { layerIsBaked, cpuBakeStats } from '@core/effects/effectBake';
@@ -1831,6 +1832,12 @@ export function extractSpatialEffects(
         if (a > 0) {
           const maxRadius = n('maxRadius'); const col = lin3('color', '#7dd3fc');
           spatial.push({ type: 'radio-waves', p: [[lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')], [Math.max(1, Math.min(64, Math.round(n('waveCount')))), maxRadius > 0 ? maxRadius : Math.hypot(lw, lh) / 2, n('phase') / 360, Math.max(0.5, n('thickness'))], [col[0], col[1], col[2], a], [clamp01(n('fadeOut') / 100), Math.round(n('composite')), 0, 0]] });
+        }
+      }
+      if (e.type === 'beam-path') {
+        const s = beamPathSettings(e, lw, lh);
+        if (s.points.length >= 4 && s.totalLen > 0) {
+          spatial.push({ type: 'beam-path', p: beamPathRows(s, lw, lh), spreadPx: beamPathSpreadPx(s) });
         }
       }
       if (e.type === 'light-burst') {
