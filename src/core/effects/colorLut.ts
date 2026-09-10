@@ -15,6 +15,7 @@
 
 import type { Effect, EffectType } from './effects';
 import { effectNumber } from './effects';
+import { cineonConverterTables, colorOffsetTables, thresholdRgbTables } from './aeRoundSevenLuts';
 
 /** 256-entry output tables (0..255 float), one per channel. */
 export interface ChannelLut {
@@ -82,6 +83,17 @@ const LUT_BUILDER_ENTRIES: readonly LutBuilderEntry[] = [
     // between usable and not.
     ['color-balance', (e) => colorBalanceTables(e)],
     ['gamma-pedestal-gain', (e) => gammaPedestalGainTables(e)],
+    /*
+      Round seven's three. Each qualifies on the SHAPE rule above — a per
+      channel transfer with no reference to the other two channels and none to
+      the neighbours — and each pays for the placement in the same coin: an
+      effect here renders on both backends and forces no bake, which for a
+      Cineon linearise (switched on for a whole log-footage comp) is the
+      difference between usable and not.
+    */
+    ['color-offset', (e) => colorOffsetTables(e)],
+    ['threshold-rgb', (e) => thresholdRgbTables(e)],
+    ['cineon-converter', (e) => cineonConverterTables(e)],
 ];
 
 const LUT_BUILDERS: ReadonlyMap<EffectType, (effect: Effect) => ChannelLut> =
@@ -549,4 +561,56 @@ export function applyChannelLutFloat(data: Float32Array, lut: ChannelLut): void 
     data[i + 1] = sampleLut01(lut.g, data[i + 1]!);
     data[i + 2] = sampleLut01(lut.b, data[i + 2]!);
   }
+}
+
+/**
+ * One texel of the GPU strip, as `AppTextureProvider.setLut` packs it: the
+ * table value rounded and clamped to a byte (NaN → 0, which is what writing it
+ * into the upload's Uint8ClampedArray does).
+ *
+ * Shared rather than restated because {@link sampleChannelLutAsUploaded} has to
+ * read EXACTLY the bytes the card reads. An entry of 127.6 is 128 on the GPU; a
+ * CPU grade that read the float would sit a level off the textured path on
+ * every flat colour it touched — visible as a seam where a CPU-graded extruded
+ * wall meets its GPU-graded cap.
+ */
+export function lutStripByte(v: number): number {
+  const b = Math.max(0, Math.min(255, Math.round(v)));
+  return Number.isNaN(b) ? 0 : b;
+}
+
+/** One channel of {@link sampleChannelLutAsUploaded}. */
+function sampleStrip(table: Float32Array, v: number): number {
+  // Clamped first, as the shader clamps before its lookup — the affine grade in
+  // front of it may overshoot. Written so NaN lands on 0 rather than indexing.
+  const u = v > 0 ? (v < 1 ? v : 1) : 0;
+  // Texel i's centre sits at U = (i + 0.5) / 256, and the strip's sampler is
+  // LINEAR with clamp-to-edge — so U = u lands at texel coordinate u·256 − 0.5,
+  // held inside the first and last texel.
+  const x = Math.max(0, Math.min(255, u * 256 - 0.5));
+  const i0 = Math.floor(x);
+  const i1 = Math.min(255, i0 + 1);
+  const f = x - i0;
+  return (lutStripByte(table[i0]!) * (1 - f) + lutStripByte(table[i1]!) * f) / 255;
+}
+
+/**
+ * Look one colour up through a channel LUT the way the GPU samples the
+ * `lut:<id>` strip — for surfaces whose colour is graded on the CPU because it
+ * is uniform: a solid quad, an extruded wall, an untextured model range.
+ *
+ * NOT {@link sampleLut01}, which maps u·255 over the float table. That is right
+ * for the 32-bpc pixel path it serves, and it is not what the shader does: the
+ * two agree at mid-grey and part by up to half a texel toward the ends, and the
+ * strip is 8-bit. A flat wall graded the other way would not match the textured
+ * cap drawn beside it through `lut-textured`.
+ *
+ * `rgb` is display-referred 0..1 — the space the tables are authored in, and
+ * the space the LUT shaders encode to before their lookup.
+ */
+export function sampleChannelLutAsUploaded(
+  lut: ChannelLut,
+  rgb: readonly [number, number, number],
+): [number, number, number] {
+  return [sampleStrip(lut.r, rgb[0]), sampleStrip(lut.g, rgb[1]), sampleStrip(lut.b, rgb[2])];
 }

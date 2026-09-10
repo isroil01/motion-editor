@@ -65,7 +65,24 @@ jest.mock('@core/plugins/PluginHost', () => ({
 }));
 
 import { useRenderQueueStore, type RenderJob } from '../renderQueueStore';
+import { useProjectStore, type CompositionSettings } from '../projectStore';
 import { createResumableVideoRender } from '@core/export/exportManager';
+
+/**
+ * The composition the fixtures were queued from. The runner refuses a job whose
+ * comp is not in the open project (it would render a blank file), so the
+ * project has to hold it — exactly as it would after the user reopened the
+ * project the queue belongs to.
+ */
+const comp1 = {
+  id: 'comp-1', name: 'Comp 1', width: 1920, height: 1080, fps: 30, durationSeconds: 2, background: '#101014',
+} as CompositionSettings;
+
+/** The JSON record of one job, as the settings blob holds it. */
+function persistedRecord(id: string): Record<string, unknown> | undefined {
+  const blob = JSON.parse(localStorage.getItem('motion-editor.settings') ?? '{}') as { 'renderQueue.jobs'?: Array<Record<string, unknown>> };
+  return blob['renderQueue.jobs']?.find((j) => j['id'] === id);
+}
 
 const baseJob: Omit<RenderJob, 'id' | 'status' | 'progress'> = {
   compositionName: 'Comp 1',
@@ -137,6 +154,7 @@ beforeEach(() => {
   adoptions.length = 0;
   resumable = [];
   localStorage.clear();
+  useProjectStore.setState({ comps: { 'comp-1': comp1 } });
   (window as unknown as { motionEditor?: unknown }).motionEditor = {
     render: {
       listResumableJobs: jest.fn(async () => resumable),
@@ -264,7 +282,9 @@ describe('boot-time discovery of staged frames', () => {
 
     const jobs = useRenderQueueStore.getState().jobs;
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({ id, status: 'stopped', resumeFrame: 12 });
+    // `paused`, not `stopped`: the record says the USER paused this one, and
+    // that distinction survives the quit along with the staging id.
+    expect(jobs[0]).toMatchObject({ id, status: 'paused', resumeFrame: 12 });
   });
 
   it('rebuilds a job from the manifest alone when the queue lost it', async () => {
@@ -390,6 +410,202 @@ describe('resuming after the restart', () => {
     expect(adoptions[0]).toBeUndefined();
     expect(mockRun.mock.calls[0]?.[0]).toBe(0);
     expect(useRenderQueueStore.getState().jobs[0]?.status).toBe('done');
+  });
+});
+
+describe('the record says what the job was doing — the disk says how far it got', () => {
+  it('writes status and resumeFrame down the moment a job pauses, and only then', async () => {
+    mockRun.mockResolvedValueOnce({ done: false, nextOffset: 40 });
+    let id = '';
+    act(() => { id = useRenderQueueStore.getState().addJob(baseJob); });
+    // Queued: nothing to resume, nothing recorded.
+    expect(persistedRecord(id)).toMatchObject({ status: 'queued' });
+    expect(persistedRecord(id)).not.toHaveProperty('resumeFrame');
+
+    await act(async () => {
+      useRenderQueueStore.getState().startAll();
+      await settle();
+    });
+
+    // Paused at 40 — the record now says so, and names the staging dir.
+    expect(persistedRecord(id)).toMatchObject({ status: 'paused', resumeFrame: 40, stagingJobId: 'staging-1' });
+    // Progress and the live handle stay out of the blob.
+    expect(persistedRecord(id)).not.toHaveProperty('progress');
+    expect(persistedRecord(id)).not.toHaveProperty('_resume');
+  });
+
+  it('a job the user paused comes back paused, not stopped, at the frame the disk holds', async () => {
+    let id = '';
+    act(() => { id = useRenderQueueStore.getState().addJob(baseJob); });
+    act(() => {
+      useRenderQueueStore.getState().updateJob(id, { status: 'paused', resumeFrame: 40, stagingJobId: 'staging-1' });
+    });
+    // The disk has fewer frames than the record — three were lost to a crash
+    // after the pause was written. The disk wins: resuming at 40 would leave
+    // a hole.
+    resumable = [
+      { jobId: 'staging-1', spec: { ...baseJob }, format: 'mp4', totalFrames: 100, stagedFrames: 37, createdAt: 1 },
+    ];
+
+    freshStore();
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+
+    const job = useRenderQueueStore.getState().jobs[0]!;
+    expect(job).toMatchObject({ id, status: 'paused', resumeFrame: 37, progress: 0.37 });
+    expect(job.attention).toBeUndefined();
+    // Restored, not started: nothing renders on launch.
+    expect(useRenderQueueStore.getState().isRunning).toBe(false);
+    expect(createResumableVideoRender).not.toHaveBeenCalled();
+  });
+
+  it('a job that was rendering when the app died comes back stopped', async () => {
+    let id = '';
+    act(() => { id = useRenderQueueStore.getState().addJob(baseJob); });
+    act(() => { useRenderQueueStore.getState().updateJob(id, { status: 'rendering', progress: 0.3 }); });
+    resumable = [
+      { jobId: 'staging-1', spec: { ...baseJob }, format: 'mp4', totalFrames: 100, stagedFrames: 30, createdAt: 1 },
+    ];
+
+    freshStore();
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+    expect(useRenderQueueStore.getState().jobs[0]).toMatchObject({ id, status: 'stopped', resumeFrame: 30 });
+  });
+
+  it('a paused job whose frames are gone comes back queued at 0, and says what was lost', async () => {
+    let id = '';
+    act(() => { id = useRenderQueueStore.getState().addJob(baseJob); });
+    act(() => {
+      useRenderQueueStore.getState().updateJob(id, { status: 'paused', resumeFrame: 400, stagingJobId: 'staging-1' });
+    });
+    // No staging dir survives — a disk-cleanup tool emptied the temp root.
+    resumable = [];
+
+    freshStore();
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+
+    const job = useRenderQueueStore.getState().jobs[0]!;
+    expect(job).toMatchObject({ id, status: 'queued', progress: 0 });
+    expect(job.resumeFrame).toBeUndefined();
+    expect(job._adopt).toBeUndefined();
+    // The dead staging id is not carried forward to be looked for again.
+    expect(job.stagingJobId).toBeUndefined();
+    expect(job.attention).toMatch(/400 rendered frames from your last session/);
+    expect(job.attention).toMatch(/starts again from the beginning/);
+  });
+
+  it('a queued job that never started needs no attention', async () => {
+    act(() => { useRenderQueueStore.getState().addJob(baseJob); });
+    freshStore();
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+    expect(useRenderQueueStore.getState().jobs[0]?.attention).toBeUndefined();
+  });
+
+  it('the flag clears once the job actually renders', async () => {
+    let id = '';
+    act(() => { id = useRenderQueueStore.getState().addJob(baseJob); });
+    act(() => { useRenderQueueStore.getState().updateJob(id, { status: 'paused', resumeFrame: 40, stagingJobId: 'staging-1' }); });
+    freshStore();
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+    expect(useRenderQueueStore.getState().jobs[0]?.attention).toBeDefined();
+
+    mockRun.mockResolvedValueOnce({ done: true });
+    mockFinish.mockResolvedValueOnce({ kind: 'file', ext: 'mp4', frames: 100, save: jest.fn(async () => '/out/hero.mp4'), saveTo: jest.fn(async () => '/out/hero.mp4'), discard: jest.fn() });
+    await act(async () => {
+      useRenderQueueStore.getState().startAll();
+      await settle();
+    });
+    const job = useRenderQueueStore.getState().jobs[0]!;
+    expect(job.status).toBe('done');
+    expect(job.attention).toBeUndefined();
+    // From frame 0 — the honest answer, since nothing was there to resume.
+    expect(mockRun.mock.calls[0]?.[0]).toBe(0);
+  });
+
+  it('a real pause, a relaunch and a Resume continue from the recorded frame', async () => {
+    // Session 1: render, pause at 40.
+    mockRun.mockResolvedValueOnce({ done: false, nextOffset: 40 });
+    let id = '';
+    act(() => { id = useRenderQueueStore.getState().addJob(baseJob); });
+    await act(async () => {
+      useRenderQueueStore.getState().startAll();
+      await settle();
+    });
+    expect(useRenderQueueStore.getState().jobs[0]).toMatchObject({ status: 'paused', resumeFrame: 40 });
+
+    // Quit. The staging dir the pause named is still on disk with its frames.
+    resumable = [
+      { jobId: 'staging-1', spec: { ...baseJob }, format: 'mp4', totalFrames: 100, stagedFrames: 40, createdAt: 1 },
+    ];
+    freshStore();
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+    expect(useRenderQueueStore.getState().jobs[0]).toMatchObject({ id, status: 'paused', resumeFrame: 40 });
+
+    // Session 2: Resume.
+    mockRun.mockResolvedValueOnce({ done: true });
+    mockFinish.mockResolvedValueOnce({ kind: 'file', ext: 'mp4', frames: 100, save: jest.fn(async () => '/out/hero.mp4'), saveTo: jest.fn(async () => '/out/hero.mp4'), discard: jest.fn() });
+    await act(async () => {
+      useRenderQueueStore.getState().resumeJob(id);
+      await settle();
+    });
+
+    expect(adoptJob).toHaveBeenCalledWith('staging-1');
+    // The second run — the one after the relaunch — started at frame 40.
+    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(mockRun.mock.calls[1]?.[0]).toBe(40);
+    expect(useRenderQueueStore.getState().jobs[0]).toMatchObject({ status: 'done', progress: 1 });
+    // Done is finished business: the record is gone from the blob.
+    expect(persistedRecord(id)).toBeUndefined();
+  });
+});
+
+describe('a job whose composition is not in the open project', () => {
+  it('is flagged on restore and left alone by Render All', async () => {
+    act(() => { useRenderQueueStore.getState().addJob(baseJob); });
+    freshStore();
+    // The user relaunched into a different project.
+    useProjectStore.setState({ comps: { other: { ...comp1, id: 'other', name: 'Other' } } });
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+
+    const job = useRenderQueueStore.getState().jobs[0]!;
+    expect(job.status).toBe('queued');
+    expect(job.attention).toMatch(/“Comp 1” is not in the open project/);
+
+    await act(async () => {
+      useRenderQueueStore.getState().startAll();
+      await settle();
+    });
+    // Nothing was rendered — a blank file with the right name is not a render.
+    expect(createResumableVideoRender).not.toHaveBeenCalled();
+    expect(useRenderQueueStore.getState().jobs[0]).toMatchObject({ status: 'queued', progress: 0 });
+    expect(useRenderQueueStore.getState().isRunning).toBe(false);
+  });
+
+  it('renders once the right project is open again', async () => {
+    act(() => { useRenderQueueStore.getState().addJob(baseJob); });
+    freshStore();
+    useProjectStore.setState({ comps: { other: { ...comp1, id: 'other', name: 'Other' } } });
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+    expect(useRenderQueueStore.getState().jobs[0]?.attention).toBeDefined();
+
+    // The project it was queued from is opened.
+    useProjectStore.setState({ comps: { 'comp-1': comp1 } });
+    mockRun.mockResolvedValueOnce({ done: true });
+    mockFinish.mockResolvedValueOnce({ kind: 'file', ext: 'mp4', frames: 100, save: jest.fn(async () => '/out/hero.mp4'), saveTo: jest.fn(async () => '/out/hero.mp4'), discard: jest.fn() });
+    await act(async () => {
+      useRenderQueueStore.getState().startAll();
+      await settle();
+    });
+    expect(useRenderQueueStore.getState().jobs[0]).toMatchObject({ status: 'done', attention: undefined });
+  });
+
+  it('a job with no composition id (queued by an older version) is not judged', async () => {
+    const { compositionId: _drop, ...legacy } = baseJob;
+    void _drop;
+    act(() => { useRenderQueueStore.getState().addJob(legacy); });
+    freshStore();
+    useProjectStore.setState({ comps: {} });
+    await act(async () => { await useRenderQueueStore.getState().restoreFromLastSession(); });
+    expect(useRenderQueueStore.getState().jobs[0]?.attention).toBeUndefined();
   });
 });
 

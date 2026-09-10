@@ -226,6 +226,22 @@
   line-height: 1.35;
 }
 
+/* Something to know before the job runs (frames from last session gone, comp
+   not in the open project). Same shape as .jobError, warning-tinted: the job
+   still runs, or still can once the right project is open. */
+.jobAttention {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 60%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-micro);
+  line-height: 1.35;
+}
+
 /* ── Status chip ─────────────────────────────────────────────────── */
 .statusChip {
   font-size: var(--font-size-micro);

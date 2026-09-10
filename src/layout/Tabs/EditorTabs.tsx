@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useDismissOnOutside } from '@hooks/useDismissOnOutside';
 import { Icon } from '@components/Icon';
 import { cn } from '@utils/cn';
 import { SCENE_TAB_ID, useEditorTabStore, type EditorTab } from '@stores/editorTabStore';
@@ -56,6 +57,12 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
 
   const [overflowOpen, setOverflowOpen] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
+  const overflowBtnRef = useRef<HTMLButtonElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const closeOverflow = useCallback(() => setOverflowOpen(false), []);
+  // Click anywhere else, or Escape, puts the menu away — the chevron was the
+  // only thing that could close it before.
+  useDismissOnOutside(overflowOpen, [overflowBtnRef, overflowMenuRef], closeOverflow);
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const sceneActive = activeId === SCENE_TAB_ID;
@@ -349,6 +356,7 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
           </button>
           {tabs.length > 0 && (
             <button
+              ref={overflowBtnRef}
               type="button"
               className={styles.overflow}
               aria-haspopup="menu"
@@ -363,7 +371,7 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
       </div>
 
       {overflowOpen && (
-        <div className={styles.overflowMenu} role="menu">
+        <div ref={overflowMenuRef} className={styles.overflowMenu} role="menu">
           {tabs.map((tab) => (
             <button
               key={tab.id}

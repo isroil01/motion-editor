@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useDismissOnOutside } from '@hooks/useDismissOnOutside';
 import ReactMarkdown from 'react-markdown';
 import { Icon } from '@components/Icon';
 import { useAiProviderStore } from '@stores/aiProviderStore';
@@ -181,6 +182,12 @@ export function AiChatPanel(): JSX.Element {
   const [openChip, setOpenChip] = useState<'look' | 'shape' | 'variants' | null>(null);
   const modelPickerRef = useRef<HTMLDivElement | null>(null);
   const modePickerRef = useRef<HTMLDivElement | null>(null);
+  const directionBarRef = useRef<HTMLDivElement | null>(null);
+  const closeChip = useCallback(() => setOpenChip(null), []);
+  // The three direction-chip popovers render INSIDE their chips, so one ref on
+  // the bar covers every chip and every popover: a click on another chip is
+  // "inside" (its own onClick swaps which chip is open), anything else closes.
+  useDismissOnOutside(openChip !== null, [directionBarRef], closeChip);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -562,7 +569,7 @@ export function AiChatPanel(): JSX.Element {
               caster has always been able to take a pack, an accent, an energy and
               a duration, and nothing in the product could supply them, so the
               model guessed all four on every run. */}
-          <div className={styles.directionBar}>
+          <div ref={directionBarRef} className={styles.directionBar}>
             <div
               className={`${styles.directionChip} ${direction.lookPackId ? styles.directionChipSet : ''}`}
               title="Look pack - fixes palette, type, shape language, pacing and motion vocabulary"

@@ -58,10 +58,21 @@ export function isGpuUnbakeableEffect(type: string): boolean {
  * a 0→100→0 ramp stays on one path for its whole length instead of flipping to
  * the GPU at the peak and popping where the two backends round differently.
  */
+/** A path-following effect (Write-on/Vegas with a mask path assigned) renders
+ *  through the CPU chain: the GPU shader draws the straight-line/contour form
+ *  and knows nothing of polylines. Same shape of gate as `maskId` below. */
+function effectFollowsPath(e: Effect): boolean {
+  // Energy Beam carries its spine to the GPU in the uniform block — the one
+  // path effect with a polyline-aware shader, so it stays on the fast route.
+  if (e.type === 'beam-path') return false;
+  const v = (e.params as Record<string, unknown> | undefined)?.pathMaskId;
+  return typeof v === 'string' && v !== '';
+}
+
 export function effectsNeedCpuBake(effects: ReadonlyArray<Effect> | undefined): boolean {
   return !!effects?.some(
     (e) => e.enabled !== false
-      && (isGpuUnbakeableEffect(e.type) || !!e.maskId || effectHasOpacity(e)),
+      && (isGpuUnbakeableEffect(e.type) || !!e.maskId || effectHasOpacity(e) || effectFollowsPath(e)),
   );
 }
 

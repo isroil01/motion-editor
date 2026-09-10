@@ -1076,9 +1076,26 @@ export interface CameraSeed {
 /** Insert a Camera layer, centred on the REAL comp and pulled back by its focal
  *  length so the comp plane renders 1:1. Position / z / focalLength are plain
  *  editable + keyframeable props (the inspector shows them automatically). */
+/**
+ * `Camera N` / `Light N` with the lowest N no layer of that kind in the active
+ * comp already uses. Both inserts hard-coded "… 1", so the second camera was
+ * another "Camera 1" — and the view menu, which lists cameras by name so you
+ * can look through one, showed two identical entries.
+ */
+export function nextDeviceName(kind: 'camera' | 'light'): string {
+  const base = kind === 'camera' ? 'Camera' : 'Light';
+  const used = new Set<string>();
+  for (const n of flattenComposition(defaultSceneGraph, activeCompRootId())) {
+    if (readNodeKind(n) === kind && n.name) used.add(n.name.trim());
+  }
+  let i = 1;
+  while (used.has(`${base} ${i}`)) i += 1;
+  return `${base} ${i}`;
+}
+
 export function insertCamera(seed: CameraSeed = {}): void {
   const rootId = activeCompRootId();
-  const node = makeNode('camera', seed.name?.trim() || 'Camera 1');
+  const node = makeNode('camera', seed.name?.trim() || nextDeviceName('camera'));
   const compSize = useCompositionStore.getState();
   const cam = Project3D.defaultCamera(compSize.width, compSize.height);
   const focal = typeof seed.focalLength === 'number' && seed.focalLength > 0 ? seed.focalLength : cam.focalLength;
@@ -1195,7 +1212,7 @@ export function insertLight(seed: LightSeed = {}): void {
       durationMs: 7000,
     });
   }
-  const node = makeNode('light', seed.name?.trim() || 'Light 1');
+  const node = makeNode('light', seed.name?.trim() || nextDeviceName('light'));
   const compSize = useCompositionStore.getState();
   // Seed position + keyframeable intensity/radius; warm colour via Style.fill.
   // Radius scales with the comp so the glow reads on any size (a fixed 500px
@@ -1574,6 +1591,83 @@ async function readSvgText(src: string): Promise<string | null> {
 }
 
 /**
+ * Insert an SVG DOCUMENT (markup text) into the active composition — the one
+ * router behind both dropping an `.svg` file and pasting SVG markup from the
+ * clipboard (Illustrator, Figma, a browser), so the two land identically.
+ *
+ * SVG routing (hybrid architecture).
+ *
+ * The default is DEFERRED PARSING: the document is stored intact as one SVG
+ * layer, rasterized faithfully, and parsed only when the user explicitly asks
+ * for editable shapes (Convert to Editable Shapes). That is what makes import
+ * instant, keeps a 300-path illustration to one layer, and reproduces
+ * gradients, masks, filters, clip paths and patterns instead of approximating
+ * them.
+ *
+ * The ONE exception is an ANIMATED document. Our compositor is texture-based
+ * (createRenderBackend: "exactly ONE rendering engine: the GPU-backed
+ * MotionRendererBackend"), so a stored SVG can only be rasterized, and a
+ * rasterized animation is a dead frame 0. The existing translator turns SMIL
+ * and CSS `@keyframes` into real keyframe tracks, which is a WORKING animation
+ * the user can edit — so animated documents keep taking that path. Losing the
+ * animation to gain fidelity is not a trade worth making; the reverse is
+ * exactly what the shape path already does well.
+ *
+ * `sizeHint` is the source's probed pixel size (largest side), used only to
+ * size an animated shape group; a clipboard paste has none and gets the
+ * importer's 400px default.
+ *
+ * Returns the new layer id, or null when the markup cannot be read at all
+ * (the file importer then falls back to a plain image; paste reports nothing
+ * to paste).
+ */
+export function insertSvgDocument(
+  svgText: string,
+  name: string,
+  opts?: { sizeHint?: number },
+): string | null {
+  const caps = scanSvgCapabilities(new DOMParser().parseFromString(svgText, 'image/svg+xml'));
+
+  if (!isAnimatedSvg(caps)) {
+    // Static: store it intact. No parser, no keyframes, one layer.
+    return insertSvgLayer(svgText, name, { capabilities: caps });
+  }
+
+  // Animated: prefer editable keyframes only when the conversion is lossless
+  // (`isSimpleSvg`). Otherwise keep the intact document and play it via Live
+  // SVG time-rasterization — matching the Assets preview instead of
+  // flattening gradients/masks/filters.
+  const unsupported = new Set<string>();
+  const shapes = parseSvgToShapes(svgText, {
+    maxDurationSeconds: useCompositionStore.getState().durationSeconds,
+    unsupportedOut: unsupported,
+    measureText: measureSvgText,
+    intersectPaths: intersectSvgPaths,
+  });
+  const convertible = shapes.some((s) => s.animation);
+  const simple = isSimpleSvg(svgText);
+  if (simple && convertible && !isOversizedSvg(shapes.length, name)) {
+    const size = opts?.sizeHint || 400;
+    const id = insertSvgShapeGroup(svgText, name, { targetSize: size, shapes });
+    if (id) {
+      reportSvgAnimation(name, convertible, unsupported);
+      return id;
+    }
+  }
+  // Live SVG: full visual fidelity + time-scrubbed playback.
+  const blockers = unsupported.size > 0 ? [...unsupported] : svgAnimationBlockers(svgText);
+  return insertSvgLayer(svgText, name, {
+    capabilities: caps,
+    livePlayback: true,
+    extraWarning: convertible && !simple
+      ? 'playing as a Live SVG so gradients, masks and filters stay intact (not editable shapes). Convert to Editable Shapes when you need per-path control.'
+      : !convertible
+        ? `playing as a Live SVG (${blockers.slice(0, 3).join(', ') || 'complex animation'}). Convert to Editable Shapes only if you need keyframes.`
+        : 'playing as a Live SVG for full animated fidelity.',
+  });
+}
+
+/**
  * Insert an imported media asset (image or video), auto-fitted to the frame.
  *
  * **Contain, not native.** This placed footage at its stored pixel size, so a
@@ -1586,76 +1680,22 @@ async function readSvgText(src: string): Promise<string | null> {
  * PAR-corrected via `sourceOf`, so an anamorphic or DV source fits by its
  * DISPLAY shape rather than its stored one.
  */
-export async function insertMedia(asset: ImportedAsset): Promise<void> {
+export async function insertMedia(asset: ImportedAsset): Promise<string | undefined> {
   const rootId = activeCompRootId();
   if (asset.type === 'audio') {
     insertAudio(asset);
     return;
   }
 
-  // SVG routing (hybrid architecture).
-  //
-  // The default is DEFERRED PARSING: the file is stored intact as one SVG
-  // layer, rasterized faithfully, and parsed only when the user explicitly
-  // asks for editable shapes. That is what makes import instant, keeps a
-  // 300-path illustration to one layer, and reproduces gradients, masks,
-  // filters, clip paths and patterns instead of approximating them.
-  //
-  // The ONE exception is an ANIMATED file. Our compositor is texture-based
-  // (createRenderBackend: "exactly ONE rendering engine: the GPU-backed
-  // MotionRendererBackend"), so a stored SVG can only be rasterized, and a
-  // rasterized animation is a dead frame 0. The existing translator turns SMIL
-  // and CSS `@keyframes` into real keyframe tracks, which is a WORKING
-  // animation the user can edit — so animated files keep taking that path.
-  // Losing the animation to gain fidelity is not a trade worth making; the
-  // reverse is exactly what the shape path already does well.
+  // SVG: one router shared with clipboard paste (see `insertSvgDocument`).
+  // Falls through to the plain image path only when the markup is unreadable.
   if (isSvgAsset(asset)) {
     const svgText = await readSvgText(asset.src);
     if (svgText) {
-      const caps = scanSvgCapabilities(new DOMParser().parseFromString(svgText, 'image/svg+xml'));
-
-      if (!isAnimatedSvg(caps)) {
-        // Static: store it intact. No parser, no keyframes, one layer.
-        const id = insertSvgLayer(svgText, asset.name, { capabilities: caps });
-        if (id) return;
-        // Unreadable markup — fall through to the plain image path.
-      } else {
-        // Animated: prefer editable keyframes only when the conversion is
-        // lossless (`isSimpleSvg`). Otherwise keep the intact document and
-        // play it via Live SVG time-rasterization — matching the Assets
-        // preview instead of flattening gradients/masks/filters.
-        const unsupported = new Set<string>();
-        const shapes = parseSvgToShapes(svgText, {
-          maxDurationSeconds: useCompositionStore.getState().durationSeconds,
-          unsupportedOut: unsupported,
-          measureText: measureSvgText,
-          intersectPaths: intersectSvgPaths,
-        });
-        const convertible = shapes.some((s) => s.animation);
-        const simple = isSimpleSvg(svgText);
-        if (simple && convertible && !isOversizedSvg(shapes.length, asset.name)) {
-          const size = Math.max(asset.metadata?.width ?? 0, asset.metadata?.height ?? 0) || 400;
-          const id = insertSvgShapeGroup(svgText, asset.name, { targetSize: size, shapes });
-          if (id) {
-            reportSvgAnimation(asset.name, convertible, unsupported);
-            return;
-          }
-        }
-        // Live SVG: full visual fidelity + time-scrubbed playback.
-        const blockers = unsupported.size > 0 ? [...unsupported] : svgAnimationBlockers(svgText);
-        const id = insertSvgLayer(svgText, asset.name, {
-          capabilities: caps,
-          livePlayback: true,
-          extraWarning: convertible && !simple
-            ? 'playing as a Live SVG so gradients, masks and filters stay intact (not editable shapes). Convert to Editable Shapes when you need per-path control.'
-            : !convertible
-              ? `playing as a Live SVG (${blockers.slice(0, 3).join(', ') || 'complex animation'}). Convert to Editable Shapes only if you need keyframes.`
-              : 'playing as a Live SVG for full animated fidelity.',
-        });
-        if (id) return;
-      }
+      const sizeHint = Math.max(asset.metadata?.width ?? 0, asset.metadata?.height ?? 0) || undefined;
+      const id = insertSvgDocument(svgText, asset.name, { sizeHint });
+      if (id) return;
     }
-    // Falls through to the plain image path only when the markup is unreadable.
   }
 
   const kind = asset.type === 'video' ? 'video' : 'image';
@@ -1685,10 +1725,11 @@ export async function insertMedia(asset: ImportedAsset): Promise<void> {
     transform.props.assetId = asset.id;
   }
   placeInComp(node, { customW: width, customH: height, exactSize: true });
-  
+
   defaultSceneGraph.addChild(rootId, node);
   useSelectionStore.getState().set([node.id]);
   bumpScene();
+  return node.id;
 }
 
 /**
@@ -1913,12 +1954,24 @@ export function ungroupSelected(): void {
   }
 }
 
-/** Toggle a boolean layer flag across the whole selection (all follow the
- *  first node's inverse, so one click flips them together). */
-function toggleSelectionFlag(flag: 'locked' | 'solo' | 'visible'): void {
-  const ids = useSelectionStore.getState().ids;
+/**
+ * Toggle a boolean layer flag across the whole selection (all follow ONE
+ * node's inverse, so one click flips them together).
+ *
+ * `anchorId` names that node. It defaults to the first selected, which is
+ * right for a keyboard shortcut — but a context menu labels its item after
+ * the ROW that was right-clicked ("Unlock" on a locked row), and in a mixed
+ * selection that row is not necessarily `ids[0]`: the menu said Unlock and
+ * then locked everything. The menu passes the clicked id so the label and
+ * the action agree.
+ */
+function toggleSelectionFlag(flag: 'locked' | 'solo' | 'visible', anchorId?: string): void {
+  const selected = useSelectionStore.getState().ids;
+  // An anchor outside the selection toggles just itself (the Scene panel's
+  // per-row eye is a click on that row, not on the selection).
+  const ids = anchorId && !selected.includes(anchorId) ? [anchorId] : selected;
   if (ids.length === 0) return;
-  const first = defaultSceneGraph.getNode(ids[0]!);
+  const first = defaultSceneGraph.getNode(anchorId ?? ids[0]!);
   if (!first) return;
   const next = flag === 'visible' ? first.visible === false : !first[flag];
   const label = flag === 'visible'
@@ -1942,9 +1995,20 @@ function toggleSelectionFlag(flag: 'locked' | 'solo' | 'visible'): void {
   });
 }
 
-export const toggleSelectedLocked = (): void => toggleSelectionFlag('locked');
-export const toggleSelectedSolo = (): void => toggleSelectionFlag('solo');
-export const toggleSelectedVisible = (): void => toggleSelectionFlag('visible');
+export const toggleSelectedLocked = (anchorId?: string): void => toggleSelectionFlag('locked', anchorId);
+export const toggleSelectedSolo = (anchorId?: string): void => toggleSelectionFlag('solo', anchorId);
+export const toggleSelectedVisible = (anchorId?: string): void => toggleSelectionFlag('visible', anchorId);
+
+/** Show/hide ONE layer as an undoable edit — the Scene panel's eye button. */
+export function toggleNodeVisible(id: string): void {
+  const node = defaultSceneGraph.getNode(id);
+  if (!node) return;
+  const next = node.visible === false;
+  runDocumentEdit(next ? 'Show layer' : 'Hide layer', () => {
+    node.visible = next;
+    bumpScene();
+  });
+}
 
 /**
  * Group the currently selected nodes into a single master group body.

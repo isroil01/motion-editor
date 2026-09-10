@@ -102,6 +102,17 @@ export interface MaterialOptions {
   roughness: number;
   /** Cel bands, 2–8. Read only when `shading` is `toon`. */
   toonBands: number;
+  /**
+   * Height displacement (AE 26.2): an image asset whose luma pushes the mesh
+   * along its normals by `displacement` px (50 % grey = flat), after
+   * `displacementSubdivisions` rounds of midpoint subdivision. `heightMapSrc`
+   * is the asset-free form (a data URI, or a primed procedural field's key)
+   * the goldens and scripts use. See heightDisplacement.ts.
+   */
+  heightMapAssetId?: string;
+  heightMapSrc?: string;
+  displacement: number;
+  displacementSubdivisions: number;
 }
 
 /** The Material Options a keyframe track can drive. Mirrors the registry's
@@ -112,6 +123,8 @@ export interface MaterialOptions {
 export const MATERIAL_ANIMATABLE = [
   'ambient', 'diffuse', 'specular', 'shininess', 'metal', 'lightTransmission', 'roughness',
   'acceptsLights', 'castsShadows', 'acceptsShadows',
+  // Height displacement amount — growing a relief is the whole use of it.
+  'displacement',
 ] as const;
 
 function transformProps(node: SceneNode): Record<string, unknown> {
@@ -178,7 +191,40 @@ export function readNodeMaterial(node: SceneNode, av?: ReadonlyMap<string, numbe
     shading: p.shadingModel === 'pbr' ? 'pbr' : p.shadingModel === 'toon' ? 'toon' : 'phong',
     roughness: pct(p.roughness, 50),
     toonBands: typeof p.toonBands === 'number' ? Math.max(2, Math.min(8, Math.round(p.toonBands))) : 3,
+    ...(typeof p.heightMapAssetId === 'string' && p.heightMapAssetId ? { heightMapAssetId: p.heightMapAssetId } : {}),
+    ...(typeof p.heightMapSrc === 'string' && p.heightMapSrc ? { heightMapSrc: p.heightMapSrc } : {}),
+    displacement: typeof p.displacement === 'number' && Number.isFinite(p.displacement) ? Math.max(-2000, Math.min(2000, p.displacement)) : 0,
+    displacementSubdivisions: typeof p.displacementSubdiv === 'number' ? Math.max(0, Math.min(3, Math.round(p.displacementSubdiv))) : 0,
   };
+}
+
+/** Assign (or clear) the height map asset a layer's material displaces by. */
+export function setNodeHeightMap(nodeId: string, assetId: string | undefined): void {
+  const node = defaultSceneGraph.getNode(nodeId);
+  const t = node?.components.find((c) => c.type === 'Transform');
+  if (!t) return;
+  defaultSceneGraph.writeProp(nodeId, t.id, 'heightMapAssetId', assetId || undefined);
+  bumpScene();
+}
+
+/** Displacement amount, px along the normal (0 = off, unstored). */
+export function setNodeDisplacement(nodeId: string, px: number): void {
+  const node = defaultSceneGraph.getNode(nodeId);
+  const t = node?.components.find((c) => c.type === 'Transform');
+  if (!t) return;
+  const v = Math.max(-2000, Math.min(2000, px));
+  defaultSceneGraph.writeProp(nodeId, t.id, 'displacement', v !== 0 ? v : undefined);
+  bumpScene();
+}
+
+/** Midpoint subdivision rounds before displacing, 0–3. */
+export function setNodeDisplacementSubdivisions(nodeId: string, rounds: number): void {
+  const node = defaultSceneGraph.getNode(nodeId);
+  const t = node?.components.find((c) => c.type === 'Transform');
+  if (!t) return;
+  const v = Math.max(0, Math.min(3, Math.round(rounds)));
+  defaultSceneGraph.writeProp(nodeId, t.id, 'displacementSubdiv', v !== 0 ? v : undefined);
+  bumpScene();
 }
 
 /** Switch a layer's 3D reflectance model. */

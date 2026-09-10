@@ -17,6 +17,12 @@
  * FREEZES at its last tracked position while the others continue — the
  * index-paired interpolation needs every keyframe to carry every point.
  *
+ * Past MAX_VERTICES the party is SAMPLED rather than refused: at most that
+ * many vertices, evenly spaced by arc length, are tracked, and each other
+ * vertex moves with its two nearest tracked neighbours along the path (see
+ * maskVertexSampling.ts). The path keeps every vertex. Within the cap every
+ * vertex is tracked and the write is the same as it always was.
+ *
  * Like every other mask write in the app, this does not create an undo
  * entry — mask state lives on scene-graph fx props, outside the animation
  * history's diff. Re-running the track overwrites the tracked range;
@@ -38,9 +44,10 @@ import {
 } from '@core/effects/mask';
 import { sourceDisplaySize } from './trackerSource';
 import { trackVideoLayerPoints, type CompTrackSample } from './trackVideoLayer';
+import { blendVertexDeltas, sampleMaskVertices, MAX_TRACKED_VERTICES } from './maskVertexSampling';
 
-/** More vertices than this is a shape, not a set of trackable features. */
-const MAX_VERTICES = 64;
+/** More vertices than this is a shape, not a set of trackable features — sampled, not refused. */
+const MAX_VERTICES = MAX_TRACKED_VERTICES;
 
 export interface MaskTrackRequest {
   nodeId: string;
@@ -55,8 +62,10 @@ export interface MaskTrackRequest {
 export interface MaskTrackResult {
   /** Mask keyframes written. */
   keyframes: number;
-  /** Vertices tracked across all paths. */
+  /** Vertices across all paths — every one of them gets keyframes. */
   vertices: number;
+  /** Vertices actually handed to the tracker (≤ MAX_VERTICES); the rest are interpolated. */
+  sampled: number;
   status: 'completed' | 'lost' | 'cancelled';
 }
 
@@ -79,26 +88,32 @@ export async function trackLayerMask(req: MaskTrackRequest): Promise<MaskTrackRe
   const base: LayerMask | undefined = readNodeMaskAt(node, startLayerT) ?? readNodeMask(node);
   if (!base || base.paths.length === 0) throw new Error('Layer has no mask to track.');
 
-  // Flatten every path's vertices into one tracking party.
+  // Flatten every path's vertices into one list, in path order.
   const refs: VertexRef[] = [];
-  const points: Array<{ x: number; y: number }> = [];
+  const vertices: Array<{ x: number; y: number }> = [];
+  const samplable: Array<{ points: Array<{ x: number; y: number }>; closed: boolean }> = [];
   for (let p = 0; p < base.paths.length; p++) {
     const path = base.paths[p]!;
+    const display: Array<{ x: number; y: number }> = [];
     for (let i = 0; i < path.points.length; i++) {
       const pt = path.points[i]!;
       refs.push({ pathIndex: p, pointIndex: i });
       // layer-local (centred) → source display px — the inverse of the
       // trackSampleToComp local step, stated once in applyTrack.ts.
-      points.push({
+      display.push({
         x: (pt.x / g.width + 0.5) * src.width,
         y: (pt.y / g.height + 0.5) * src.height,
       });
     }
+    vertices.push(...display);
+    samplable.push({ points: display, closed: path.closed });
   }
-  if (points.length === 0) throw new Error('The mask has no points.');
-  if (points.length > MAX_VERTICES) {
-    throw new Error(`The mask has ${points.length} points — more than ${MAX_VERTICES} is a shape, not trackable features. Simplify it first.`);
-  }
+  if (vertices.length === 0) throw new Error('The mask has no points.');
+
+  // The tracking party: every vertex within the cap, an arc-length sample of
+  // them past it. `points[k]` is the rest position of slot k.
+  const sampling = sampleMaskVertices(samplable, MAX_VERTICES);
+  const points = sampling.tracked.map((v) => vertices[v]!);
 
   const result = await trackVideoLayerPoints({
     nodeId: req.nodeId,
@@ -126,13 +141,27 @@ export async function trackLayerMask(req: MaskTrackRequest): Promise<MaskTrackRe
 
   const keyframes: MaskKeyframe[] = [];
   const lastKnown: Array<{ x: number; y: number }> = points.map((p) => ({ ...p }));
+  const interpolated = sampling.tracked.length < refs.length;
   for (const compTime of times) {
+    // Where every tracked slot is at this time (frozen if it was lost).
+    const slotAt: Array<{ x: number; y: number }> = new Array(points.length);
+    for (let k = 0; k < points.length; k++) {
+      const sample = byTime[k]!.get(compTime);
+      const at = sample ? { x: sample.x, y: sample.y } : lastKnown[k]!;
+      if (sample) lastKnown[k] = at;
+      slotAt[k] = at;
+    }
+    // Untracked vertices ride their neighbours' deltas (display px).
+    const blended = interpolated
+      ? blendVertexDeltas(sampling, slotAt.map((at, k) => ({ x: at.x - points[k]!.x, y: at.y - points[k]!.y })))
+      : null;
     // Deep-clone the base shape and displace each vertex by its tracked delta.
     const paths = base.paths.map((path) => ({ ...path, points: path.points.map((pt) => ({ ...pt })) }));
     for (let v = 0; v < refs.length; v++) {
-      const sample = byTime[v]!.get(compTime);
-      const at = sample ? { x: sample.x, y: sample.y } : lastKnown[v]!;
-      if (sample) lastKnown[v] = at;
+      const slot = sampling.slotOf[v]!;
+      const at = slot >= 0
+        ? slotAt[slot]!
+        : { x: vertices[v]!.x + blended![v]!.x, y: vertices[v]!.y + blended![v]!.y };
       const ref = refs[v]!;
       const pt: MaskPoint = paths[ref.pathIndex]!.points[ref.pointIndex]!;
       const lx = (at.x / src.width - 0.5) * g.width;
@@ -159,5 +188,5 @@ export async function trackLayerMask(req: MaskTrackRequest): Promise<MaskTrackRe
   getEventBus().emit('AnimationChanged', { nodeId: req.nodeId });
   bumpScene();
 
-  return { keyframes: keyframes.length, vertices: points.length, status: result.status };
+  return { keyframes: keyframes.length, vertices: refs.length, sampled: points.length, status: result.status };
 }

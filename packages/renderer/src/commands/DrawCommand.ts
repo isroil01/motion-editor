@@ -75,6 +75,9 @@ export interface DrawItem {
    *  a 24-bit depth packed across rgb and a filtered blend of two of them is not
    *  a depth. That is why it cannot be the layer's sampler. */
   shadowSampler?: SamplerHandle;
+  /** The run's SECOND shadow map, at bindings 13/14 (plan B2) — the same contract as the first. */
+  shadow2Texture?: TextureHandle;
+  shadow2Sampler?: SamplerHandle;
   /**
    * The run's ambient-occlusion buffer, at bindings 11/12.
    *
@@ -89,6 +92,15 @@ export interface DrawItem {
    *  usually half resolution and is being magnified. It cannot be the layer's:
    *  `solid3d` has no layer sampler for the backend to broadcast. */
   aoSampler?: SamplerHandle;
+  /**
+   * The layer's per-channel colour LUT strip, at binding 15 of the lit-3d LUT
+   * variants (`LUT3D_TEXTURE_BINDING`). Only those materials declare it, so it
+   * is set only by the helpers that select one — a 3D draw without a LUT keeps
+   * its narrow material and never binds a stand-in. The 2D `lut-textured`
+   * material reads its strip from `maskTexture` instead; that slot is taken by
+   * the PBR map set on the mesh path.
+   */
+  lutTexture?: TextureHandle;
   /** Optional custom geometry for mesh rendering. */
   vertexBuffer?: BufferHandle;
   indexBuffer?: BufferHandle;
@@ -134,6 +146,8 @@ export class CommandBuffer {
    * a binding its material does not declare.
    */
   shadow?: { texture: TextureHandle; sampler: SamplerHandle };
+  /** The run's second shadow map (plan B2), bound beside the first. */
+  shadow2?: { texture: TextureHandle; sampler: SamplerHandle };
 
   /**
    * The ambient-occlusion buffer every lit-3d draw in this buffer binds.

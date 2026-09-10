@@ -76,8 +76,13 @@ export function effectHits(term: string, limit: number): QuickApplyHit[] {
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-/** Can this preset do anything on this layer? Text presets need a text layer. */
+/** Can this preset do anything on this layer? Text presets need a text layer,
+ *  camera presets a camera — same gates the panel and `applyPreset` enforce. */
 function presetFits(p: AnimationPreset, nodeId: string): boolean {
+  if (p.requires === 'camera') {
+    const node = defaultSceneGraph.getNode(nodeId);
+    return !!node && readNodeKind(node) === 'camera';
+  }
   if (p.requires !== 'text' && !(p.animators && p.animators.length)) return true;
   const node = defaultSceneGraph.getNode(nodeId);
   return !!node && readNodeKind(node) === 'text';

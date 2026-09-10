@@ -1,7 +1,10 @@
 import { snapshotToFrameScene, layerToRenderable, viewToCamera } from './snapshotToFrameScene';
 import type { RenderSnapshot, RenderLayer } from './RenderBackend';
 import { BLEND_MODES } from '@core/effects/blendMode';
-import { Renderer, NullBackend, type Mat3 } from '@motion/renderer';
+import { Renderer, NullBackend, Color, type Mat3 } from '@motion/renderer';
+import { buildChannelLut, sampleChannelLutAsUploaded } from '@core/effects/colorLut';
+import { effectColorMatrix, applyColorMatrix } from '@core/effects/effectColorMatrix';
+import type { Effect } from '@core/effects/effects';
 
 function layer(over: Partial<RenderLayer> = {}): RenderLayer {
   return {
@@ -19,6 +22,49 @@ function snapshot(layers: RenderLayer[], over: Partial<RenderSnapshot> = {}): Re
 function apply(m: Mat3, x: number, y: number): { x: number; y: number } {
   return { x: m[0]! * x + m[3]! * y + m[6]!, y: m[1]! * x + m[4]! * y + m[7]! };
 }
+
+/**
+ * A colour LUT on a SOLID quad. Its colour is uniform, so — like the affine
+ * grade beside it — the LUT is applied on the CPU through the table the GPU
+ * would upload, read the way the shader reads it. Only textured renderables
+ * carry a `lutTextureKey`, so before this a Levels on a solid shape (2D or 3D)
+ * did nothing at all.
+ */
+describe('colour LUT on a solid quad', () => {
+  const lv: Effect = {
+    id: 'lv', type: 'levels',
+    params: { inputBlack: 30, inputWhite: 200, gamma: 1.4, outputBlack: 10, outputWhite: 240 },
+  };
+  const inv: Effect = { id: 'inv', type: 'invert', params: { amount: 100 } };
+  const base = Color.fromHex('#3366cc');
+
+  test('remaps the solid colour exactly as the uploaded strip would', () => {
+    const r = layerToRenderable(layer({ fill: '#3366cc', effects: [lv] }));
+    const want = sampleChannelLutAsUploaded(buildChannelLut([lv])!, [base.r, base.g, base.b]);
+    expect(r.color!.r).toBeCloseTo(want[0], 10);
+    expect(r.color!.g).toBeCloseTo(want[1], 10);
+    expect(r.color!.b).toBeCloseTo(want[2], 10);
+    // …and the grade really moved it, so the assertion above is not vacuous.
+    expect(Math.abs(r.color!.b - base.b)).toBeGreaterThan(0.02);
+    // Still the SDF solid: the colour carries the grade, no strip is needed.
+    expect(r.sdf).toBeDefined();
+    expect(r.lutTextureKey).toBeUndefined();
+  });
+
+  test('runs the affine matrix FIRST and the LUT second, whatever the stack order — the GPU order', () => {
+    const r = layerToRenderable(layer({ fill: '#3366cc', effects: [lv, inv] }));
+    const inverted = applyColorMatrix(effectColorMatrix([inv]), [base.r, base.g, base.b]);
+    const want = sampleChannelLutAsUploaded(buildChannelLut([lv])!, inverted);
+    expect(r.color!.r).toBeCloseTo(want[0], 10);
+    expect(r.color!.g).toBeCloseTo(want[1], 10);
+    expect(r.color!.b).toBeCloseTo(want[2], 10);
+  });
+
+  test('a disabled Levels leaves the colour alone', () => {
+    const r = layerToRenderable(layer({ fill: '#3366cc', effects: [{ ...lv, enabled: false }] }));
+    expect(r.color).toEqual(base);
+  });
+});
 
 describe('snapshotToFrameScene', () => {
   test('maps composition size + background', () => {

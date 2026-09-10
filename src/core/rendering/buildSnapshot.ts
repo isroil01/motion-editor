@@ -7,7 +7,7 @@ import type SceneGraph from '@core/scene/SceneGraph';
 import { renderComponentsOf, renderTransformOf } from '@core/scene/SceneGraph';
 import type { SceneNode } from '@core/types';
 import { flattenComposition, readNodeKind, KIND_FILL } from '@core/scene/sceneDerive';
-import { readNodeRenderEffects, effectsToFilter, resolveEffectParams, paramsOf, type Effect } from '@core/effects/effects';
+import { readNodeRenderEffects, effectsToFilter, resolveEffectParams, paramsOf, effectNumber, type Effect } from '@core/effects/effects';
 import { readNodeLayerStyles, layerStylesToEffects, layerStyleEffectId, styledSurfaceFill } from '@core/effects/layerStyles';
 
 /** Prop-path prefix every layer-style keyframe track shares —
@@ -18,7 +18,11 @@ import { resolveGlass } from '@core/effects/glassResolve';
 import { resolveGlobalLight } from '@stores/projectStore';
 import { readNodeBlend } from '@core/effects/blendMode';
 import { readNodePreserveTransparency } from '@core/effects/preserveTransparency';
-import { readNodeMaskAt, roundedRectMask, applyMaskPropertyTracks, type LayerMask } from '@core/effects/mask';
+import { readNodeMask, readNodeMaskAt, maskPathPolyline, roundedRectMask, applyMaskPropertyTracks, type LayerMask } from '@core/effects/mask';
+import { BEAM_PEN_UP, BEAM_SOURCE } from '@core/effects/beamPath';
+import { displacedMeshFor, getHeightField } from '@core/scene/heightDisplacement';
+import type { MaterialOptions } from '@core/scene/material';
+import { traceTextRuns } from '@core/scene/shapesFromText';
 import {
   clampCornerRadii,
   hasIndependentCornerRadii,
@@ -27,7 +31,15 @@ import {
 } from '@core/scene/cornerRadii';
 import { readNodeMatte, readMatte } from '@core/effects/matte';
 import { readNodeAdjustment } from '@core/effects/adjustment';
-import { readNodeMotionBlur, motionBlurSampleTimes, adaptiveMotionBlurSamples, type MotionBlurConfig } from '@core/effects/motionBlur';
+import {
+  readNodeMotionBlur,
+  motionBlurSampleTimes,
+  adaptiveMotionBlurSamples,
+  affineTravelPx,
+  motionBlurTravelPx,
+  type MotionProbe,
+  type MotionBlurConfig,
+} from '@core/effects/motionBlur';
 import { readNodeFill, readNodeFills, sampleFillAt, type FillPaint } from '@core/paint/fill';
 import { readNodeStroke, readNodeRenderStrokes } from '@core/paint/stroke';
 import { useAssetStore } from '@stores/assetStore';
@@ -63,6 +75,7 @@ import { environmentRigFor, environmentSpecularMap } from '@core/scene/environme
 // when the inspector happens to be open. See environmentImage.ts.
 import '@core/scene/environmentImage';
 import { isColorEffect } from '@core/effects/effectColorMatrix';
+import { isLutEffect } from '@core/effects/colorLut';
 import { readNodeFaceMaterials, resolveFaceMaterial, faceKindOf } from '@core/scene/faceMaterials';
 import { faceEffectsFor } from '@core/scene/faceEffects';
 import { shadeLayer, planeNormalOf, toShaderLights, lightAim3D, aimToCompAngleDeg, type SceneLight } from '@core/scene/lightShading';
@@ -78,7 +91,8 @@ import { resolveTextPath, resolveTextPathMask, flattenMaskPath } from '@core/tex
 import { bracketFrames } from './videoFrameCache';
 import { footageSourceOf, applyLoop } from '@core/source/sourceInfo';
 import { slotFitOf, coverUvRect } from '@core/template/mediaSlots';
-import { readSceneCamera, readSceneDof, dofBlurPx, dofIrisParams, activeCameraNode, cameraFromNode } from '@core/scene/camera3d';
+import { readSceneCamera, readSceneDof, dofBlurPx, dofIrisParams, viewCameraNode, cameraFromNode } from '@core/scene/camera3d';
+import { orthoViewOf, type CameraViewMode } from '@core/scene/cameraViewMode';
 import { planDofCocCorners, layerCornerDepths } from './dofStrips';
 import { expandCompInstances, instanceSourceOf, isCompInstanceRoot, readCompRef, readCompCollapse } from '@core/scene/compInstance';
 import { applyOverridesToComponents, overriddenPropsFor, readCompOverrides, type OverrideValue } from '@core/scene/compInstanceOverrides';
@@ -86,6 +100,7 @@ import { expandCloners, cloneOffsetOf } from '@core/scene/clonerExpand';
 import { readNodePhysics, physicsPosesAt } from '@core/simulation/physicsBodies';
 import type { BodySeed } from '@core/simulation/rigidBody';
 import { usePhysicsStore } from '@stores/physicsStore';
+import { useTextEditStore } from '@stores/textEditStore';
 import { readLiveBoolean, evaluateLiveBoolean, isBooleanOperand, nodeWorldOutline, flattenOutline, ADAPTIVE } from '@core/scene/mergePaths';
 import { readContinuousRaster, supportsContinuousRaster } from '@core/scene/continuousRaster';
 import { readNodeCornerPin } from '@core/scene/cornerPin';
@@ -149,7 +164,13 @@ export interface SnapshotComp {
    * geometry through `exportView` — so if you are adding a fifth, set this too.
    */
   forExport?: boolean;
-  camera3dMode?: 'active' | Project3D.OrthoView;
+  /**
+   * The view the frame is drawn through. `camera:<id>` renders exactly like
+   * 'active' — perspective, DOF, camera motion blur — but through that camera
+   * node instead of the topmost; a stale id falls back to 'active'
+   * (`viewCameraNode`). Export and headless paths never set it.
+   */
+  camera3dMode?: 'active' | Project3D.OrthoView | CameraViewMode;
   /**
    * View-camera override (AE custom views): when set (and the mode is not an
    * ortho view), 3D layers project through THIS pre-built camera instead of
@@ -976,6 +997,27 @@ export function buildSnapshot(
     return assetIndex;
   };
 
+  /**
+   * Height displacement (B1) for one mesh carrier, or null when the material
+   * has none set, the amount is zero, or the field is still decoding. The
+   * field is keyed by asset id (or the asset-free `heightMapSrc`), so every
+   * carrier sharing a map shares one decode.
+   */
+  const displacedCarrierFor = (
+    meshKey: string,
+    vertices: Float32Array,
+    indices: Uint16Array | Uint32Array,
+    mat: MaterialOptions,
+  ): ReturnType<typeof displacedMeshFor> | null => {
+    if (!(Math.abs(mat.displacement) > 1e-6)) return null;
+    const fieldKey = mat.heightMapAssetId ?? mat.heightMapSrc;
+    if (!fieldKey) return null;
+    const src = mat.heightMapAssetId ? assetById().get(mat.heightMapAssetId)?.src : mat.heightMapSrc;
+    const field = getHeightField(fieldKey, src);
+    if (!field) return null;
+    return displacedMeshFor(meshKey, fieldKey, vertices, indices, field, mat.displacement, mat.displacementSubdivisions);
+  };
+
   const valueCache = new Map<string, Map<PropPath, number>>();
   const valuesOf = (id: string): Map<PropPath, number> => {
     let v = valueCache.get(id);
@@ -1044,7 +1086,7 @@ export function buildSnapshot(
     // what keeps preview and export identical — and the per-frame magnitudes are
     // what correctly make the content hash vary for this layer, and only this
     // layer. Same mechanism as the Timecode clock above.
-    const all = layerTimeSec === undefined
+    const withAudio = layerTimeSec === undefined
       ? resolved
       : resolved.map((e) => {
           if (e.type !== 'audio-spectrum') return e;
@@ -1060,6 +1102,38 @@ export function buildSnapshot(
           );
           return { ...e, params: { ...p, magnitudes } };
         });
+
+    // Path-following effects (Write-on / Vegas with a mask path assigned):
+    // the referenced path is flattened HERE, at the frame's time, into the
+    // effect's `pathPoints` resolved param — same hand-off as the audio
+    // magnitudes above, and for the same reasons: the drawing kernel stays a
+    // pure function of its params, and a TRACKED mask (maskAnim) yields a
+    // different polyline per frame, which both follows the object and varies
+    // the content hash so cached frames re-render.
+    const all = withAudio.map((e) => {
+      const p = paramsOf(e);
+      // Energy Beam on the layer's OWN text outline: the traced runs, each a
+      // closed cubic loop, flattened like a mask path and separated by the
+      // kernel's pen-up sentinel so every letter is its own stroke.
+      if (e.type === 'beam-path' && Math.round(effectNumber(e, 'source')) === BEAM_SOURCE.text) {
+        const runs = readNodeKind(node) === 'text' ? traceTextRuns(node) : null;
+        const pathPoints: number[] = [];
+        for (const run of runs ?? []) {
+          if (pathPoints.length > 0) pathPoints.push(BEAM_PEN_UP, 0);
+          pathPoints.push(...maskPathPolyline({
+            id: 'text', mode: 'none', closed: true, points: run.points, feather: 0, opacity: 1, expansion: 0, inverted: false,
+          }, 6));
+        }
+        return { ...e, params: { ...p, pathPoints } };
+      }
+      const pathMaskId = p.pathMaskId;
+      if (typeof pathMaskId !== 'string' || pathMaskId === '') return e;
+      const m = (layerTimeSec !== undefined ? readNodeMaskAt(node, layerTimeSec) : undefined)
+        ?? readNodeMask(node);
+      const path = m?.paths.find((mp) => mp.id === pathMaskId);
+      const pathPoints = path ? maskPathPolyline(path) : [];
+      return { ...e, params: { ...p, pathPoints } };
+    });
 
     return { own: all.slice(0, ownRaw.length), all };
   };
@@ -1159,7 +1233,12 @@ export function buildSnapshot(
     const remapped = anim.sample(groupNode.id, 'timeRemap', t) ?? anim.sample(groupNode.id, 'precompTime', t);
     return remapOf(groupNode.id)(remapped !== undefined ? remapped : t);
   };
-  const buildPrecompContainer = (groupNode: SceneNode, innerOverride?: RenderLayer[]): RenderLayer => {
+  const buildPrecompContainer = (
+    groupNode: SceneNode,
+    innerOverride?: RenderLayer[],
+    /** A sealed instance's nested 3D frame (see `nestedCompLayers`). */
+    scene3d?: RenderLayer['precompScene3d'],
+  ): RenderLayer => {
     const gv = valuesOf(groupNode.id);
     const gBase = readBase(groupNode);
     const inner = innerOverride ?? precompInner.get(groupNode.id) ?? [];
@@ -1243,6 +1322,7 @@ export function buildSnapshot(
       filter,
       effects: gFx.length ? gFx : undefined,
       precompLayers: inner,
+      ...(scene3d ? { precompScene3d: scene3d } : {}),
       sourceTime: precompSourceTime(groupNode),
     };
   };
@@ -1395,10 +1475,10 @@ export function buildSnapshot(
 
   const cameraMode = comp.camera3dMode ?? 'active';
   // The six axis views project orthographically (no perspective, no scene
-  // camera); 'active' uses the scene's Camera layer. One `project` closure so
-  // every projection site below is view-agnostic.
-  const orthoView: Project3D.OrthoView | null =
-    cameraMode === 'active' ? null : (cameraMode as Project3D.OrthoView);
+  // camera); 'active' and a `camera:<id>` view use a scene Camera layer —
+  // `viewCameraNode` decides which. One `project` closure so every projection
+  // site below is view-agnostic.
+  const orthoView: Project3D.OrthoView | null = orthoViewOf(cameraMode);
   // Custom views (AE parity): a pre-built view camera supplied by the editor
   // replaces the scene camera — the shot camera is deliberately IGNORED.
   const customCamera = orthoView ? null : comp.customViewCamera ?? null;
@@ -1413,7 +1493,7 @@ export function buildSnapshot(
         // The camera is a layer: it follows its parent chain like everything
         // else, through the renderer's own per-frame caches.
         toWorldPoint,
-        { isLiveAt },
+        { isLiveAt, view: cameraMode },
       );
   const project = orthoView
     ? (p: { x: number; y: number; z: number }) => Project3D.projectOrtho(p, orthoView, comp.width, comp.height)
@@ -1434,7 +1514,7 @@ export function buildSnapshot(
     (the documented static-chain approximation).
   */
   const cameraMotionNode = !orthoView && !customCamera && motionBlur
-    ? activeCameraNode(graph, comp.rootId, { isLiveAt })
+    ? viewCameraNode(graph, cameraMode, comp.rootId, { isLiveAt })
     : null;
   const cameraAnimated =
     cameraMotionNode !== null &&
@@ -1464,7 +1544,7 @@ export function buildSnapshot(
   // Draft 3D skips DOF entirely (dof = null ⇒ withDof/dofEffectOf no-op).
   const dof = orthoView || customCamera || comp.draft3d
     ? null
-    : readSceneDof(graph, comp.width, comp.height, (id, p) => valuesOf(id).get(p), comp.rootId, { isLiveAt });
+    : readSceneDof(graph, comp.width, comp.height, (id, p) => valuesOf(id).get(p), comp.rootId, { isLiveAt, view: cameraMode });
   // `depth: undefined` = this layer is not in the camera's space (a 2D layer),
   // so it is never defocused.
   const withDof = (f: string | undefined, depth: number | undefined): string | undefined => {
@@ -1828,9 +1908,18 @@ export function buildSnapshot(
    * `compStack` is the cycle guard. Insertion already refuses reference loops
    * (`wouldCreateCompCycle`), but a hand-edited or migrated document must not be
    * able to hang the renderer.
+   *
+   * Returns the nested layers AND, when the referenced comp has 3D content, its
+   * own 3D frame (`scene3d`: camera, lights, environment reflection) for the
+   * container to carry — the GPU path needs the nested camera to depth-test and
+   * light those layers in the comp they belong to. Without it only the CPU
+   * projection survived the nesting and the layers composited flat.
    */
   const stack = comp.compStack ?? [];
-  const nestedCompLayers = (node: SceneNode, ref: string): RenderLayer[] | null => {
+  const nestedCompLayers = (
+    node: SceneNode,
+    ref: string,
+  ): { layers: RenderLayer[]; scene3d?: RenderLayer['precompScene3d'] } | null => {
     if (stack.includes(ref) || stack.length >= MAX_COMP_DEPTH) return null;
     if (!graph.getNode(ref)) return null;
     const size = comp.compSizeOf?.(ref) ?? { width: comp.width, height: comp.height };
@@ -1863,13 +1952,29 @@ export function buildSnapshot(
         backgroundPaint: undefined,
         // The host's view mode does not reach inside a sealed comp: it is
         // composited as a flat card, so an ortho view or a custom view camera
-        // would be re-applied on top of the host's own.
+        // would be re-applied on top of the host's own — and a `camera:<id>`
+        // view names a HOST camera, which must not steer the precomp's shot.
         camera3dMode: 'active',
         customViewCamera: undefined,
         compStack: [...stack, ref],
       },
     );
-    return prefixLayerIds(nested.layers, `${node.id}::`);
+    // The nested comp's OWN 3D frame, exactly as its pass resolved it (inner
+    // world space, inner comp px). Present only when it has 3D content — a 2D
+    // comp's instance stays byte-identical. SSAO is deliberately NOT carried:
+    // `nested.ssao` is the HOST's `comp.ssao` inherited through `...comp`
+    // above, not a setting of the referenced composition.
+    const scene3d: RenderLayer['precompScene3d'] = nested.camera3d
+      ? {
+          camera3d: nested.camera3d,
+          ...(nested.lights3d && nested.lights3d.length > 0 ? { lights3d: nested.lights3d } : {}),
+          ...(nested.envMap ? { envMap: nested.envMap } : {}),
+        }
+      : undefined;
+    return {
+      layers: prefixLayerIds(nested.layers, `${node.id}::`),
+      ...(scene3d ? { scene3d } : {}),
+    };
   };
 
   // Which layers must be fully materialized this frame. Invisible / un-soloed
@@ -1938,7 +2043,8 @@ export function buildSnapshot(
         if (!needsFullBuild.has(node.id)) {
           emitInvisibleStub(node);
         } else {
-          emitLayer(buildPrecompContainer(node, nestedCompLayers(node, ref) ?? undefined), node);
+          const nested = nestedCompLayers(node, ref);
+          emitLayer(buildPrecompContainer(node, nested?.layers, nested?.scene3d), node);
         }
       }
       continue;
@@ -2043,7 +2149,14 @@ export function buildSnapshot(
           color: lt.color,
           intensity: av?.get('intensity') ?? lt.intensity,
           radius: shape.radius,
-          screenRadius: shape.radius,
+          // Ambient covers the FRAME, not a radius: its wash is a flat plate
+          // (see rasterizeLight), so the quad must span the comp — the square
+          // quad is 2·screenRadius on a side, centred, so max(w,h)/2 covers.
+          // A radius-sized ambient quad was the phantom "second light": a
+          // 2·radius blob pinned to the comp centre.
+          screenRadius: lt.type === 'ambient'
+            ? Math.max(comp.width, comp.height) / 2
+            : shape.radius,
           type: lt.type,
           cone: av?.get('lightCone') ?? lt.cone,
           // Without this the wash had no feather to apply and a spot's soft
@@ -2083,7 +2196,29 @@ export function buildSnapshot(
           emitterWidth: pW,
           emitterHeight: pH,
         };
-        const cfg = resolveParticleConfig(syncedCfg, (path) => pv?.get(path));
+        const resolvedCfg = resolveParticleConfig(syncedCfg, (path) => pv?.get(path));
+        // Particles v2 — three facts only the snapshot knows:
+        //  · the comp shutter (for velocity streaks), taken only when this
+        //    layer's own motion-blur switch is on, like any other layer;
+        //  · the sprite asset's source, resolved from its id here so the
+        //    field painter needs no store;
+        //  · the scene camera's focal length as the field's perspective when
+        //    the layer is 3D and no explicit perspective is set, so depth
+        //    parallax follows the comp lens instead of a private one.
+        const blurOn = motionBlur?.enabled === true && readNodeMotionBlur(node);
+        const shutterSec = blurOn && motionBlur
+          ? (Math.max(0, Math.min(360, motionBlur.shutterAngle)) / 360) / Math.max(1, motionBlur.fps)
+          : 0;
+        const spriteAsset = resolvedCfg.spriteAssetId ? assetById().get(resolvedCfg.spriteAssetId) : undefined;
+        const autoPerspective = is3DEnabled(node) && camera && !((resolvedCfg.perspective ?? 0) > 0)
+          ? camera.focalLength
+          : undefined;
+        const cfg = {
+          ...resolvedCfg,
+          shutterSec,
+          ...(spriteAsset ? { spriteSrc: spriteAsset.src } : {}),
+          ...(autoPerspective ? { perspective: autoPerspective } : {}),
+        };
         emitLayer({
           id: node.id, kind: 'shape',
           x: w.x, y: w.y, rotation: w.rotation, scaleX: w.scaleX, scaleY: w.scaleY, depth: 0,
@@ -3284,7 +3419,7 @@ export function buildSnapshot(
     */
     const forcedBlur = readForceMotionBlur(resolvedEffects);
     const blurCfg = forcedBlur && motionBlur
-      ? { ...motionBlur, enabled: true, shutterAngle: forcedBlur.shutterAngle, samples: forcedBlur.samples }
+      ? { ...motionBlur, enabled: true, shutterAngle: forcedBlur.shutterAngle, samples: forcedBlur.samples, shutterPhase: forcedBlur.shutterPhase }
       : motionBlur;
     const blurOptIn = forcedBlur ? true : (motionBlur?.enabled === true && readNodeMotionBlur(node));
     // A 3D layer also moves ON SCREEN when the camera does — a static card
@@ -3386,7 +3521,13 @@ export function buildSnapshot(
       const dofFx = is3D ? dofEffectOf(depth) : null;
       if (dofFx) gpuFx.push(dofFx);
       const mat = readNodeMaterial(node, a);
-      if (!isSolid && mat.castsShadows) {
+      // Solids are excluded from the 2D drop shadow only: a 2D solid is pinned
+      // full-frame, so a drop shadow off it would be a shadow of the whole
+      // comp. A 3D solid is un-pinned onto its own transform (see
+      // set3DEnabled) and is an ordinary plane — it used to be excluded from
+      // the projected path too, while the shadow map below let it cast, so
+      // the same card threw a shadow or not depending on the light's mode.
+      if (mat.castsShadows && (is3D || !isSolid)) {
         // A 3D layer under a shadow-casting light gets a REAL projected shadow
         // (emitted after this walk, once every receiver plane is known). The
         // screen-space drop-shadow stays for 2D layers, where there is no depth
@@ -3523,7 +3664,19 @@ export function buildSnapshot(
     // extruded: both carriers would draw, one inside the other. (Extrusion
     // Depth still shows in the 3D panel for such a layer; it simply has
     // nothing to sweep.)
-    if (is3D && world3d && extrusionDepth > 0 && !isPrimitiveMeshNode(node)) {
+    /*
+      No body while the text is being edited in place: the body is traced
+      from the layer's text, which the edit overlay is replacing character by
+      character, so the solid showed the PRE-edit string through the overlay
+      until Enter. (The texture provider already blanks the front face for the
+      edited id; the `::ext-*` carriers never matched it.)
+    */
+    const textBodySuppressed = layer.kind === 'text' && useTextEditStore.getState().nodeId === node.id;
+    // Per-character 3D keeps the whole-string body (pinned by
+    // buildSnapshotPerChar3D.test) but the FRONT is the glyph planes below —
+    // the mesh must not also paint the string on an inset cap.
+    const perCharText = layer.kind === 'text' && isPerChar3D(node);
+    if (is3D && world3d && extrusionDepth > 0 && !isPrimitiveMeshNode(node) && !textBodySuppressed) {
       const isComplexContent =
         layer.kind === 'text' ||
         (layer.kind === 'shape' && layer.primitive !== 'rect' && layer.primitive !== 'ellipse');
@@ -3619,17 +3772,44 @@ export function buildSnapshot(
         and the quad is not emitted.
       */
       const complexOutline = layer.kind === 'text' || (layer.kind === 'shape' && layer.primitive === 'path');
-      const meshOwnsFront = complexOutline && meshBevel > 0;
+      const meshOwnsFront = complexOutline && meshBevel > 0 && !perCharText;
       /*
-        Effect REACH decides the path. COLOUR effects (invert, tint, …) fold
-        into the mesh's range colours / colour matrix on the CPU, so they reach
-        every surface of the body. SPATIAL effects (blur, glow, DOF's appended
-        blur, drop shadow) need per-face offscreen resolves that only the quad
-        synthesis can stage — so their presence sends the whole object down the
-        fallback, where each face still carries them (see faceEffectsFor).
+        Effect REACH decides the path. COLOUR effects reach every surface of
+        the body on the mesh: the AFFINE ones (invert, tint, …) fold into the
+        range colours on the CPU and the colour matrix on textured ranges, and
+        the LUT ones (Levels, Curves, Posterize, Exposure, Lumetri — whatever
+        `isLutEffect` admits) grade flat ranges through the uploaded table on
+        the CPU and textured ranges through the `-lut` mesh materials. SPATIAL
+        effects (blur, glow, DOF's appended blur, drop shadow) need per-face
+        offscreen resolves that only the quad synthesis can stage — so their
+        presence sends the whole object down the fallback, where each face
+        still carries them (see faceEffectsFor).
+
+        The LUT grades used to be in the second group by default, having no
+        mesh stage: a Levels on an extruded title swapped its solid for the
+        slice stack.
       */
-      const meshBlockedByFx = (layer.effects ?? []).some((e) => e.enabled !== false && !isColorEffect(e.type));
-      const builtMesh = meshOutline && !meshBlockedByFx
+      // The camera-DOF blur (`id: 'dof'`) is excluded: inside a depth group the
+      // mesh is defocused per pixel from the depth buffer (the gather pass),
+      // so the appended flat-quad blur is not what it needs — and counting it
+      // sent every extruded text to the slice stack the moment DOF came on.
+      const meshBlockedByFx = (layer.effects ?? []).some(
+        (e) => e.enabled !== false && e.id !== 'dof' && !isColorEffect(e.type) && !isLutEffect(e.type),
+      );
+      /*
+        INTERIOR layer styles (inner shadow, inner glow, satin, bevel, stroke)
+        hug the contour of the surface they are on, so each one has to be
+        resolved per FACE against that face's own edges. A mesh range is a
+        single flat colour and a single draw — there is nowhere to put them,
+        and the result was a title whose front carried the inner shadow and
+        whose walls carried nothing, split along the front edge exactly like
+        the gradient above. The quad synthesis stages a resolve per face
+        (`faceFxFor`), so a layer that asks for one goes there — the same rule
+        the spatial effects above follow. Overlays are not in this set: they
+        repaint the surface and already reach every face through `wallFill`.
+      */
+      const meshBlockedByStyles = faceStyles !== undefined;
+      const builtMesh = meshOutline && !meshBlockedByFx && !meshBlockedByStyles
         ? extrusionMeshFor(meshOutline, layerW, layerH, { depth: extrusionDepth, bevel: meshBevel, bevelStyle: d3.bevelStyle, frontCap: meshOwnsFront })
         : null;
       let meshEmitted = false;
@@ -3643,6 +3823,22 @@ export function buildSnapshot(
         if (!O.clipped) {
           const isMedia = layer.kind === 'image' || layer.kind === 'video';
           const hasFrontCap = mesh.ranges.some((r) => r.role === 'front');
+          /*
+            A GRADIENT fill reaches the walls through a paint plate: the layer
+            box painted edge to edge with `fillPaint`, which the wall, bevel and
+            back ranges sample over the mesh's layer-box uv. `layer.fill` is
+            only the BASE colour a gradient never writes to, so a gradient-
+            filled title used to get a gradient front over flat blue walls,
+            split exactly along the front edge (the quad path samples the
+            paint per face; a mesh range is one colour). A Colour/Gradient
+            Overlay style repaints the surface instead (wallFill differs from
+            the base) and keeps the flat styled colour; so does an explicit
+            per-face material.
+          */
+          const wallBase = typeof layer.fill === 'string' ? layer.fill : EXTRUSION_WALL_FALLBACK_FILL;
+          const wallPaint = layer.fillPaint && layer.fillPaint.type !== 'solid' && wallFill === wallBase
+            ? { key: `paint:${layer.id}`, fillPaint: layer.fillPaint, fill: wallBase, width: layerW, height: layerH }
+            : undefined;
           const ranges = mesh.ranges.map((r) => {
             if (r.role === 'front') {
               // The layer's own content, on the inset cap, undimmed.
@@ -3655,15 +3851,34 @@ export function buildSnapshot(
             // Media keeps its picture on the back cap unless a back colour
             // was chosen, as the quad path's spread back cap did.
             const textured = isMedia && r.role === 'back' && !faceMats.back?.fill;
-            return { role: r.role, first: r.first, count: r.count, fill: fm.fill, gain, ...(textured ? { textured: true } : {}) };
+            const paintTextured = !!wallPaint && !textured && !faceMats[r.role]?.fill;
+            return {
+              role: r.role, first: r.first, count: r.count, fill: fm.fill, gain,
+              ...(textured ? { textured: true } : {}),
+              ...(paintTextured ? { paintTextured: true } : {}),
+            };
           });
+          // Height displacement (B1): substitute the displaced vertices and
+          // remap the ranges by the subdivision's triangle multiple. The
+          // field decodes asynchronously — until it lands the mesh draws flat
+          // and the decode nudges a re-render (heightDisplacement.ts).
+          const disp = displacedCarrierFor(key, mesh.vertices, mesh.indices, extMat);
+          const dispRanges = disp ? ranges.map((r) => ({ ...r, first: r.first * disp.triangleScale, count: r.count * disp.triangleScale })) : ranges;
+          const extrudedMesh = {
+            key: disp ? disp.key : key,
+            vertices: disp ? disp.vertices : mesh.vertices,
+            indices: disp ? disp.indices : mesh.indices,
+            ranges: dispRanges,
+            ...(wallPaint ? { paint: wallPaint } : {}),
+          };
           // A carrier that samples the layer's raster (media back cap, or a
           // front cap the mesh owns) must keep the layer's content fields so
           // the texture provider rasterises the same thing under the new id.
           const carriesContent = isMedia || hasFrontCap;
           const scrub = {
-            // Colour-only by the gate above; the adapter folds them into the
-            // range colours (solid) / colour matrix (textured).
+            // Colour-only by the gate above (affine + LUT); the adapter folds
+            // them into the range colours (solid) / colour matrix + LUT strip
+            // (textured).
             effects: layer.effects,
             matte: undefined,
             isMatteSource: undefined,
@@ -3682,7 +3897,7 @@ export function buildSnapshot(
                 ...layer,
                 ...scrub,
                 id: `${layer.id}::ext-mesh`,
-                extrudedMesh: { key, vertices: mesh.vertices, indices: mesh.indices, ranges },
+                extrudedMesh,
               }
             : {
                 ...scrub,
@@ -3704,7 +3919,12 @@ export function buildSnapshot(
                 fill: resolveFaceMaterial(faceMats, 'side', wallFill).fill,
                 visible: layer.visible,
                 flatFacet: true,
-                extrudedMesh: { key, vertices: mesh.vertices, indices: mesh.indices, ranges },
+                // The SOLID casts into the GPU shadow map, not just the front
+                // plane: `castsShadow3d` was set on `layer` above and the
+                // content-carrying clone inherits it, but this bare carrier
+                // did not — so an extruded box threw a zero-depth shadow.
+                ...(layer.castsShadow3d ? { castsShadow3d: true } : {}),
+                extrudedMesh,
               };
           if (extLit) {
             // Per-fragment lighting from the interpolated vertex normals, one
@@ -4061,11 +4281,33 @@ export function buildSnapshot(
           )
         : null;
       const deformed = skinned ?? morphed;
+      // Height displacement (B1) rides on whatever the skin/morph produced —
+      // the same interleaved layout — so a displaced model still animates.
+      const mDisp = displacedCarrierFor(
+        deformed ? deformed.key : modelEntry.key,
+        deformed ? deformed.vertices : modelEntry.vertices,
+        modelEntry.indices,
+        mMat,
+      );
+      /*
+        Enabled COLOUR effects ride along, exactly as on the extrusion carrier:
+        the adapter grades each solid range's colour on the CPU
+        (gradeFillByEffects — the affine matrix, then the LUT table) and hands a
+        textured model's colour matrix and `lut:<id>` strip to the mesh draw
+        (the `-lut` mesh materials), so a Tint, a Hue/Saturation or a Levels
+        reaches every surface. Both halves are kept — `isColorEffect` is the
+        AFFINE set only, and the LUT grades (Levels, Curves, Posterize,
+        Exposure, Lumetri, …) are `isLutEffect`. The rest are dropped, not
+        half-applied: a model has no quad fallback to send spatial effects to.
+      */
+      const meshFx = (layer.effects ?? []).filter(
+        (e) => e.enabled !== false && (isColorEffect(e.type) || isLutEffect(e.type)),
+      );
       modelMeshLayer = {
         ...layer,
         // Same scrub as the extrusion carrier: features the mesh path cannot
-        // stage yet must not half-apply (colour-effect folding is a follow-up).
-        effects: undefined,
+        // stage yet must not half-apply.
+        effects: meshFx.length > 0 ? meshFx : undefined,
         matte: undefined,
         isMatteSource: undefined,
         isAdjustment: undefined,
@@ -4078,13 +4320,13 @@ export function buildSnapshot(
         lighting: undefined,
         shade3d: undefined,
         extrudedMesh: {
-          key: deformed ? deformed.key : modelEntry.key,
-          vertices: deformed ? deformed.vertices : modelEntry.vertices,
-          indices: modelEntry.indices,
+          key: mDisp ? mDisp.key : deformed ? deformed.key : modelEntry.key,
+          vertices: mDisp ? mDisp.vertices : deformed ? deformed.vertices : modelEntry.vertices,
+          indices: mDisp ? mDisp.indices : modelEntry.indices,
           ranges: [{
             role: modelEntry.doubleSided ? 'front' : 'side',
             first: 0,
-            count: modelEntry.indices.length,
+            count: mDisp ? mDisp.indices.length : modelEntry.indices.length,
             fill: textured ? '#ffffffff' : modelEntry.fill,
             gain: 1,
             ...(textured ? { textured: true } : {}),
@@ -4666,24 +4908,35 @@ function sampleMotion(
   // near-static layers; AE's adaptive limit exists for the same reason.
   const probe = motionBlurSampleTimes(t, cfg.fps, cfg.shutterAngle, 2, cfg.shutterPhase ?? -90, limit);
   let travelPx = 0;
+  const boxW = base.width ?? 0;
+  const boxH = base.height ?? 0;
   if (probe.length >= 2 && matrixAt) {
     // 3D: measure PROJECTED travel — it is what lands on screen. The raw x/y
     // probe below reads zero for a card flip (rotationY only), a depth push
     // (z only) and every camera move, so exactly the showiest 3D motion was
-    // sampled at the static-layer floor and strobed.
+    // sampled at the static-layer floor and strobed. Measured at the box's
+    // CORNERS, not its centre: a flip moves the edges and not the centre.
     const ta = probe[0]!;
     const tb = probe[probe.length - 1]!;
     const ma = matrixAt(remap(ta), ta);
     const mb = matrixAt(remap(tb), tb);
-    travelPx = Math.hypot(mb[4]! - ma[4]!, mb[5]! - ma[5]!);
+    travelPx = affineTravelPx(ma, mb, boxW, boxH);
   } else if (probe.length >= 2) {
     const a = remap(probe[0]!);
     const b = remap(probe[probe.length - 1]!);
-    const xa = anim.sample(nodeId, 'x', a) ?? base.x;
-    const ya = anim.sample(nodeId, 'y', a) ?? base.y;
-    const xb = anim.sample(nodeId, 'x', b) ?? base.x;
-    const yb = anim.sample(nodeId, 'y', b) ?? base.y;
-    travelPx = Math.hypot(xb - xa, yb - ya);
+    const at = (tt: number): MotionProbe => {
+      const sc = anim.sample(nodeId, 'scale', tt);
+      return {
+        x: anim.sample(nodeId, 'x', tt) ?? base.x,
+        y: anim.sample(nodeId, 'y', tt) ?? base.y,
+        rotation: anim.sample(nodeId, 'rotation', tt) ?? base.rotation,
+        scaleX: sc ?? anim.sample(nodeId, 'scaleX', tt) ?? base.scaleX,
+        scaleY: sc ?? anim.sample(nodeId, 'scaleY', tt) ?? base.scaleY,
+      };
+    };
+    // Silhouette travel: the anchor's path plus what rotation and scale do to
+    // the far corner. A spinning title has no anchor travel at all.
+    travelPx = motionBlurTravelPx(at(a), at(b), Math.hypot(boxW, boxH) / 2);
   }
   const samples = adaptiveMotionBlurSamples(cfg.samples, travelPx, limit);
   const times = motionBlurSampleTimes(t, cfg.fps, cfg.shutterAngle, samples, cfg.shutterPhase ?? -90, limit);

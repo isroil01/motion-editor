@@ -116,8 +116,7 @@ export const PANEL_DEFS: readonly PanelDef[] = [
    * properties of the current selection.
    */
   { id: 'properties',  title: 'Properties', icon: 'sliders-h',  region: 'rightInspector', weight: 5,   closable: false },
-  { id: 'character',   title: 'Character', icon: 'type',        region: 'rightInspector', weight: 4.8, closable: false },
-  { id: 'paragraph',   title: 'Paragraph', icon: 'text-left',   region: 'rightInspector', weight: 4.7, closable: false },
+  { id: 'character',   title: 'Text',      icon: 'type',        region: 'rightInspector', weight: 4.8, closable: false },
   { id: 'align',       title: 'Align',     icon: 'align-center', region: 'rightInspector', weight: 4.6, closable: false },
   // The project palette. NOT `onDemand`: a palette nobody can see is a palette
   // nobody fills, and the swatches it holds are document state that has to be

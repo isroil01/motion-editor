@@ -48,7 +48,12 @@ export function AdvancedTracking({
     onRotoBrush, onSeedMatte, onSegmentSam, onContentAwareFill,
   } = actions;
   return (
-  <details className={styles.advanced}>
+  <details
+    className={styles.advanced}
+    // The overlay draws the manual handles and feature/search boxes only
+    // while this is open (or after a run) — see trackerStore.advancedOpen.
+    onToggle={(e) => store.getState().setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+  >
     <summary className={styles.advancedSummary}>Advanced tracking</summary>
     <div className={styles.advancedBody}>
       <InspectorRow label="Mode">

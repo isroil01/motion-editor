@@ -477,6 +477,25 @@
   color: var(--color-text-secondary);
 }
 
+/* A set lock is a warning the row is not editable here, so it gets the
+   primary text colour rather than the secondary the closed eye uses: the eye
+   says "not drawn", the lock says "your next drag will be refused". */
+.rowAction[data-kind='lock'][data-on] {
+  color: var(--color-text-primary);
+}
+
+/* A soloed layer is the one still rendering while everything else is muted —
+   the accent, as the timeline's solo switch already draws it. */
+.rowAction[data-kind='solo'][data-on] {
+  color: var(--color-accent);
+}
+
+/* Hidden layer: the title dims with the eye, so the state reads without
+   hovering the row. Wraps the label only — the kind glyph keeps its tint. */
+.hiddenRow {
+  opacity: 0.5;
+}
+
 .rowAction:hover {
   background: var(--color-hover);
   color: var(--color-text-primary);

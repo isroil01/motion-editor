@@ -87,3 +87,55 @@ export function setNodeMotionBlur(nodeId: string, on: boolean): void {
   defaultSceneGraph.setMotionBlur(nodeId, on ? true : undefined);
   getEventBus().emit('AnimationChanged', { nodeId });
 }
+
+/** One sub-frame transform sample, as `sampleMotion` reads it. */
+export interface MotionProbe {
+  x: number; y: number;
+  /** Degrees. */
+  rotation: number;
+  scaleX: number; scaleY: number;
+}
+
+/**
+ * How far a layer's SILHOUETTE travels on screen between two sub-frame
+ * samples, in comp px — the number the adaptive sample count is sized from.
+ *
+ * The anchor's own travel is the obvious term and used to be the only one,
+ * which sized a spinning title or a scale pop at the static-layer floor: a
+ * rotation about the anchor moves the anchor not at all, and every corner by
+ * `Δθ · halfDiagonal`. So the far corner's travel from rotation and scale is
+ * added on top. `halfDiagonalPx` is half the layer box's diagonal (0 for a
+ * layer with no size, which then falls back to the anchor rule).
+ */
+export function motionBlurTravelPx(a: MotionProbe, b: MotionProbe, halfDiagonalPx: number): number {
+  const anchor = Math.hypot(b.x - a.x, b.y - a.y);
+  const hd = Math.max(0, halfDiagonalPx);
+  const rot = Math.abs(b.rotation - a.rotation) * (Math.PI / 180) * hd;
+  const scale = Math.max(Math.abs(b.scaleX - a.scaleX), Math.abs(b.scaleY - a.scaleY)) * hd;
+  return anchor + rot + scale;
+}
+
+/**
+ * The same measure for a PROJECTED 3D layer: the farthest any corner of the
+ * `w`×`h` box (centred on the origin) moves between the two affine matrices
+ * `[a, b, c, d, e, f]`. A card flip moves its edges and not its centre, which
+ * is why the translation term alone read zero for exactly the showiest 3D
+ * motion.
+ */
+export function affineTravelPx(
+  ma: readonly [number, number, number, number, number, number],
+  mb: readonly [number, number, number, number, number, number],
+  w: number,
+  h: number,
+): number {
+  const hw = Math.max(0, w) / 2; const hh = Math.max(0, h) / 2;
+  const corners: ReadonlyArray<readonly [number, number]> = [[0, 0], [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]];
+  let max = 0;
+  for (const [x, y] of corners) {
+    const ax = ma[0] * x + ma[2] * y + ma[4]; const ay = ma[1] * x + ma[3] * y + ma[5];
+    const bx = mb[0] * x + mb[2] * y + mb[4]; const by = mb[1] * x + mb[3] * y + mb[5];
+    const d = Math.hypot(bx - ax, by - ay);
+    if (Number.isFinite(d) && d > max) max = d;
+  }
+  return max;
+}

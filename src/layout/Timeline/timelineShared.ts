@@ -153,6 +153,8 @@ export const GROUP_HEADING: Readonly<Record<TimelineGroupKey, { label: string; i
   effects: { label: 'Effects', icon: 'sparkles' },
   transform: { label: 'Transform', icon: 'sliders-h' },
   styles: { label: 'Layer Styles', icon: 'palette' },
+  camera: { label: 'Camera Options', icon: 'camera' },
+  light: { label: 'Light Options', icon: 'light' },
   material: { label: 'Material Options', icon: 'cube' },
   audio: { label: 'Audio', icon: 'audio' },
   time: { label: 'Time', icon: 'clock' },

@@ -433,7 +433,7 @@ export function TopNav(): JSX.Element {
         // The view lock (Free/Fixed) is NOT mirrored here — the Composition
         // tab strip owns it (`EditorTabs.tsx`, the lock button in its panel
         // actions), so a copy would be a second switch for one state.
-        { type: 'checkbox', id: 'draft-3d', label: 'Draft 3D', checked: draft3d, onChange: () => useGuidesStore.getState().toggleDraft3d() },
+        { type: 'checkbox', id: 'draft-3d', label: 'Draft 3D — fast preview, skips lights, shadows & DOF', checked: draft3d, onChange: () => useGuidesStore.getState().toggleDraft3d() },
         { type: 'checkbox', id: 'ground-grid', label: '3D Ground Plane', checked: groundGridVisible, onChange: () => useGuidesStore.getState().toggleGroundGridVisible() },
         { type: 'checkbox', id: 'layer-boxes', label: 'Layer Bounding Boxes', checked: layerBoxesVisible, onChange: () => usePreferenceStore.getState().set('showLayerBounds', !usePreferenceStore.getState().showLayerBounds) },
       ]

@@ -702,6 +702,26 @@ export class MotionRendererBackend implements RenderBackend {
           // One bad asset (broken src, rasterization failure, upload error)
           // must not abort texture feeding for the rest of the frame.
           try {
+            // 0a. An extrusion's gradient plate (buildSnapshot `extrudedMesh.paint`):
+            // the layer box filled edge to edge with the fill paint, which the
+            // wall ranges sample. A plain rect through the path rasteriser —
+            // no effects, so no padding, so the mesh's box uv is the plate's.
+            const plate = layer.extrudedMesh?.paint;
+            if (plate) {
+              activeKeys.add(plate.key);
+              this.textures!.setPath(plate.key, {
+                id: plate.key,
+                kind: 'shape',
+                primitive: 'rect',
+                x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1,
+                width: plate.width,
+                height: plate.height,
+                opacity: 1,
+                visible: true,
+                fill: plate.fill ?? '#ffffff',
+                fillPaint: plate.fillPaint,
+              } as RenderLayer);
+            }
             // 0. Imported-model PBR maps. Fed BEFORE the base-layer branch and
             // outside it, because they ride alongside whatever the layer's own
             // texture is (a model leaf is an image layer when it has a base

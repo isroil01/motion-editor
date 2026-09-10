@@ -101,6 +101,14 @@ function bakedEffectSpread(layer: RenderLayer): number {
       case 'glow':
         s = effectNumber(e, 'radius') * BLUR_EXTENT;
         break;
+      // The widest octave's sigma; the pyramid's tail is that Gaussian's.
+      case 'deep-glow':
+        s = effectNumber(e, 'radius') * BLUR_EXTENT;
+        break;
+      // The glow's cut-off (10 × spread) plus the core and the distortion reach.
+      case 'beam-path':
+        s = effectNumber(e, 'coreWidth') * Math.max(effectNumber(e, 'startSize'), effectNumber(e, 'endSize')) / 100 + effectNumber(e, 'glowSpread') * 10 + effectNumber(e, 'distortion');
+        break;
       case 'drop-shadow':
         s = effectNumber(e, 'distance') + effectNumber(e, 'softness') * BLUR_EXTENT;
         break;

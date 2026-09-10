@@ -27,6 +27,13 @@ export interface ExrImage {
   width: number;
   height: number;
   channels: ExrChannel[];
+  /**
+   * The header's STRING attributes, by name — the ones a matte workflow reads:
+   * Cryptomatte writes `cryptomatte/<id>/name` and `cryptomatte/<id>/manifest`
+   * (a JSON object of object name → 32-bit hash as 8 hex digits) beside its
+   * channels. Absent on files that carry none.
+   */
+  attributes?: Record<string, string>;
 }
 
 const MAGIC = 20000630;
@@ -168,6 +175,7 @@ export async function decodeExr(buf: ArrayBuffer): Promise<ExrImage> {
   let compression = -1;
   let dataWindow: { xMin: number; yMin: number; xMax: number; yMax: number } | null = null;
   let lineOrder = 0;
+  let attributes: Record<string, string> | undefined;
 
   for (;;) {
     const name = r.str();
@@ -175,7 +183,11 @@ export async function decodeExr(buf: ArrayBuffer): Promise<ExrImage> {
     const type = r.str();
     const size = r.i32();
     const attrEnd = r.pos + size;
-    if (name === 'channels' && type === 'chlist') {
+    if (type === 'string') {
+      // A string attribute is `size` bytes, no terminator. Kept for the
+      // Cryptomatte manifest (and anything else a reader may want to show).
+      (attributes ??= {})[name] = new TextDecoder().decode(r.raw(size));
+    } else if (name === 'channels' && type === 'chlist') {
       for (;;) {
         const ch = r.str();
         if (ch === '') break;
@@ -259,7 +271,7 @@ export async function decodeExr(buf: ArrayBuffer): Promise<ExrImage> {
     }
   }
 
-  return { width, height, channels: planes.map((p) => ({ name: p.spec.name, data: p.data })) };
+  return { width, height, channels: planes.map((p) => ({ name: p.spec.name, data: p.data })), ...(attributes ? { attributes } : {}) };
 }
 
 // ── encode (uncompressed scanline) ───────────────────────────────────

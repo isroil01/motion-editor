@@ -517,18 +517,30 @@ export function recipeLowerThird(
 /**
  * A slow, continuous push-in (or pull-out) that makes a hero shot feel alive.
  *
- * IMPLEMENTED AS A PER-LAYER SCALE RAMP, NOT A 3D CAMERA. A real 3D scene camera
- * dollying in this engine CULLS 3D content it pushes past its frustum — e.g. a
- * scene-3 emblem vanishing near the end of a multi-scene video. The scale ramp
- * gives the same "the shot is breathing" feel with none of that risk: it nudges
- * every content layer's scale by a few percent across its life. Layers that
- * already animate their own scale (an emblem's entrance/pulse, a card's pop) are
- * left alone so the ramp never fights an entrance.
+ * A REAL 3D CAMERA MOVE. Every shape/text/image layer gets its 3D switch on (a
+ * camera moves nothing until content is 3D), the comp's first camera is reused
+ * — or a "3D Camera" layer is created — and that camera is keyframed across the
+ * move: a dolly in `z` (−2200 → −1350 for a push, −1200 → −2200 for a pull)
+ * plus a small `orbitYaw` arc (−8° → 8°, or 6° → −6°), so layers at different
+ * depths parallax against each other instead of reading as a flat zoom. Layer
+ * scale is not touched, so a layer's own scale entrance or pulse never fights
+ * the move.
+ *
+ * Note — why the dolly stays well short of the comp plane: an earlier version
+ * of this recipe avoided the camera entirely (a per-layer scale ramp) because a
+ * camera pushed THROUGH 3D content culls whatever falls past its frustum — a
+ * scene-3 emblem vanishing near the end of a multi-scene video. The camera
+ * never comes closer than 1200px to z = 0, which keeps content sitting on or
+ * near the plane in view; a layer already placed that far toward the camera in
+ * z can still end up behind it.
+ *
+ * Returns the number of CONTENT layers moved, separately from the camera, so a
+ * caller's count never includes the camera itself.
  */
 export function recipeCameraMove(
   ctx: ToolContext,
   opts: { kind?: 'push_in' | 'pull_out'; durationSec?: number },
-): number {
+): { layers: number; cameraId: string; createdCamera: boolean } {
   const comp = ctx.comp.get();
   const dur = opts.durationSec ?? comp.durationSeconds;
   const isPull = opts.kind === 'pull_out';
@@ -544,6 +556,7 @@ export function recipeCameraMove(
 
   // 2. Find or create a dedicated 3D Camera layer
   let camId = ctx.scene.all().find((n) => n.kind === 'camera')?.id;
+  const createdCamera = !camId;
   if (!camId) {
     camId = ctx.scene.create('camera', '3D Camera');
   }
@@ -562,7 +575,7 @@ export function recipeCameraMove(
     { t: dur, value: isPull ? -6 : 8, easing: 'bezier', bezier: PHYSICS.smooth },
   ]);
 
-  return targets.length + 1;
+  return { layers: targets.length, cameraId: camId, createdCamera };
 }
 
 /**

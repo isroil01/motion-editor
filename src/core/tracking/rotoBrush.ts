@@ -158,7 +158,7 @@ function pathFromMatte(
   };
 }
 
-async function loadExactSource(nodeId: string): Promise<{
+export async function loadExactSource(nodeId: string): Promise<{
   source: ExactVideoSource;
   width: number;
   height: number;
@@ -182,7 +182,7 @@ async function loadExactSource(nodeId: string): Promise<{
   };
 }
 
-function mediaTimeAt(nodeId: string, compTime: number): number {
+export function mediaTimeAt(nodeId: string, compTime: number): number {
   // Clip remapping via keyframe time axis — source seconds ≈ layer media clock.
   return Math.max(0, compToKeyframeTime(nodeId, compTime));
 }

@@ -16,8 +16,10 @@ import { wanderOffset } from './particleField';
 import { parseColorChannels, channelsToColor } from '@core/effects/effects';
 import type { SceneNode } from '@core/types';
 
-export type EmitterType = 'point' | 'box' | 'circle';
-export type ParticleShape = 'circle' | 'square' | 'line' | 'star';
+/** `sphere` is a 3D VOLUME: uniform in a ball of diameter `emitterWidth`, so z is born with it. */
+export type EmitterType = 'point' | 'box' | 'circle' | 'sphere';
+/** `sprite` draws `spriteSrc` (an image asset, optionally a horizontal sheet of `spriteFrames`). */
+export type ParticleShape = 'circle' | 'square' | 'line' | 'star' | 'sprite';
 export type ParticleBlend = 'normal' | 'add';
 /** `ballistic` = closed-form (default). `stateful` = SimulationCache + floor bounce. */
 export type ParticleSimMode = 'ballistic' | 'stateful';
@@ -97,10 +99,13 @@ export interface ParticleConfig {
   speedZ?: number;
   /**
    * Perspective focal length in px; 0 = off (z is simulated but not
-   * projected). This is 2.5D ON PURPOSE: particles project through their own
-   * focal length inside the field texture, independent of the comp camera —
-   * making them camera-aware would mean rasterizing the field per camera,
-   * which is a renderer subsystem, not a particle option.
+   * projected). This is 2.5D ON PURPOSE: particles project through a focal
+   * length inside the field texture — making them fully camera-aware would
+   * mean rasterizing the field per camera, which is a renderer subsystem,
+   * not a particle option. Since 2026-09-09 a 3D particle layer under a scene
+   * camera takes that camera's focal length here automatically when this is
+   * 0 (buildSnapshot), so depth parallax follows the comp lens; the field
+   * card itself is still placed and projected like any 3D layer.
    */
   perspective?: number;
   /** Particle-particle collisions (stateful only — contact is history). */
@@ -114,7 +119,7 @@ export interface ParticleConfig {
    * Children never sub-emit (one generation), or a firework would cascade
    * unbounded.
    */
-  subEmit?: 'off' | 'death' | 'bounce';
+  subEmit?: 'off' | 'death' | 'bounce' | 'continuous';
   /** Children per event, capped hard — each child is a live particle. */
   subCount?: number;
   /** Child launch speed px/s (full 360° spread). */
@@ -123,6 +128,58 @@ export interface ParticleConfig {
   subLifetime?: number;
   /** Child size as a fraction of the config's size ramp. */
   subSizeScale?: number;
+  /**
+   * `subEmit: 'continuous'` — children per second per LIVING parent (sparks
+   * off a spark, smoke off an ember). Closed-form: child k of parent i is
+   * born at `birth_i + k / subRate` at the parent's position then, and flies
+   * on its own; the count is bounded by `maxParticles`.
+   */
+  subRate?: number;
+  /**
+   * Linear drag, 1/s. Folded into the closed form EXACTLY —
+   * `p = p0 + (v0 − a/k)(1 − e^{−kt})/k + (a/k)·t` — so a dragged particle
+   * scrubs as freely as a ballistic one. 0 = the pre-drag formula, bit for bit.
+   */
+  drag?: number;
+  /**
+   * Per-age curves: a MID-POINT between birth and death for size, opacity and
+   * colour at normalised age `midAge` (default 0.5). Absent → the straight
+   * two-point ramp, byte-identical to before. A 3-point ramp is what makes a
+   * spark flare then die, or smoke bloom then thin.
+   */
+  sizeMid?: number;
+  opacityMid?: number;
+  colorMid?: string;
+  midAge?: number;
+  /**
+   * Velocity streaks, 0..1: each sprite is drawn stretched along its own
+   * closed-form velocity by `|v| · shutterSec · motionBlur`. The shutter
+   * comes from the comp's motion-blur settings via `shutterSec` (buildSnapshot
+   * writes it when the layer's motion-blur switch is on); 0 = off.
+   */
+  motionBlur?: number;
+  shutterSec?: number;
+  /** Sprite image source (an asset's `src`) for `shape: 'sprite'`; resolved from `spriteAssetId` at snapshot time. */
+  spriteAssetId?: string;
+  spriteSrc?: string;
+  /** Horizontal sheet frame count (1 = a single image). */
+  spriteFrames?: number;
+  /** Frames per second through the sheet; 0 = index the sheet by AGE instead (birth = first, death = last). */
+  spriteFps?: number;
+  /**
+   * Plexus over the live particles: link every pair closer than
+   * `plexusDistance` (field px, after projection) with a line whose opacity
+   * falls with distance, optionally filling mutually-close triples. Drawn
+   * after the sprites by `drawPlexusLinks`; 0 distance = off.
+   */
+  plexusDistance?: number;
+  plexusWidth?: number;
+  /** 0..1. */
+  plexusOpacity?: number;
+  plexusColor?: string;
+  plexusTriangles?: boolean;
+  /** 0..1. */
+  plexusTriangleOpacity?: number;
 }
 
 export interface Particle {
@@ -165,6 +222,15 @@ export interface Particle {
    * Optional so every existing producer and consumer is untouched.
    */
   index?: number;
+  /**
+   * Closed-form velocity at this instant, px/s — what the velocity streak is
+   * drawn along. Absent when streaks are off, so pre-streak outputs compare
+   * byte-identical.
+   */
+  vx?: number;
+  vy?: number;
+  /** Sheet frame for `shape: 'sprite'` (0-based). */
+  spriteFrame?: number;
 }
 
 export const DEFAULT_PARTICLE_CONFIG: ParticleConfig = {
@@ -219,6 +285,18 @@ export const DEFAULT_PARTICLE_CONFIG: ParticleConfig = {
   subSpeed: 120,
   subLifetime: 0.6,
   subSizeScale: 0.5,
+  subRate: 10,
+  drag: 0,
+  midAge: 0.5,
+  motionBlur: 0,
+  spriteFrames: 1,
+  spriteFps: 0,
+  plexusDistance: 0,
+  plexusWidth: 1,
+  plexusOpacity: 0.6,
+  plexusColor: '#9fd0ff',
+  plexusTriangles: false,
+  plexusTriangleOpacity: 0.15,
 };
 
 /** Read a node's particle config off its `fx` component, filling in every
@@ -241,12 +319,16 @@ export const PARTICLE_NUMERIC_KEYS = [
   // that rises over the shot needs nothing beyond this entry.
   'windX', 'windY', 'turbulence', 'turbulenceScale', 'turbulenceSpeed',
   'emitterDepth', 'speedZ', 'perspective',
+  // Particles v2 (2026-09-09): drag, the mid-point curves, continuous
+  // sub-emission rate and the streak amount are all keyframeable numbers.
+  'drag', 'sizeMid', 'opacityMid', 'midAge', 'subRate', 'motionBlur',
+  'plexusDistance', 'plexusWidth', 'plexusOpacity', 'plexusTriangleOpacity',
 ] as const;
 export type ParticleNumericKey = (typeof PARTICLE_NUMERIC_KEYS)[number];
 
 /** The color config fields — keyframed via decomposed channel tracks
  *  (`particle.colorStart_r` …), the same pattern effect colors use. */
-export const PARTICLE_COLOR_KEYS = ['colorStart', 'colorEnd'] as const;
+export const PARTICLE_COLOR_KEYS = ['colorStart', 'colorEnd', 'colorMid'] as const;
 export type ParticleColorKey = (typeof PARTICLE_COLOR_KEYS)[number];
 
 /** Animation prop-path for a particle config field (`particle.birthRate`). */
@@ -282,7 +364,9 @@ export function resolveParticleConfig(
     const b = sample(particlePropPath(`${key}_b`));
     const a = sample(particlePropPath(`${key}_a`));
     if (r !== undefined || g !== undefined || b !== undefined || a !== undefined) {
-      const base = parseColorChannels(cfg[key]);
+      // The mid colour is optional; an animated track on an unset one starts
+      // from the start colour rather than from nothing.
+      const base = parseColorChannels(cfg[key] ?? cfg.colorStart);
       touch()[key] = channelsToColor(r ?? base[0], g ?? base[1], b ?? base[2], a ?? base[3]);
     }
   }
@@ -308,6 +392,96 @@ function lerpColor(a: string, b: string, t: number, alpha: number): string {
   const bl = Math.round(lerp(ca[2], cb[2], t));
   const al = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
   return `rgba(${r},${g},${bl},${al})`;
+}
+
+// ── Particles v2: the closed forms the sim, the bursts and the trails share ──
+
+/**
+ * A 3-point ramp over normalised age: `start` → `mid` at `midAge` → `end`.
+ * With no `mid` it is the plain two-point lerp, so configs that predate the
+ * curves render byte-identically.
+ */
+export function rampAt(start: number, end: number, age01: number, mid: number | undefined, midAge: number): number {
+  if (mid === undefined) return lerp(start, end, age01);
+  const m = Math.min(0.999, Math.max(0.001, midAge));
+  return age01 <= m ? lerp(start, mid, age01 / m) : lerp(mid, end, (age01 - m) / (1 - m));
+}
+
+/** The colour ramp with the same optional mid-point. */
+export function colorRampAt(cfg: ParticleConfig, age01: number, alpha: number): string {
+  const mid = cfg.colorMid;
+  if (!mid) return lerpColor(cfg.colorStart, cfg.colorEnd, age01, alpha);
+  const m = Math.min(0.999, Math.max(0.001, cfg.midAge ?? 0.5));
+  return age01 <= m
+    ? lerpColor(cfg.colorStart, mid, age01 / m, alpha)
+    : lerpColor(mid, cfg.colorEnd, (age01 - m) / (1 - m), alpha);
+}
+
+/**
+ * Position and velocity after `t` seconds from `o` with initial velocity
+ * `v0`, constant acceleration `a` and linear drag `k` (1/s). The exact
+ * solution of `v' = a − k·v`:
+ *   v(t) = a/k + (v0 − a/k)·e^{−kt}
+ *   p(t) = o + (a/k)·t + (v0 − a/k)·(1 − e^{−kt})/k
+ * and, at k = 0, the ballistic `o + v0·t + ½·a·t²` — reached by the SAME
+ * code path (the k→0 limit is taken literally), so drag-free configs are
+ * bit-identical to the pre-drag sim.
+ */
+export function flightAt(
+  ox: number, oy: number, v0x: number, v0y: number, ax: number, ay: number, t: number, k: number,
+): { x: number; y: number; vx: number; vy: number } {
+  if (!(k > 1e-6)) {
+    return { x: ox + v0x * t + 0.5 * ax * t * t, y: oy + v0y * t + 0.5 * ay * t * t, vx: v0x + ax * t, vy: v0y + ay * t };
+  }
+  const e = Math.exp(-k * t);
+  const s = (1 - e) / k;
+  const tx = ax / k; const ty = ay / k;
+  return {
+    x: ox + tx * t + (v0x - tx) * s,
+    y: oy + ty * t + (v0y - ty) * s,
+    vx: tx + (v0x - tx) * e,
+    vy: ty + (v0y - ty) * e,
+  };
+}
+
+/** Where particle `i` is born: point, box, disc or ball (the ball has depth). */
+export function emitterOrigin(
+  cfg: ParticleConfig, i: number, seed: number,
+  /** The caller's hash — the stateful sim has its own recipe, and its box/disc origins must not move. */
+  h: (i: number, salt: number, seed: number) => number = hash01,
+): { x: number; y: number; z: number } {
+  let ox = 0; let oy = 0; let oz = 0;
+  if (cfg.emitterType === 'box') {
+    ox = (h(i, 4, seed) - 0.5) * cfg.emitterWidth;
+    oy = (h(i, 5, seed) - 0.5) * cfg.emitterHeight;
+  } else if (cfg.emitterType === 'circle') {
+    const ang = h(i, 4, seed) * Math.PI * 2;
+    const rad = Math.sqrt(h(i, 5, seed)) * (cfg.emitterWidth / 2);
+    ox = Math.cos(ang) * rad;
+    oy = Math.sin(ang) * rad;
+  } else if (cfg.emitterType === 'sphere') {
+    // Uniform in the ball: cube-root radius, cosine-uniform latitude.
+    const ang = h(i, 4, seed) * Math.PI * 2;
+    const cosLat = h(i, 9, seed) * 2 - 1;
+    const sinLat = Math.sqrt(Math.max(0, 1 - cosLat * cosLat));
+    const rad = Math.cbrt(h(i, 5, seed)) * (cfg.emitterWidth / 2);
+    ox = Math.cos(ang) * sinLat * rad;
+    oy = Math.sin(ang) * sinLat * rad;
+    oz = cosLat * rad;
+  }
+  // The flat emitters' depth spread stays what it was; the ball adds its own.
+  oz += (h(i, 6, seed) - 0.5) * (cfg.emitterDepth ?? 0);
+  return { x: ox, y: oy, z: oz };
+}
+
+/** Sheet frame for a sprite particle: by age, or by a fixed rate through the sheet. */
+function spriteFrameAt(cfg: ParticleConfig, age: number, age01: number): number | undefined {
+  if (cfg.shape !== 'sprite') return undefined;
+  const frames = Math.max(1, Math.floor(cfg.spriteFrames ?? 1));
+  if (frames <= 1) return 0;
+  const fps = cfg.spriteFps ?? 0;
+  if (fps > 0) return Math.floor(age * fps) % frames;
+  return Math.min(frames - 1, Math.floor(age01 * frames));
 }
 
 /**
@@ -336,25 +510,16 @@ function emitDeathBurst(
   const dir = dirBase + spreadRad * (hash01(parent, 3, seed) - 0.5);
   const v0x = Math.cos(dir) * speed;
   const v0y = Math.sin(dir) * speed;
-  let ox = 0;
-  let oy = 0;
-  if (cfg.emitterType === 'box') {
-    ox = (hash01(parent, 4, seed) - 0.5) * cfg.emitterWidth;
-    oy = (hash01(parent, 5, seed) - 0.5) * cfg.emitterHeight;
-  } else if (cfg.emitterType === 'circle') {
-    const ang = hash01(parent, 4, seed) * Math.PI * 2;
-    const rad = Math.sqrt(hash01(parent, 5, seed)) * (cfg.emitterWidth / 2);
-    ox = Math.cos(ang) * rad;
-    oy = Math.sin(ang) * rad;
-  }
+  const origin = emitterOrigin(cfg, parent, seed);
   const ax = cfg.gravityX + (cfg.windX ?? 0);
   const ay = cfg.gravityY + (cfg.windY ?? 0);
+  const drag = Math.max(0, cfg.drag ?? 0);
   const dw = wanderOffset(parent, parentLife, cfg);
-  const deathX = ox + v0x * parentLife + 0.5 * ax * parentLife * parentLife + dw.x;
-  const deathY = oy + v0y * parentLife + 0.5 * ay * parentLife * parentLife + dw.y;
-  const oz = (hash01(parent, 6, seed) - 0.5) * (cfg.emitterDepth ?? 0);
+  const death = flightAt(origin.x, origin.y, v0x, v0y, ax, ay, parentLife, drag);
+  const deathX = death.x + dw.x;
+  const deathY = death.y + dw.y;
   const vz = (hash01(parent, 8, seed) * 2 - 1) * (cfg.speedZ ?? 0);
-  const deathZ = oz + vz * parentLife;
+  const deathZ = origin.z + vz * parentLife;
 
   const subLife = Math.max(0.05, cfg.subLifetime ?? 0.6);
   const count = Math.min(16, Math.max(0, Math.floor(cfg.subCount ?? 0)));
@@ -369,21 +534,86 @@ function emitDeathBurst(
     const j = parent * 977 + k;
     const cdir = hash01(j, 30, seed) * Math.PI * 2;
     const cspeed = subSpeed * (0.5 + hash01(j, 31, seed));
-    const cx = deathX + Math.cos(cdir) * cspeed * childAge + 0.5 * ax * childAge * childAge;
-    const cy = deathY + Math.sin(cdir) * cspeed * childAge + 0.5 * ay * childAge * childAge;
-    const size = Math.max(0, lerp(cfg.sizeStart, cfg.sizeEnd, a01)) * sizeScale;
-    const opacity = lerp(cfg.opacityStart, cfg.opacityEnd, a01);
+    const cf = flightAt(deathX, deathY, Math.cos(cdir) * cspeed, Math.sin(cdir) * cspeed, ax, ay, childAge, drag);
+    const size = Math.max(0, rampAt(cfg.sizeStart, cfg.sizeEnd, a01, cfg.sizeMid, cfg.midAge ?? 0.5)) * sizeScale;
+    const opacity = rampAt(cfg.opacityStart, cfg.opacityEnd, a01, cfg.opacityMid, cfg.midAge ?? 0.5);
     out.push({
       index: -(j + 1),
-      x: cx,
-      y: cy,
+      x: cf.x,
+      y: cf.y,
       z: deathZ,
       size,
-      color: lerpColor(cfg.colorStart, cfg.colorEnd, a01, opacity),
+      color: colorRampAt(cfg, a01, opacity),
       opacity,
       rotation: cfg.spin * childAge,
       age01: a01,
       shape: cfg.shape,
+    });
+  }
+}
+
+/**
+ * The children a living parent sheds continuously — sparks off a spark. Child
+ * `k` is born at the parent's age `k / subRate`, at the parent's position
+ * then (its own closed form), and flies from there under the same
+ * gravity/wind/drag with a hashed velocity. Only children born within the
+ * last `subLifetime` are alive, so the loop visits a bounded window.
+ */
+function emitContinuousChildren(
+  out: Particle[],
+  cfg: ParticleConfig,
+  parent: number,
+  parentLife: number,
+  parentAge: number,
+  seed: number,
+  drag: number,
+  streak: number,
+): void {
+  const subRate = Math.max(0, cfg.subRate ?? 0);
+  if (subRate <= 0) return;
+  const subLife = Math.max(0.05, cfg.subLifetime ?? 0.6);
+  const sizeScale = Math.max(0, cfg.subSizeScale ?? 0.5);
+  const subSpeed = cfg.subSpeed ?? 120;
+  const dirBase = (cfg.direction * Math.PI) / 180;
+  const spreadRad = (cfg.spread * Math.PI) / 180;
+  const speed = cfg.speed * (1 + cfg.speedRandom * (hash01(parent, 2, seed) * 2 - 1));
+  const dir = dirBase + spreadRad * (hash01(parent, 3, seed) - 0.5);
+  const v0x = Math.cos(dir) * speed;
+  const v0y = Math.sin(dir) * speed;
+  const origin = emitterOrigin(cfg, parent, seed);
+  const ax = cfg.gravityX + (cfg.windX ?? 0);
+  const ay = cfg.gravityY + (cfg.windY ?? 0);
+  const vz = (hash01(parent, 8, seed) * 2 - 1) * (cfg.speedZ ?? 0);
+  // Children born while the parent lived, and still within their own life.
+  const kMax = Math.floor(Math.min(parentAge, parentLife) * subRate);
+  const kMin = Math.max(0, Math.ceil((parentAge - subLife) * subRate));
+  const cap = cfg.maxParticles * 2;
+  for (let k = kMin; k <= kMax; k++) {
+    if (out.length >= cap) return;
+    const tb = k / subRate;
+    const childAge = parentAge - tb;
+    if (childAge < 0 || childAge >= subLife) continue;
+    const j = parent * 977 + k;
+    const w = wanderOffset(parent, tb, cfg);
+    const at = flightAt(origin.x, origin.y, v0x, v0y, ax, ay, tb, drag);
+    const cdir = hash01(j, 32, seed) * Math.PI * 2;
+    const cspeed = subSpeed * (0.5 + hash01(j, 33, seed));
+    const cf = flightAt(at.x + w.x, at.y + w.y, Math.cos(cdir) * cspeed, Math.sin(cdir) * cspeed, ax, ay, childAge, drag);
+    const a01 = childAge / subLife;
+    const size = Math.max(0, rampAt(cfg.sizeStart, cfg.sizeEnd, a01, cfg.sizeMid, cfg.midAge ?? 0.5)) * sizeScale;
+    const opacity = rampAt(cfg.opacityStart, cfg.opacityEnd, a01, cfg.opacityMid, cfg.midAge ?? 0.5);
+    out.push({
+      index: -(j + 1),
+      x: cf.x,
+      y: cf.y,
+      z: origin.z + vz * tb,
+      size,
+      color: colorRampAt(cfg, a01, opacity),
+      opacity,
+      rotation: cfg.spin * childAge,
+      age01: a01,
+      shape: cfg.shape,
+      ...(streak > 0 ? { vx: cf.vx, vy: cf.vy } : {}),
     });
   }
 }
@@ -393,11 +623,14 @@ export function simulateParticles(cfg: ParticleConfig, time: number): Particle[]
   if (rate <= 0 || time <= 0) return [];
 
   const subEmitDeath = cfg.subEmit === 'death';
+  const subContinuous = cfg.subEmit === 'continuous' && cfg.simMode !== 'stateful';
   const subLife = Math.max(0.05, cfg.subLifetime ?? 0.6);
   const maxLife = Math.max(0.05, cfg.lifetime * (1 + Math.max(0, cfg.lifetimeRandom)))
     // A dead parent still matters while its children fly, so the birth window
     // reaches back one child-lifetime further.
-    + (subEmitDeath ? subLife : 0);
+    + (subEmitDeath || subContinuous ? subLife : 0);
+  const drag = Math.max(0, cfg.drag ?? 0);
+  const streak = Math.max(0, cfg.motionBlur ?? 0) * Math.max(0, cfg.shutterSec ?? 0);
   let iStart = Math.max(0, Math.ceil((time - maxLife) * rate));
   const iEnd = Math.floor(time * rate);
   if (iEnd - iStart > cfg.maxParticles) iStart = iEnd - cfg.maxParticles;
@@ -416,6 +649,13 @@ export function simulateParticles(cfg: ParticleConfig, time: number): Particle[]
       0.05,
       cfg.lifetime * (1 + cfg.lifetimeRandom * (hash01(i, 1, seed) * 2 - 1)),
     );
+    // CONTINUOUS SUB-EMIT, closed-form: child k of this parent is born at
+    // `birth + k / subRate` while the parent lives, at the parent's position
+    // then, and flies on its own from there — every term a formula in
+    // (parent index, child index, time), so it scrubs like the parent does.
+    if (subContinuous && out.length < cfg.maxParticles * 2) {
+      emitContinuousChildren(out, cfg, i, life, age, seed, drag, streak);
+    }
     if (age >= life) {
       // DEATH SUB-EMIT, still closed-form: the death time is `birth + life`, a
       // fact known in advance, so a child's whole flight is a formula in
@@ -435,32 +675,26 @@ export function simulateParticles(cfg: ParticleConfig, time: number): Particle[]
     const dir = dirBase + spreadRad * (hash01(i, 3, seed) - 0.5);
     const v0x = Math.cos(dir) * speed;
     const v0y = Math.sin(dir) * speed;
-    const oz = (hash01(i, 6, seed) - 0.5) * (cfg.emitterDepth ?? 0);
     const vz = (hash01(i, 8, seed) * 2 - 1) * (cfg.speedZ ?? 0);
 
-    // Emitter origin sample.
-    let ox = 0;
-    let oy = 0;
-    if (cfg.emitterType === 'box') {
-      ox = (hash01(i, 4, seed) - 0.5) * cfg.emitterWidth;
-      oy = (hash01(i, 5, seed) - 0.5) * cfg.emitterHeight;
-    } else if (cfg.emitterType === 'circle') {
-      const ang = hash01(i, 4, seed) * Math.PI * 2;
-      const rad = Math.sqrt(hash01(i, 5, seed)) * (cfg.emitterWidth / 2);
-      ox = Math.cos(ang) * rad;
-      oy = Math.sin(ang) * rad;
-    }
+    // Emitter origin sample (point / box / disc / ball).
+    const origin = emitterOrigin(cfg, i, seed);
+    const ox = origin.x;
+    const oy = origin.y;
+    const oz = origin.z;
 
     // Wind is just more constant acceleration, so it lives inside the same
-    // closed form as gravity — scrubbing stays free. Turbulence is a seeded
-    // wander displacement, zero at birth (see particleField.ts).
+    // closed form as gravity — scrubbing stays free; drag is folded into that
+    // form exactly (see `flightAt`). Turbulence is a seeded wander
+    // displacement, zero at birth (see particleField.ts).
     const ax = cfg.gravityX + (cfg.windX ?? 0);
     const ay = cfg.gravityY + (cfg.windY ?? 0);
     const wander = wanderOffset(i, age, cfg);
-    const x = ox + v0x * age + 0.5 * ax * age * age + wander.x;
-    const y = oy + v0y * age + 0.5 * ay * age * age + wander.y;
-    const size = Math.max(0, lerp(cfg.sizeStart, cfg.sizeEnd, age01));
-    const opacity = lerp(cfg.opacityStart, cfg.opacityEnd, age01);
+    const fl = flightAt(ox, oy, v0x, v0y, ax, ay, age, drag);
+    const x = fl.x + wander.x;
+    const y = fl.y + wander.y;
+    const size = Math.max(0, rampAt(cfg.sizeStart, cfg.sizeEnd, age01, cfg.sizeMid, cfg.midAge ?? 0.5));
+    const opacity = rampAt(cfg.opacityStart, cfg.opacityEnd, age01, cfg.opacityMid, cfg.midAge ?? 0.5);
     const rotation = cfg.spin * age;
 
     // Trails: the SAME closed form at trailing ages. Points before birth are
@@ -475,23 +709,24 @@ export function simulateParticles(cfg: ParticleConfig, time: number): Particle[]
         const ta = age - k * spacing;
         if (ta < 0) break;
         const tw = wanderOffset(i, ta, cfg);
-        trail.push({
-          x: ox + v0x * ta + 0.5 * ax * ta * ta + tw.x,
-          y: oy + v0y * ta + 0.5 * ay * ta * ta + tw.y,
-        });
+        const tf = flightAt(ox, oy, v0x, v0y, ax, ay, ta, drag);
+        trail.push({ x: tf.x + tw.x, y: tf.y + tw.y });
       }
     }
 
+    const frame = spriteFrameAt(cfg, age, age01);
     out.push({
       index: i,
       x,
       y,
       size,
-      color: lerpColor(cfg.colorStart, cfg.colorEnd, age01, opacity),
+      color: colorRampAt(cfg, age01, opacity),
       opacity,
       rotation,
       age01,
       shape: cfg.shape,
+      ...(streak > 0 ? { vx: fl.vx, vy: fl.vy } : {}),
+      ...(frame !== undefined ? { spriteFrame: frame } : {}),
       z: oz + vz * age,
       ...(trail && trail.length > 0 ? { trail } : {}),
     });

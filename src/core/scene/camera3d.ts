@@ -12,6 +12,7 @@ import type SceneGraph from '@core/scene/SceneGraph';
 import type { SceneNode } from '@core/types';
 import { flattenComposition, flattenScene, readNodeKind } from '@core/scene/sceneDerive';
 import { Project3D, type Camera3D } from '@motion/scene';
+import { cameraViewNodeId } from '@core/scene/cameraViewMode';
 
 /** Default focal length (px) for a comp of the given width. */
 export function defaultFocalLength(width: number): number {
@@ -213,9 +214,11 @@ export function readSceneCamera(
   sample?: CameraSample,
   rootId?: string,
   worldOf?: CameraWorldOf,
-  filter?: ActiveCameraFilter,
+  filter?: ViewCameraOptions,
 ): Camera3D {
-  const node = activeCameraNode(graph, rootId, filter);
+  // `filter.view` is how a `camera:<id>` view reaches the renderer; without
+  // one this is `activeCameraNode`'s pick, exactly as before.
+  const node = viewCameraNode(graph, filter?.view, rootId, filter);
   return node
     ? cameraFromNode(node, width, height, sample, worldOf)
     : Project3D.defaultCamera(width, height);
@@ -239,6 +242,19 @@ export function readSceneCamera(
 export interface ActiveCameraFilter {
   /** False ⇒ this camera's layer is not live at the current time. */
   isLiveAt?: (nodeId: string) => boolean;
+}
+
+/**
+ * What a VIEW needs to pick its camera: the active-camera filter plus the view
+ * mode itself. A separate type rather than a field on `ActiveCameraFilter` so
+ * `activeCameraNode` — the shot's rule, which what the viewer happens to be
+ * looking through must never steer — cannot be handed a view it would
+ * silently ignore.
+ */
+export interface ViewCameraOptions extends ActiveCameraFilter {
+  /** The view mode being drawn. A `camera:<id>` view looks through that node;
+   *  absent or any other mode ⇒ the active camera, unchanged. */
+  view?: string;
 }
 
 /**
@@ -272,6 +288,76 @@ export function activeCameraNode(
     return node;
   }
   return null;
+}
+
+/**
+ * The camera node a VIEW looks through, or null (⇒ the default camera).
+ *
+ * Every mode but one gets `activeCameraNode`'s pick. A `camera:<id>` view
+ * (AE: 3D View ▸ <camera name>) gets THAT node — the only way to preview a
+ * camera that is not on top, since the active rule always takes the topmost:
+ * with two cameras the lower one could be edited but never seen.
+ *
+ * The renderer, the viewport chrome, the frustum/handle suppression and the C
+ * tool all resolve through here, so the camera being drawn, the one whose
+ * wireframe is hidden and the one being orbited are always the same node.
+ *
+ * A named camera that can no longer be looked through FALLS BACK to the active
+ * pick (see `lookThroughCamera` for the conditions). The id is view state and
+ * goes stale on its own — the camera is deleted or disabled, the user switches
+ * comps, a project reopens — and a view that went blank or reverted to the
+ * default camera would read as a broken scene. Checking on every read means no
+ * load-time repair, and a camera that comes back (undo) is looked through again.
+ *
+ * The named camera is NOT held to `isLiveAt`. Choosing a camera by name is
+ * asking to see through it, outside its in/out bar included — lining up a cut
+ * to a camera that has not started yet is the main reason to do it. Liveness
+ * still governs the fallback, because the fallback IS the shot's rule.
+ */
+export function viewCameraNode(
+  graph: SceneGraph,
+  mode: string | null | undefined,
+  rootId?: string,
+  filter?: ActiveCameraFilter,
+): SceneNode | null {
+  return lookThroughCamera(graph, cameraViewNodeId(mode), rootId)
+    ?? activeCameraNode(graph, rootId, filter);
+}
+
+/**
+ * The camera `nodeId` names, if a view can look through it: it is in THIS
+ * composition (ids are per comp, and another comp's camera must not steer this
+ * one — the scope `activeCameraNode` enforces), it is a camera, and it is
+ * enabled. Null otherwise, which every caller reads as "use the active camera".
+ *
+ * Exported so the view menus can tell a live camera view from a stale one and
+ * label the stale one "Active Camera" — which is what it is showing.
+ */
+export function lookThroughCamera(
+  graph: SceneGraph,
+  nodeId: string | null | undefined,
+  rootId?: string,
+): SceneNode | null {
+  if (!nodeId) return null;
+  const nodes = rootId ? flattenComposition(graph, rootId) : flattenScene(graph);
+  const node = nodes.find((n) => n.id === nodeId);
+  if (!node || readNodeKind(node) !== 'camera' || node.visible === false) return null;
+  return node;
+}
+
+/**
+ * Every camera a view could look through in a composition, TOPMOST FIRST — the
+ * order the timeline lists layers, so the view menu reads like the stack. The
+ * same conditions as `lookThroughCamera`, so a listed camera never falls back.
+ */
+export function lookThroughCameras(graph: SceneGraph, rootId?: string): SceneNode[] {
+  const nodes = rootId ? flattenComposition(graph, rootId) : flattenScene(graph);
+  const out: SceneNode[] = [];
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i]!;
+    if (readNodeKind(node) === 'camera' && node.visible !== false) out.push(node);
+  }
+  return out;
 }
 
 /** Depth-of-field config (camera props; keyframeable). Null = DOF off. */
@@ -350,7 +436,9 @@ export interface DofConfig {
  * pass computes the same two CoC models per PIXEL from the real depth buffer
  * (the config rides `RenderSnapshot.camera3d.dof`). This function remains the
  * source of truth for the shader's maths and for every path that cannot
- * gather (painter-path layers, MSAA-only targets, Canvas2D-era readers).
+ * gather (painter-path layers, a backend with no sampleable depth texture,
+ * Canvas2D-era readers). MSAA does not block the gather: DOF_TARGET is
+ * declared single-sampled precisely so its depth stays sampleable.
  */
 export function dofBlurPx(depth: number, dof: DofConfig): number {
   if (dof.fStop === undefined) {
@@ -439,17 +527,20 @@ export function readSceneDof(
   height: number,
   sample?: CameraSample,
   rootId?: string,
-  filter?: ActiveCameraFilter,
+  filter?: ViewCameraOptions,
 ): DofConfig | null {
-  const active = activeCameraNode(graph, rootId, filter);
-  return active ? readNodeDof(active, width, height, sample) : null;
+  // Through the same view resolver as `readSceneCamera`, so a camera view's
+  // depth of field is read off the camera doing the projecting.
+  const node = viewCameraNode(graph, filter?.view, rootId, filter);
+  return node ? readNodeDof(node, width, height, sample) : null;
 }
 
 /**
  * ONE camera node's depth of field, without asking which camera is active.
  *
  * `readSceneDof` is the renderer's entry point and answers "what is the shot's
- * DOF", which is necessarily the ACTIVE camera's. The viewport's focus-plane
+ * DOF", which is necessarily the VIEWED camera's (the active one, or the one a
+ * `camera:<id>` view names). The viewport's focus-plane
  * gizmo asks a different question — "what is THIS camera's DOF" — about a
  * camera the user selected, which may not be the one the comp renders through.
  * Splitting the read out is what keeps those two from growing separate parsers

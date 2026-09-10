@@ -5,12 +5,14 @@ import { depthEligible3D, type Renderable, type RenderableEffect, type Renderabl
 import type { SolidShape, Shade3D } from '../../pipeline/uniforms';
 import type { TextureHandle, SamplerHandle, BufferHandle } from '../../gpu/types';
 import { RenderPass, type RenderPassContext } from '../RenderPass';
-import { beginViewportPass, beginSizedPass, emitSolid, emitTextured, emitSilhouette, emitMaskedTextured, emitLutTextured, emitMatteCombine, emitBlendCombine, modelFromRect, mvpFor, writeAttachment, emitLayerTexture, screenMvp, targetSampleUv, mvp3dFor, emitSolid3D, emitTextured3D, emitMaskedTextured3D, emitMesh3D, emitShadowCaster, emitSsao, emitSsaoBlur } from './passUtils';
+import { beginViewportPass, beginSizedPass, emitSolid, emitTextured, emitSilhouette, emitMaskedTextured, emitLutTextured, emitMatteCombine, emitBlendCombine, modelFromRect, mvpFor, writeAttachment, emitLayerTexture, screenMvp, targetSampleUv, mvp3dFor, emitSolid3D, emitTextured3D, emitLutTextured3D, emitMaskedTextured3D, emitMesh3D, emitShadowCaster, emitSsao, emitSsaoBlur } from './passUtils';
 import { addTransformedBox, boxIsEmpty, emptyBox, shadowCameraFor, shadowMapSizeOf, type ShadowCamera, type WorldBox } from './shadowMap';
 import { ssaoBufferSize, ssaoCameraFor, ssaoFarFor, ssaoIntensityOf, ssaoRadiusOf, SSAO_SAMPLES } from './ssao';
-import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL } from '../../shaders/Material';
+import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL, DEEP_GLOW_ACC_FX_MATERIAL, DEEP_GLOW_BLUR_FX_MATERIAL, DEEP_GLOW_COMPOSITE_FX_MATERIAL } from '../../shaders/Material';
 import { roundElevenSinglePass } from './roundElevenFx';
 import { roundTwelveSinglePass, roundTwelveFieldPass } from './roundTwelveFx';
+import { roundFifteenSinglePass } from './roundFifteenFx';
+import { deepGlowInv, deepGlowOctaves, deepGlowStep } from '../../shaders/deepGlowKernel';
 import { packBlur, packBokeh, packCocBlur, packDofGather, packGlass, packGradientRamp, packFractalNoise, packDisplacementMap, packCompoundBlur, packApplyColorLut, packSetMatte, packMotionTile, packFill, packStroke, packSharpen, packNoise, packBeam, packLightSweep, packLensFlare, packLightRays, packBend, packPerspective, packSpotlight, packArithmetic, packVignetteFx, packBlackAndWhite, packTritone, packPhotoFilter, packThreshold, packVibrance, packFxBlock, packPluginEffect } from '../../pipeline/uniforms';
 import { ENV_SPEC_LEVELS } from '../../pipeline/uniforms';
 import { Mat4 } from '../../core/math/Mat4';
@@ -192,15 +194,55 @@ interface FxSpace {
  * generous for blur-like effects: the shader treats the radius as a Gaussian
  * SIGMA and samples to ±2.5σ, so a margin of one radius would clip the tail
  * into a visible straight edge.
+ *
+ * Only effects whose shaders actually WRITE outside the layer's box appear
+ * here. Nearly every ported effect (rounds six through fifteen) passes
+ * through pixels outside the box — the shaders' `wp`/`gp` guard mirrors the
+ * CPU kernels, which never see pixels beyond the layer canvas — so for them
+ * a margin buys nothing and costs content resolution; they stay at 0 on
+ * purpose, and that is a statement about the shader, not an omission. The
+ * exceptions are the ones below that ride an unguarded whole-buffer pass:
+ * the Gaussian riders, the additive generators, and Motion Tile.
+ *
+ * `layerW`/`layerH` are the layer's size in comp px, for the effects whose
+ * reach is a fraction of the layer (lens-flare's halo, beam's endpoints).
  */
-function effectSpreadPx(effects: readonly RenderableEffect[]): number {
+export function effectSpreadPx(effects: readonly RenderableEffect[], layerW: number, layerH: number): number {
   let max = 0;
   for (const e of effects) {
     let s = 0;
     if (e.type === 'blur') s = (e.cocCorners
       ? Math.max(e.radiusPx, ...e.cocCorners)
       : e.radiusPx) * BLUR_TAIL;
+    // Ride the SAME separable Gaussian pass as `blur`, with `radiusPx` already
+    // converted to its sigma (r/√3, see snapshotToFrameScene) — same tail.
+    else if (e.type === 'gaussian-blur' || e.type === 'fast-box-blur') s = e.radiusPx * BLUR_TAIL;
     else if (e.type === 'glow') s = (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
+    // The widest octave is a Gaussian of `radiusPx`; the pyramid's tail is its tail.
+    else if (e.type === 'deep-glow') s = e.radiusPx * Math.max(e.aspect[0], e.aspect[1]) * Math.max(e.chroma[0], e.chroma[1], e.chroma[2]) * BLUR_TAIL;
+    else if (e.type === 'beam-path') s = e.spreadPx;
+    else if (e.type === 'beam') {
+      // The beam field is evaluated over the whole buffer: its halo crosses
+      // the box edge by the soft radius (thickness·(1+3·softness)/2 — reserve
+      // the diameter), and its endpoints are FRACTIONS of the box that the
+      // controls happily push outside it.
+      const overX = Math.max(0, -e.startX, -e.endX, e.startX - 1, e.endX - 1) * layerW;
+      const overY = Math.max(0, -e.startY, -e.endY, e.startY - 1, e.endY - 1) * layerH;
+      s = overX + overY + Math.max(0.5, e.thickness) * (1 + e.softness * 3);
+    }
+    // Rays are wedges of length `rayLength` from a centre that is itself an
+    // offset from the layer mid — both in comp px, so their sum bounds the fan.
+    else if (e.type === 'light-rays') s = Math.hypot(e.centerX, e.centerY) + e.rayLength;
+    else if (e.type === 'lens-flare') {
+      // Ghosts land at centre + axis·2t for t up to 1.9 (see LENS_FLARE) —
+      // as far as 2.8 offsets beyond the layer mid — and the halo spans
+      // 0.35·max(w,h)·scale around the centre. Three offsets plus half a span
+      // over-covers both, streak included.
+      s = 3 * Math.hypot(e.centerX, e.centerY) + 0.5 * Math.max(layerW, layerH) * e.scale;
+    }
+    // Wraps the WHOLE buffer through its scaled uv — reach is unbounded by
+    // construction, so let the MAX_FX_MARGIN cap decide what it is worth.
+    else if (e.type === 'motion-tile') { if (e.scale !== 1) s = Number.POSITIVE_INFINITY; }
     else if (e.type === 'drop-shadow') {
       s = Math.hypot(e.offsetX, e.offsetY) + (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
     }
@@ -828,6 +870,91 @@ export class CompositionPass extends RenderPass {
         encC.end();
         const outTex = texOf(f1);
         if (outTex) { curTex = outTex; curName = f1; }
+        continue;
+      }
+
+      /*
+        Deep Glow — the octave pyramid (fxDeepGlow.ts / deepGlowKernel.ts).
+
+        Targets: the chain's source stays in `curName` for the composite;
+        each octave runs H (level → f1) then V (f1 → f0), so the level lives
+        in f0 and the NEXT octave blurs it further — the progressive pyramid.
+        The third slot (f2) accumulates: each level drawn once with the `add`
+        blend at its weight, cleared on the first octave. A pool without a
+        third slot (plugin and matte chains) degrades to a single Gaussian at
+        the full radius, which is still a glow rather than nothing.
+      */
+      if (effect.type === 'deep-glow') {
+        const f2 = free[2] as string | undefined;
+        const octs = deepGlowOctaves(effect.radiusPx, f2 ? effect.octaves : 1);
+        const weight = 1 / octs.length;
+        const maxChroma = Math.max(effect.chroma[0], effect.chroma[1], effect.chroma[2]);
+        const blurPass = (
+          src: TextureHandle, dest: string, label: string,
+          dirX: number, dirY: number, sigmaTexels: number, first: boolean,
+        ): TextureHandle | null => {
+          const step = deepGlowStep(sigmaTexels * maxChroma);
+          const inv: [number, number, number] = [
+            deepGlowInv(sigmaTexels * effect.chroma[0]),
+            deepGlowInv(sigmaTexels * effect.chroma[1]),
+            deepGlowInv(sigmaTexels * effect.chroma[2]),
+          ];
+          const cmdsB = new CommandBuffer();
+          cmdsB.add({
+            batchKey: 'deep-glow-blur', material: DEEP_GLOW_BLUR_FX_MATERIAL, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [
+              [dirX * step / viewport.pixelSize.width, dirY * step / viewport.pixelSize.height, step, first ? effect.threshold : 0],
+              [inv[0], inv[1], inv[2], first ? 1 : 0],
+            ], fxBox),
+            texture: src, sampler: clampSampler(),
+          });
+          const encB = beginViewportPass(ctx, label, writeAttachment(ctx, dest, Color.transparent()));
+          services.quad.execute(encB, cmdsB);
+          encB.end();
+          return texOf(dest);
+        };
+        let level: TextureHandle = curTex;
+        let accTex: TextureHandle | null = null;
+        for (let k = 0; k < octs.length; k++) {
+          const d = octs[k]!.delta;
+          const h = blurPass(level, f1, 'deep-glow-h', 1, 0, d * effect.aspect[0] * kx, k === 0);
+          if (!h) break;
+          const v = blurPass(h, f0, 'deep-glow-v', 0, 1, d * effect.aspect[1] * ky, false);
+          if (!v) break;
+          level = v;
+          if (f2) {
+            const cmdsA = new CommandBuffer();
+            cmdsA.add({
+              batchKey: 'deep-glow-acc', material: DEEP_GLOW_ACC_FX_MATERIAL, blend: 'add',
+              uniforms: packFxBlock(mvp, targetUv, [[weight, 0, 0, 0]], fxBox),
+              texture: level, sampler: clampSampler(),
+            });
+            // Clear on the first octave only; the rest load and add.
+            const encA = beginViewportPass(ctx, 'deep-glow-acc', writeAttachment(ctx, f2, k === 0 ? Color.transparent() : undefined));
+            services.quad.execute(encA, cmdsA);
+            encA.end();
+            accTex = texOf(f2);
+          } else {
+            accTex = level;
+          }
+        }
+        if (accTex) {
+          // Composite into f1: distinct from the source (curName), the level (f0) and the accumulator (f2).
+          const cmdsC = new CommandBuffer();
+          cmdsC.add({
+            batchKey: 'deep-glow-composite', material: DEEP_GLOW_COMPOSITE_FX_MATERIAL, blend: 'normal',
+            uniforms: packFxBlock(mvp, targetUv, [
+              [effect.gain, effect.tint[0], effect.tint[1], effect.tint[2]],
+              [effect.tintAmount, effect.glowOnly ? 1 : 0, effect.dither ? viewport.pixelSize.width : 0, viewport.pixelSize.height],
+            ], fxBox),
+            texture: curTex, sampler: clampSampler(), maskTexture: accTex,
+          });
+          const encC = beginViewportPass(ctx, 'deep-glow-composite', writeAttachment(ctx, f1, Color.transparent()));
+          services.quad.execute(encC, cmdsC);
+          encC.end();
+          const outTex = texOf(f1);
+          if (outTex) { curTex = outTex; curName = f1; }
+        }
         continue;
       }
 
@@ -1764,9 +1891,12 @@ export class CompositionPass extends RenderPass {
           ], fxBox),
           texture: curTex, sampler: clampSampler(),
         });
-      } else if (roundElevenSinglePass(effect) || roundTwelveSinglePass(effect)) {
-        // Rounds eleven + twelve single-pass effects — the tables in roundElevenFx.ts / roundTwelveFx.ts.
-        const draw = (roundElevenSinglePass(effect) ?? roundTwelveSinglePass(effect))!;
+      } else if (roundElevenSinglePass(effect) || roundTwelveSinglePass(effect) || roundFifteenSinglePass(effect)) {
+        // Rounds eleven, twelve and fifteen single-pass effects — the tables in
+        // roundElevenFx.ts / roundTwelveFx.ts / roundFifteenFx.ts.
+        const draw = (roundElevenSinglePass(effect)
+          ?? roundTwelveSinglePass(effect)
+          ?? roundFifteenSinglePass(effect))!;
         cmds.add({
           batchKey: effect.type, material: draw.material, blend: 'normal',
           uniforms: packFxBlock(mvp, targetUv, draw.params, fxBox),
@@ -2216,6 +2346,32 @@ export class CompositionPass extends RenderPass {
    * Beyond the depth cap: with `inlineFallback` the subtree collapses inline
    * (children × container opacity — the legacy behaviour), else null.
    */
+  /**
+   * The context a precomp's subtree renders under.
+   *
+   * A plain group inherits the current one. A sealed comp instance carrying its
+   * own 3D frame (`precomp.camera3d`) gets a scene whose 3D fields are REPLACED
+   * wholesale — camera, lights, environment, and SSAO dropped — so nothing of
+   * the scope it is drawn in (host lights, a shadow-mapped lamp, the host's env
+   * reflection or AO) reaches its layers. It is a fresh object, never a
+   * mutation, so nothing of the inner frame outlives the subtree either: the
+   * caller keeps rendering with its own `ctx`, and a nested instance derives
+   * from whatever scope it is drawn in, so each level "restores" its parent's
+   * by construction.
+   */
+  private static precompScope(ctx: RenderPassContext, pre: NonNullable<Renderable['precomp']>): RenderPassContext {
+    if (!pre.camera3d) return ctx;
+    const { camera3d: _cam, lights3d: _lights, envMap: _env, ssao: _ssao, ...base } = ctx.scene;
+    void _cam; void _lights; void _env; void _ssao;
+    const scene: RenderPassContext['scene'] = {
+      ...base,
+      camera3d: pre.camera3d,
+      ...(pre.lights3d && pre.lights3d.length > 0 ? { lights3d: pre.lights3d } : {}),
+      ...(pre.envMap ? { envMap: pre.envMap } : {}),
+    };
+    return { ...ctx, scene, target: (name: string) => ctx.target(name) };
+  }
+
   private prepareIsolatedPrecomp(
     ctx: RenderPassContext,
     r: Renderable,
@@ -2224,11 +2380,14 @@ export class CompositionPass extends RenderPass {
     inlineFallback: boolean,
   ): Renderable | null {
     const { services } = ctx;
+    // The subtree draws under its OWN scope (a sealed comp's camera/lights);
+    // everything after the subtree — mask bake, composite — stays in `ctx`.
+    const scope = CompositionPass.precompScope(ctx, r.precomp!);
     if (slot >= PRECOMP_TARGETS.length) {
       if (!inlineFallback) return null;
       st.flushMain();
       const folded = r.precomp!.renderables.map((c) => ({ ...c, opacity: c.opacity * r.opacity }));
-      this.renderList(ctx, folded, st.out, st.depth);
+      this.renderList(scope, folded, st.out, st.depth);
       return null;
     }
     st.flushMain();
@@ -2238,7 +2397,7 @@ export class CompositionPass extends RenderPass {
 
     // Clear, then render the subtree (nested precomps recurse into deeper slots).
     beginViewportPass(ctx, 'precomp-clear', writeAttachment(ctx, targetName, Color.transparent())).end();
-    this.renderList(ctx, r.precomp!.renderables, targetName, slot + 1);
+    this.renderList(scope, r.precomp!.renderables, targetName, slot + 1);
     let tex = ctx.services.backend.renderTargetTexture(ctx.target(targetName)!);
     if (!tex) return null;
 
@@ -2381,7 +2540,7 @@ export class CompositionPass extends RenderPass {
     // so its first two column vectors ARE the width and height edges.
     const worldW = Math.hypot(model[0]!, model[1]!, model[2]!) || 1;
     const worldH = Math.hypot(model[4]!, model[5]!, model[6]!) || 1;
-    const spread = effectSpreadPx(r.effects!);
+    const spread = effectSpreadPx(r.effects!, worldW, worldH);
 
     // Margin as a fraction of the layer, per axis, capped so a small layer
     // under a large glow degrades to a soft-edged result instead of shrinking
@@ -2780,6 +2939,8 @@ export class CompositionPass extends RenderPass {
     ctx: RenderPassContext,
     group: ReadonlyArray<Renderable>,
     light: { type: 'ambient' | 'point' | 'spot' | 'parallel'; x: number; y: number; z: number; aimX: number; aimY: number; aimZ: number; shadowMapSize?: number },
+    /** 0 = the run's first map (bindings 9/10), 1 = the second (13/14, plan B2). */
+    slot: 0 | 1 = 0,
   ): { texture: TextureHandle; sampler: SamplerHandle; camera: ShadowCamera; size: number } | null {
     const casters = group.filter((r) => r.threeD?.castsShadow === true && r.opacity > 0);
     if (casters.length === 0) return null;
@@ -2790,11 +2951,13 @@ export class CompositionPass extends RenderPass {
 
     const { services } = ctx;
     const size = shadowMapSizeOf(light.shadowMapSize);
-    // Pinned and keyed by SIZE alone: one map per resolution serves every run in
-    // the frame, because a run consumes its map before the next one is drawn.
+    // Pinned and keyed by SIZE and SLOT: one map per resolution per slot serves
+    // every run in the frame, because a run consumes its maps before the next
+    // one is drawn — and the two slots must not share a target, since both are
+    // sampled by the same draw.
     const rt = services.resources.renderTarget(
-      `shadow-map:${size}`,
-      { label: `shadow-map:${size}`, width: size, height: size, format: 'rgba8unorm', depth: true },
+      `shadow-map:${size}:${slot}`,
+      { label: `shadow-map:${size}:${slot}`, width: size, height: size, format: 'rgba8unorm', depth: true },
       /* pinned */ true,
     );
     // White = a distance past the far plane, so an untouched texel says "no
@@ -2831,8 +2994,16 @@ export class CompositionPass extends RenderPass {
   /**
    * The per-pixel DOF gather setup for this frame's 3D groups, or null when the
    * per-layer CoC fallback must stand: no camera DOF, an ortho/custom view (no
-   * eye ⇒ no lens), or a backend/target that cannot hand back a sampleable
-   * depth texture (the WebGL2 MSAA fallback path, tests on colour-only mocks).
+   * eye ⇒ no lens), or a backend that cannot hand back a sampleable depth
+   * texture for DOF_TARGET.
+   *
+   * No shipping backend lands in that last case. DOF_TARGET is declared
+   * single-sample, so WebGPU and WebGL2 both give it a depth TEXTURE whatever
+   * the scene / precomp targets' 4× MSAA — their depth is the unsampleable
+   * kind, which is why a DOF group is redirected here at all. Only a backend
+   * without `renderTargetDepthTexture` (or a colour-only test mock) returns
+   * null with DOF on, and there MESHES draw sharp: the mesh branch in
+   * render3DGroup has no per-layer blur to fall back on.
    */
   private dofGatherFor(ctx: RenderPassContext): { depthA: number; depthB: number } | null {
     const cam = ctx.scene.camera3d;
@@ -2922,27 +3093,39 @@ export class CompositionPass extends RenderPass {
     const envMap = ctx.scene.envMap?.levels === ENV_SPEC_LEVELS ? ctx.scene.envMap : undefined;
     const env = this.envBindingFor(ctx);
     /*
-      Geometry-aware shadows for ONE light per run.
+      Geometry-aware shadows for up to TWO lights per run (plan B2).
 
-      One, not all of them, and the limit is the binding rather than the maths:
-      a second map is a second texture at a second slot on every lit-3d
-      material, plus a second matrix in a uniform tail that is already 184
-      floats. The first light with `shadowMap` on wins; the rest keep the 2.5D
-      projected copy the adapter still emits for them, so turning the switch on
-      for two lamps gives one geometric shadow and one projected one rather than
-      a silent downgrade of both.
+      Two, not all of them, and the limit is the binding rather than the maths:
+      each map is a texture at its own slot on every lit-3d material (9/10 and
+      13/14), plus its own 28-float block in a uniform tail that is already
+      long. The first two lights with `shadowMap` on get maps; the rest keep
+      the 2.5D projected copy the adapter still emits for them, so turning the
+      switch on for three lamps gives two geometric shadows and one projected
+      one rather than a silent downgrade of any.
 
       Rendered BEFORE the main pass opens, because the map is a texture the
       main pass samples and no backend lets one pass read the target another is
       still writing.
     */
     const shadowLightIndex = lights ? lights.findIndex((l) => l.shadowMap === true && l.type !== 'ambient' && l.gain > 0) : -1;
-    const shadowRun = shadowLightIndex >= 0 ? this.renderShadowMap(ctx, group, lights![shadowLightIndex]!) : null;
+    const shadowRun = shadowLightIndex >= 0 ? this.renderShadowMap(ctx, group, lights![shadowLightIndex]!, 0) : null;
     const shadowLight = shadowRun ? lights![shadowLightIndex]! : undefined;
-    // `shadowed` is what `packShade3D` matches on to resolve the light's index
-    // AFTER its own filtering — see the flag's note there.
-    const litLights = lights && shadowRun
-      ? lights.map((l, i) => (i === shadowLightIndex ? { ...l, shadowed: true } : l))
+    // The SECOND mapped light (plan B2): the next light with the switch on
+    // gets its own map at bindings 13/14 and its own uniform block. A third
+    // still falls back to the projected copy — two is the binding budget.
+    const shadow2LightIndex = lights && shadowLightIndex >= 0
+      ? lights.findIndex((l, i) => i > shadowLightIndex && l.shadowMap === true && l.type !== 'ambient' && l.gain > 0)
+      : -1;
+    const shadow2Run = shadow2LightIndex >= 0 ? this.renderShadowMap(ctx, group, lights![shadow2LightIndex]!, 1) : null;
+    const shadow2Light = shadow2Run ? lights![shadow2LightIndex]! : undefined;
+    // `shadowed` / `shadowed2` are what `packShade3D` matches on to resolve
+    // each light's index AFTER its own filtering — see the flags' note there.
+    const litLights = lights && (shadowRun || shadow2Run)
+      ? lights.map((l, i) => (
+        i === shadowLightIndex && shadowRun ? { ...l, shadowed: true }
+          : i === shadow2LightIndex && shadow2Run ? { ...l, shadowed2: true }
+            : l
+      ))
       : lights;
     /*
       The v flip is the OPPOSITE of `targetSampleUv`'s, and that is not a typo.
@@ -2956,6 +3139,9 @@ export class CompositionPass extends RenderPass {
     const shadowFlipV = !ctx.services.backend.renderTargetFlipV;
     const shadow = shadowRun
       ? { texture: shadowRun.texture, sampler: shadowRun.sampler }
+      : this.shadowFallback(ctx);
+    const shadow2 = shadow2Run
+      ? { texture: shadow2Run.texture, sampler: shadow2Run.sampler }
       : this.shadowFallback(ctx);
     /*
       Ambient occlusion, for the whole run.
@@ -2999,6 +3185,18 @@ export class CompositionPass extends RenderPass {
         // rather than asking the UI to know the far plane.
         bias: Math.max(0, shadowLight?.shadowBias ?? 3) * shadowRun.camera.invFar,
         step: Math.max(0, shadowLight?.shadowSoftness ?? 1) / shadowRun.size,
+        flipV: shadowFlipV,
+      }
+      : undefined;
+    const shadow2Tail = shadow2Run
+      ? {
+        matrix: shadow2Run.camera.matrix,
+        axis: shadow2Run.camera.axis,
+        invFar: shadow2Run.camera.invFar,
+        origin: shadow2Run.camera.origin,
+        darkness: Math.max(0, Math.min(1, shadow2Light?.shadowDarkness ?? 1)),
+        bias: Math.max(0, shadow2Light?.shadowBias ?? 3) * shadow2Run.camera.invFar,
+        step: Math.max(0, shadow2Light?.shadowSoftness ?? 1) / shadow2Run.size,
         flipV: shadowFlipV,
       }
       : undefined;
@@ -3064,6 +3262,7 @@ export class CompositionPass extends RenderPass {
         // no second gate: a shadow catcher turned off packs the block as zeros
         // and reads exactly as it did before this existed.
         ...(shadowTail && s.acceptsShadows !== false ? { shadow: shadowTail } : {}),
+        ...(shadow2Tail && s.acceptsShadows !== false ? { shadow2: shadow2Tail } : {}),
         // Attached to every lit surface in the run, unconditionally: AO is
         // contact darkening of AMBIENT light, and there is no per-layer switch
         // for it because there is no per-layer question — a surface either has
@@ -3082,6 +3281,7 @@ export class CompositionPass extends RenderPass {
     let cmds = new CommandBuffer();
     cmds.env = env;
     cmds.shadow = shadow;
+    cmds.shadow2 = shadow2;
     cmds.ao = ao;
     let depthCleared = false;
     // True when `cmds` holds a queued draw sampling the resolved-effect texture
@@ -3101,6 +3301,7 @@ export class CompositionPass extends RenderPass {
       // would queue incomplete bind groups.
       cmds.env = env;
       cmds.shadow = shadow;
+      cmds.shadow2 = shadow2;
       cmds.ao = ao;
       depthCleared = true;
       pendingResolved = false;
@@ -3115,6 +3316,15 @@ export class CompositionPass extends RenderPass {
       const uv = r.uvRect ?? { x: 0, y: 0, width: 1, height: 1 };
 
       if (r.extrudedMesh) {
+        // No per-layer DOF branch, on purpose: a mesh's defocus comes ONLY
+        // from the gather (the `dofSource` blur an extrusion carrier still
+        // carries was stripped above; glTF/primitive carriers never get one).
+        // With camera DOF on the gather is available on every shipped backend
+        // — DOF_TARGET is single-sample, so its depth is sampleable however
+        // multisampled `out` is (dofGatherMesh.test pins both halves). Only a
+        // backend with no sampleable depth at all reaches here ungathered; a
+        // blurred mesh there would need its own offscreen depth resolve, a pass
+        // no shipping configuration would ever run, so it draws sharp.
         this.emitExtrudedMesh(ctx, r, mvp, shadeFor(r), cmds, clampSampler);
         continue;
       }
@@ -3161,10 +3371,15 @@ export class CompositionPass extends RenderPass {
         emitSolid3D(cmds, mvp, tint, r.opacity, r.blend, toSolidShape(r.sdf), shade);
       } else if (isTextured && r.textureKey) {
         const tex = this.texFor(ctx, r.textureKey);
-        // Known limitation: no LUT variant in the 3D material set — a 3D layer
-        // carrying a colour LUT keeps its affine grade rows but skips the LUT
-        // remap inside a depth group (rare combination).
-        if (tex) emitTextured3D(cmds, mvp, tint, r.opacity, r.blend, tex.texture, clampSampler(), uv, r.colorMatrix, shade, true, !!tex.sampleLinear);
+        // A colour LUT (Levels / Curves / …) remaps after the affine rows on the
+        // `textured3d-lut` variant, as `lut-textured` does on the 2D path. A
+        // SOLID 3D quad needs no variant: its colour is uniform, so the adapter
+        // graded it through the same table on the CPU (gradedSolidColor).
+        // Still without one: a MASKED 3D quad — the same combination the 2D
+        // masked path does not remap either.
+        const lut = r.lutTextureKey ? services.textures.get(r.lutTextureKey) : undefined;
+        if (tex && lut) emitLutTextured3D(cmds, mvp, tint, r.opacity, r.blend, tex.texture, clampSampler(), lut.texture, uv, r.colorMatrix, shade, !!tex.sampleLinear);
+        else if (tex) emitTextured3D(cmds, mvp, tint, r.opacity, r.blend, tex.texture, clampSampler(), uv, r.colorMatrix, shade, true, !!tex.sampleLinear);
       }
     }
     flush();
@@ -3199,6 +3414,13 @@ export class CompositionPass extends RenderPass {
       { label: `ext-index:${r.id}`, sizeBytes: mesh.indices.byteLength, usage: ['index'], data: mesh.indices },
     );
     const tex = r.textureKey ? this.texFor(ctx, r.textureKey) : undefined;
+    // The layer's colour LUT strip (`lut:<id>`, Levels / Curves / …), for the
+    // ranges that SAMPLE a texture: its texels carry ungraded colour, so the
+    // `-lut` material remaps them after the affine rows, as the 2D quad path
+    // does. Flat ranges never take it — their colour was graded through the
+    // same table on the CPU (gradeFillByEffects) — and neither does the
+    // white-base PBR draw below, whose tint IS such a colour.
+    const lut = r.lutTextureKey ? ctx.services.textures.get(r.lutTextureKey)?.texture : undefined;
     /*
       The glTF map set, resolved once for the whole mesh.
 
@@ -3248,15 +3470,30 @@ export class CompositionPass extends RenderPass {
       const rangeShade = shade && range.role === 'front' && shade.oneSided
         ? { ...shade, oneSided: undefined }
         : shade;
-      if (range.textured && tex) {
-        emitMesh3D(cmds, mvp, Color.white(), r.opacity, r.blend, geometry, rangeShade,
-          { texture: tex.texture, sampler: clampSampler(), uvRect: r.uvRect, color: r.colorMatrix, sampleLinear: !!tex.sampleLinear },
+      // A range may sample its OWN texture — an extrusion's gradient plate —
+      // over the mesh's layer-box uv (no pad correction: the plate is the box).
+      // Its tint carries the unlit face gain the way the flat path's `color`
+      // does; lit ranges leave that to the shader, as everywhere else.
+      const rangeTex = range.textureKey ? this.texFor(ctx, range.textureKey) : tex;
+      const ownTexture = !!range.textureKey && !!rangeTex;
+      if (range.textured && rangeTex) {
+        const tint = ownTexture && !shade ? { r: range.gain, g: range.gain, b: range.gain, a: 1 } : Color.white();
+        emitMesh3D(cmds, mvp, tint, r.opacity, r.blend, geometry, rangeShade,
+          { texture: rangeTex.texture, sampler: clampSampler(), uvRect: ownTexture ? undefined : r.uvRect, color: r.colorMatrix, sampleLinear: !!rangeTex.sampleLinear, lut },
           pbrSet);
+      } else if (range.textured && range.textureKey && !rangeTex) {
+        // Plate not uploaded yet (first frame): the flat colour, never nothing.
+        emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade);
       } else if (pbrSet && white) {
         // Untextured base colour with maps: white at slot 1, the material's
-        // colour through the tint.
+        // colour through the tint. An untextured range's colour arrives
+        // ALREADY graded on the CPU (snapshotToFrameScene grades solid ranges
+        // by the layer's colour effects), so the matrix rides along only for a
+        // textured range that landed here before its texture uploaded — its
+        // colour is raw. Passing it for both graded a mixed multi-material
+        // model's plain parts twice.
         emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade,
-          { texture: white.texture, sampler: clampSampler(), color: r.colorMatrix },
+          { texture: white.texture, sampler: clampSampler(), color: range.textured ? r.colorMatrix : undefined },
           pbrSet);
       } else {
         emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade);
@@ -3288,6 +3525,11 @@ export class CompositionPass extends RenderPass {
     // guaranteed depth attachment — fall back to the CPU-affine path there
     // (the adapter routes 3D frames through the scene colour target anyway).
     const canDepthGroup = !!ctx.scene.camera3d && ctx.target(out) !== null;
+    // The same test render3DGroup uses to pick a shadow-mapped light, so a wash
+    // is hoisted exactly when a map would otherwise be split across runs.
+    const frameHasMapLight = !!ctx.scene.lights3d?.some(
+      (l) => l.shadowMap === true && l.type !== 'ambient' && l.gain > 0,
+    );
     const visible = ctx.viewport.visibleWorldRect;
     let i = 0;
     while (i < renderables.length) {
@@ -3296,16 +3538,37 @@ export class CompositionPass extends RenderPass {
         // Contiguous run of depth-eligible 3D renderables → one depth pass.
         // (2D layers, mattes, adjustments, effect layers break the run —
         // exactly the barriers buildSnapshot's painter sort respects.)
+        //
+        // In a frame with a shadow-MAPPED light, a light's WASH quad does
+        // not break it either. The wash sits at the light layer's stacking
+        // position, so a light between two 3D layers split them into
+        // separate depth groups — and the shadow map, built per group, then
+        // saw a caster with no receiver (or the reverse) and darkened
+        // nothing. The wash is a depthless screen-blend glow, so it hoists to
+        // just after the group.
+        //
+        // ONLY with a mapped light. Hoisting screens the glow over any later
+        // 3D layer it used to sit beneath; projected shadows are ordinary
+        // geometry in paint order and gain nothing from one run, so without
+        // a map the move is pure cost (`shadow-catcher`'s caster washed out).
         const group: Renderable[] = [];
-        while (i < renderables.length && depthEligible3D(renderables[i]!)) {
+        const hoistedWashes: Renderable[] = [];
+        while (i < renderables.length) {
           const g = renderables[i]!;
-          if (Rect.intersects(visible, g.bounds) && g.opacity > 0) group.push(g);
+          if (depthEligible3D(g)) {
+            if (Rect.intersects(visible, g.bounds) && g.opacity > 0) group.push(g);
+          } else if (g.lightWash && frameHasMapLight) {
+            hoistedWashes.push(g);
+          } else {
+            break;
+          }
           i += 1;
         }
         if (group.length > 0) {
           st.flushMain();
           this.render3DGroup(ctx, group, out, st.byId);
         }
+        for (const w of hoistedWashes) this.processRenderable(ctx, w, st);
         continue;
       }
       this.processRenderable(ctx, r, st);

@@ -327,6 +327,62 @@ export function writeOnData(
   return out;
 }
 
+/**
+ * Write-on along a POLYLINE — the mask-path form of the effect.
+ *
+ * The path arrives pre-flattened in layer-local centred px (see
+ * `maskPathPolyline`); completion reveals it by TRUE arc length, so the brush
+ * moves at constant speed whatever the segment sampling did. No wobble: the
+ * path is authored (or tracked) geometry, and bending it would un-draw the
+ * shape the person placed. Taper thins the leading tip exactly as the
+ * straight-line form does.
+ */
+export function writeOnPathData(
+  src: Uint8ClampedArray,
+  w: number,
+  h: number,
+  flat: ReadonlyArray<number>,
+  completion: number,
+  brushSize: number,
+  brushRgb: [number, number, number],
+  taper: number,
+): Uint8ClampedArray {
+  const out = Uint8ClampedArray.from(src);
+  const t1 = clamp01(completion / 100);
+  const n = Math.floor(flat.length / 2);
+  if (t1 <= 0 || n < 2) return out;
+
+  // Cumulative arc length over the polyline (centred → raster shift applied).
+  const xs = new Float64Array(n);
+  const ys = new Float64Array(n);
+  const arc = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    xs[i] = w / 2 + flat[i * 2]!;
+    ys[i] = h / 2 + flat[i * 2 + 1]!;
+    arc[i] = i === 0 ? 0 : arc[i - 1]! + Math.hypot(xs[i]! - xs[i - 1]!, ys[i]! - ys[i - 1]!);
+  }
+  const total = arc[n - 1]!;
+  if (total < 1e-3) return out;
+
+  const radius = Math.max(0.5, brushSize / 2);
+  const drawn = total * t1;
+  const step = Math.max(0.75, radius * 0.5);
+  const tipSpan = Math.max(1e-6, (taper / 100) * drawn);
+  let seg = 1;
+  for (let d = 0; d <= drawn; d += step) {
+    while (seg < n - 1 && arc[seg]! < d) seg++;
+    const a0 = arc[seg - 1]!;
+    const a1 = arc[seg]!;
+    const f = a1 > a0 ? (d - a0) / (a1 - a0) : 0;
+    const px = xs[seg - 1]! + (xs[seg]! - xs[seg - 1]!) * f;
+    const py = ys[seg - 1]! + (ys[seg]! - ys[seg - 1]!) * f;
+    const fromTip = (drawn - d) / tipSpan;
+    const thin = taper > 0 && fromTip < 1 ? 0.25 + 0.75 * fromTip : 1;
+    stampDisc(out, w, h, px, py, radius * thin, brushRgb[0], brushRgb[1], brushRgb[2], 1);
+  }
+  return out;
+}
+
 // ── Light Burst ─────────────────────────────────────────────────────
 
 /**

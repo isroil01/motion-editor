@@ -15,7 +15,7 @@ import type {
   TextureFormat,
   VertexBufferLayout,
 } from '../gpu/types';
-import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING } from '../gpu/types';
+import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, LUT3D_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING } from '../gpu/types';
 import { makeKey } from '../utils/ids';
 import { QUAD_LAYOUT } from '../resources/Geometry';
 import type { ShaderCache } from './ShaderCache';
@@ -410,6 +410,23 @@ export const SCALE_WIPE_FX_MATERIAL = perspectiveMaterial('scale-wipe');
 export const TEXTURIZE_FX_MATERIAL = perspectiveMaterial('texturize');
 export const THREADS_FX_MATERIAL = perspectiveMaterial('threads');
 export const HEX_TILE_FX_MATERIAL = perspectiveMaterial('hex-tile');
+/* Round seven (fxRoundFifteen.ts). One texture each -- none of the fifteen
+   needs a blurred reference copy, so none is a two-texture material. */
+export const CC_TILER_FX_MATERIAL = perspectiveMaterial('cc-tiler');
+export const RIPPLE_PULSE_FX_MATERIAL = perspectiveMaterial('ripple-pulse');
+export const RADIAL_SCALE_WIPE_FX_MATERIAL = perspectiveMaterial('radial-scale-wipe');
+export const GLASS_WIPE_FX_MATERIAL = perspectiveMaterial('glass-wipe');
+export const IMAGE_WIPE_FX_MATERIAL = perspectiveMaterial('image-wipe');
+export const COLOR_DIFFERENCE_KEY_FX_MATERIAL = perspectiveMaterial('color-difference-key');
+export const WIRE_REMOVAL_FX_MATERIAL = perspectiveMaterial('wire-removal');
+export const BROADCAST_COLORS_FX_MATERIAL = perspectiveMaterial('broadcast-colors');
+export const NOISE_HLS_FX_MATERIAL = perspectiveMaterial('noise-hls');
+export const BLOCK_LOAD_FX_MATERIAL = perspectiveMaterial('block-load');
+export const KERNEL_FX_MATERIAL = perspectiveMaterial('kernel');
+export const GLASSES_3D_FX_MATERIAL = perspectiveMaterial('3d-glasses');
+export const FRACTAL_FX_MATERIAL = perspectiveMaterial('fractal');
+export const PARTICLE_SYSTEMS_FX_MATERIAL = perspectiveMaterial('particle-systems');
+export const BUBBLES_FX_MATERIAL = perspectiveMaterial('cc-bubbles');
 /** Two-texture combines: tex = layer, binding 3 = the blurred field / projected shadow. */
 export const RADIAL_SHADOW_FX_MATERIAL = twoTextureMaterial('radial-shadow');
 export const PLASTIC_FX_MATERIAL = twoTextureMaterial('plastic');
@@ -455,6 +472,12 @@ export const BEVEL_FX_MATERIAL = twoTextureMaterial('bevel');
 export const FX_HISTOGRAM_FX_MATERIAL = perspectiveMaterial('fx-histogram');
 export const FX_AUTO_TABLE_FX_MATERIAL = perspectiveMaterial('fx-auto-table');
 export const FX_AUTO_APPLY_FX_MATERIAL = twoTextureMaterial('fx-auto-apply');
+// Deep Glow (fxDeepGlow.ts): separable per-channel blur, weighted accumulate, two-texture composite.
+export const DEEP_GLOW_BLUR_FX_MATERIAL = perspectiveMaterial('deep-glow-blur');
+export const DEEP_GLOW_ACC_FX_MATERIAL = perspectiveMaterial('deep-glow-acc');
+export const DEEP_GLOW_COMPOSITE_FX_MATERIAL = twoTextureMaterial('deep-glow-composite');
+// Energy Beam (fxBeamPath.ts): single pass, the spine rides in the uniform block.
+export const BEAM_PATH_FX_MATERIAL = perspectiveMaterial('beam-path');
 
 /** Same binding shape as motion-tile: one source texture, warped in place. */
 export const BEND_MATERIAL: MaterialDescriptor = {
@@ -579,9 +602,11 @@ export const SOLID3D_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
   // The env map is this material's ONLY texture, so it lands on unit 0 here.
-  glslSamplers: ['uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   depth: { test: true, write: true },
 };
 
@@ -599,8 +624,10 @@ export const TEXTURED3D_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
-  glslSamplers: ['uTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   depth: { test: true, write: true },
 };
 
@@ -637,8 +664,10 @@ export const TEXTURED3D_NO_DEPTH_WRITE_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
-  glslSamplers: ['uTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   depth: { test: true, write: false },
 };
 
@@ -662,10 +691,12 @@ export const MASKED_TEXTURED3D_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
   // Three textures now, past what the backend's two-name guess can reach —
   // so name them all, in the order QuadRenderer pushes the entries.
-  glslSamplers: ['uTex', 'uMaskTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uTex', 'uMaskTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   depth: { test: true, write: true },
 };
 
@@ -785,8 +816,10 @@ export const MESH3D_SOLID_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
-  glslSamplers: ['uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   buffers: [MESH3D_LAYOUT],
   depth: { test: true, write: true },
 };
@@ -805,8 +838,10 @@ export const MESH3D_TEXTURED_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
-  glslSamplers: ['uTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   buffers: [MESH3D_LAYOUT],
   depth: { test: true, write: true },
 };
@@ -842,13 +877,48 @@ export const MESH3D_PBR_MATERIAL: MaterialDescriptor = {
     { binding: SHADOW_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
     { binding: AO_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
     { binding: AO_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
+    { binding: SHADOW2_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] },
+    { binding: SHADOW2_SAMPLER_BINDING, type: 'sampler', stages: ['fragment'] },
   ],
   // Bindings 3–6 are CLAIMED by the map set; the environment atlas took 7/8,
   // which is exactly the "anything else starts at 7" this note anticipated.
-  glslSamplers: ['uTex', 'uNormalTex', 'uMRTex', 'uAOTex', 'uEmissiveTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex'],
+  glslSamplers: ['uTex', 'uNormalTex', 'uMRTex', 'uAOTex', 'uEmissiveTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex'],
   buffers: [MESH3D_LAYOUT],
   depth: { test: true, write: true },
 };
+
+/**
+ * The lit-3d LUT VARIANTS: a base material plus ONE texture — the layer's
+ * per-channel colour LUT strip (`lut:<id>`) at `LUT3D_TEXTURE_BINDING` — and a
+ * shader that remaps the graded colour through it before the light stage.
+ *
+ * Variants rather than a widened base, for the reason `MESH3D_PBR_MATERIAL`
+ * gives: a bind-group layout is part of the pipeline, so a LUT slot on the base
+ * would rebuild the pipeline every extrusion and 3D layer draws through and
+ * bind a stand-in strip on all of them. A draw without a LUT keeps the exact
+ * material — and so the exact pixels — it had before these existed.
+ *
+ * Derived from the base descriptors, so a slot added to a base cannot miss its
+ * variant; the strip is appended LAST in both the layout and the GLSL names,
+ * matching the order QuadRenderer pushes it.
+ */
+function withLutStrip(base: MaterialDescriptor, shader: string): MaterialDescriptor {
+  return {
+    ...base,
+    shader,
+    layout: [...base.layout, { binding: LUT3D_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] }],
+    glslSamplers: [...(base.glslSamplers ?? []), 'uLutTex'],
+  };
+}
+
+/** 3D textured quad + colour LUT (a textured layer in a depth group). */
+export const TEXTURED3D_LUT_MATERIAL = withLutStrip(TEXTURED3D_MATERIAL, 'textured3d-lut');
+export const TEXTURED3D_LUT_LINEAR_MATERIAL = withLutStrip(TEXTURED3D_MATERIAL, 'textured3d-lut-linear');
+/** Textured mesh range + colour LUT (an extrusion cap / plate, a base-colour-only model). */
+export const MESH3D_TEXTURED_LUT_MATERIAL = withLutStrip(MESH3D_TEXTURED_MATERIAL, 'mesh3d-textured-lut');
+export const MESH3D_TEXTURED_LUT_LINEAR_MATERIAL = withLutStrip(MESH3D_TEXTURED_MATERIAL, 'mesh3d-textured-lut-linear');
+/** A glTF material with maps + colour LUT. No `-linear` twin, as its base has none. */
+export const MESH3D_PBR_LUT_MATERIAL = withLutStrip(MESH3D_PBR_MATERIAL, 'mesh3d-pbr-lut');
 
 export const DEFORMED_MESH_LINEAR_MATERIAL: MaterialDescriptor = {
   ...DEFORMED_MESH_MATERIAL,

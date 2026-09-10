@@ -29,6 +29,7 @@ import {
   createNullAndApplyTrack,
   createNullsForPlanes,
 } from '@core/tracking/applyTrack';
+import { reparentNode } from '@core/scene/parenting';
 import { matteToPath } from '@core/tracking/rotoMatte';
 import { grabCutMatte } from '@core/tracking/grabCut';
 import { segmentSamSync } from '@core/tracking/samSegment';
@@ -40,6 +41,8 @@ import { densifyQuad } from '@core/tracking/planarFit';
 import { readNodeKind } from '@core/scene/sceneDerive';
 import { readGeometry } from '@core/workspace/geometry';
 import type { SceneNode } from '@core/types';
+import { customConfirm } from '@components/Modal';
+import { needsSelfApplyConfirm, selfApplyConfirmCopy } from './applyTargetGuard';
 
 export type StabVariant = 'similarity' | 'subspace' | 'rolling-shutter';
 
@@ -64,11 +67,14 @@ export interface TrackMotionContext {
   stabVariant: StabVariant;
   /** Layers offered as the track's target, this layer among them. */
   targets: ReadonlyArray<SceneNode>;
+  /** Reported when "Create null & apply" lands, so the section can offer the
+   *  follow-up (attach a layer) instead of a note asking the user to do it. */
+  onNullCreated?: (nullId: string) => void;
 }
 
 export type TrackMotionActions = ReturnType<typeof trackMotionActions>;
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- the return shape IS the API
+ 
 export function trackMotionActions(ctx: TrackMotionContext) {
   const {
     nodeId, targetId, setTargetId, mode, points, featureHalf, searchHalf, tracking, result, autoPhase,
@@ -134,9 +140,27 @@ export function trackMotionActions(ctx: TrackMotionContext) {
       return;
     }
     setTargetId(out.nullId);
+    ctx.onNullCreated?.(out.nullId);
     store.getState().finishTracking(
       result,
-      `Created a tracked null with ${out.keyframes} ${asTransform ? 'position, rotation & scale' : 'position'} keyframes — parent your layer to it.`,
+      `Created a tracked null with ${out.keyframes} ${asTransform ? 'position, rotation & scale' : 'position'} keyframes.`,
+    );
+  };
+
+  /**
+   * The step the note used to ASK the user to do: parent a layer to the
+   * tracked null. `reparentNode` preserves the child's world pose (the same
+   * path the timeline's Parent & Link uses), so attaching never jumps the
+   * layer — it simply starts following.
+   */
+  const onAttachToNull = (childId: string, nullId: string): void => {
+    const nullName = defaultSceneGraph.getNode(nullId)?.name || nullId;
+    const ok = reparentNode(childId, nullId);
+    store.getState().finishTracking(
+      result,
+      ok
+        ? `Parented ${targetName(childId)} to ${nullName} — it now follows the track.`
+        : 'Could not parent that layer — the move would create a loop.',
     );
   };
 
@@ -163,7 +187,9 @@ export function trackMotionActions(ctx: TrackMotionContext) {
         });
         store.getState().finishTracking(
           null,
-          `Tracked ${r.vertices} mask vertices, wrote ${r.keyframes} mask keyframes (${r.status}).`,
+          r.sampled < r.vertices
+            ? `Tracked ${r.sampled} of ${r.vertices} mask vertices (the rest follow their neighbours), wrote ${r.keyframes} mask keyframes (${r.status}).`
+            : `Tracked ${r.vertices} mask vertices, wrote ${r.keyframes} mask keyframes (${r.status}).`,
         );
         return;
       }
@@ -213,8 +239,18 @@ export function trackMotionActions(ctx: TrackMotionContext) {
     }
   };
 
-  const onApply = (): void => {
+  const onApply = async (): Promise<void> => {
     if (!result) return;
+    // Applying the forward track to the FOOTAGE itself moves the footage
+    // under its own track — the accident applyTargetGuard.ts describes. One
+    // confirm, offering the null; every other target applies as before.
+    if (needsSelfApplyConfirm({ mode, targetId, sourceId: nodeId })) {
+      const copy = selfApplyConfirmCopy({ mode, layerName: targetName(targetId) });
+      const makeNull = await customConfirm(copy.title, copy.message, { confirmLabel: copy.confirmLabel });
+      if (makeNull) onCreateNullAndApply();
+      else store.getState().finishTracking(result, 'Not applied — choose another layer to receive the track.');
+      return;
+    }
     let n = 0;
     let what = '';
     if (mode === 'follow') {
@@ -490,6 +526,7 @@ export function trackMotionActions(ctx: TrackMotionContext) {
   };
 
   return {
+    onAttachToNull,
     onArmPick,
     onTrackAgain,
     onCancel,

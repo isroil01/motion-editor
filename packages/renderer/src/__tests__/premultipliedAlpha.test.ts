@@ -41,6 +41,9 @@ const FAMILIES = [
   'textured', 'masked-textured', 'lut-textured', 'deformed-mesh', 'textured3d', 'masked-textured3d',
   'textured-linear', 'masked-textured-linear', 'lut-textured-linear',
   'deformed-mesh-linear', 'textured3d-linear', 'masked-textured3d-linear',
+  // The lit-3d colour-LUT variants: derived from their bases BEFORE the
+  // unpremultiply rewrite, so the rewrite must have found its sites in them too.
+  'textured3d-lut', 'textured3d-lut-linear', 'mesh3d-textured-lut', 'mesh3d-textured-lut-linear', 'mesh3d-pbr-lut',
 ];
 
 describe('every textured family un-premultiplies at the sample', () => {

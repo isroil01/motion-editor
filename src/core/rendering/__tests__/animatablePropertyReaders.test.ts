@@ -100,6 +100,16 @@ const EXPLAINED: Record<string, string> = {
   acceptsLights: 'readNodeMaterial(node, a)',
   castsShadows: 'readNodeMaterial(node, a)',
   acceptsShadows: 'readNodeMaterial(node, a)',
+  // Camera DOF is sampled as a SET: buildSnapshot hands its sampler to
+  // `readSceneDof` (camera3d.ts), which quotes each prop name there — the same
+  // shape as Material Options above. `highlightGain` is absent from this list
+  // because snapshotToFrameScene quotes it directly.
+  dofStrength: 'readSceneDof(',
+  focusDistance: 'readSceneDof(',
+  dofAperture: 'readSceneDof(',
+  fStop: 'readSceneDof(',
+  irisBlades: 'readSceneDof(',
+  irisRoundness: 'readSceneDof(',
 };
 
 /**

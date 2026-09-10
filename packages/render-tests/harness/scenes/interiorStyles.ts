@@ -219,7 +219,11 @@ export const interiorStyleScenes: Scene[] = [
     });
   }, { size: { w: 640, h: 480 }, comp: { width: 640, height: 480, background: '#0c0c12' } }),
 
-  scene('bevel-above-cap', 'Same bevel at 2× — computed on the capped buffer and upsampled.', (graph) => {
+  // Blessed from the GPU path (2026-09-08): above the working-buffer cap the
+  // CPU pass renders a downscaled-and-upsampled approximation, ~1.2 % of pixels
+  // off the full-resolution shader in the ramp. The golden pins the product's
+  // full-res look; the CPU cap remains a deliberate performance trade.
+  scene('bevel-above-cap', 'Same bevel at 2× — full resolution on the GPU; the CPU pass computes on the capped buffer and upsamples.', (graph) => {
     graph.addNode(node('s', {
       kind: 'shape',
       position: { x: 640, y: 480 },

@@ -41,7 +41,7 @@ import {
   type MaterialDescriptor,
 } from '../shaders/Material';
 import { SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING, ENV_TEXTURE_BINDING } from '../gpu/types';
-import { packTextured3D, packSolid3D, SHADOW3D_FLOATS, type Shade3D, type Shade3DLight } from '../pipeline/uniforms';
+import { packTextured3D, packSolid3D, SHADOW3D_FLOATS, SHADOW3D_TAIL_FLOATS, type Shade3D, type Shade3DLight } from '../pipeline/uniforms';
 import { addTransformedBox, emptyBox, shadowCameraFor, shadowMapSizeOf } from '../rendergraph/passes/shadowMap';
 import { Mat4 } from '../core/math/Mat4';
 import type { Rect } from '../core/math/geometry';
@@ -108,9 +108,11 @@ describe('the gate: no shadow-mapped light ⇒ the arithmetic that shipped befor
       shadow: SHADOW,
     }));
     expect(withShadow.length).toBe(without.length);
-    const head = without.length - SHADOW3D_FLOATS;
+    // The first map's block sits BEFORE the second's (plan B2), which stays zero here.
+    const head = without.length - SHADOW3D_TAIL_FLOATS;
     expect([...withShadow.slice(0, head)]).toEqual([...without.slice(0, head)]);
-    expect([...withShadow.slice(head)]).not.toEqual(new Array(SHADOW3D_FLOATS).fill(0));
+    expect([...withShadow.slice(head, head + SHADOW3D_FLOATS)]).not.toEqual(new Array(SHADOW3D_FLOATS).fill(0));
+    expect([...withShadow.slice(head + SHADOW3D_FLOATS)]).toEqual(new Array(SHADOW3D_FLOATS).fill(0));
   });
 
   it('a shadow whose light did not survive the filter stays OFF', () => {
@@ -170,7 +172,7 @@ describe('the binding contract', () => {
     // per-layer slot — so adding a per-layer texture can never renumber them.
     const textures = material.layout.filter((e) => e.type === 'texture').map((e) => e.binding);
     expect(material.glslSamplers!.length).toBe(textures.length);
-    expect(material.glslSamplers!.slice(-3)).toEqual(['uEnvTex', 'uShadowTex', 'uSsaoTex']);
+    expect(material.glslSamplers!.slice(-4)).toEqual(['uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex']);
     expect([...textures].sort((a, b) => a - b)).toEqual(textures);
   });
 
@@ -211,9 +213,10 @@ describe('both dialects sample the map only inside the gate', () => {
   it.each(SHADE_SHADERS.map((s) => s.name))('%s taps the map from ONE site', (name) => {
     const src = BUILTIN_SHADERS.find((s) => s.name === name)!;
     // One tap site per dialect, inside the 3x3 nest, inside the gate. More than
-    // one means a second sampling path the gate may not cover.
-    expect(src.wgsl.split('textureSampleLevel(shadowTex').length - 1).toBe(1);
-    expect(src.glsl!.fragment.split('textureLod(uShadowTex').length - 1).toBe(1);
+    // one means a second sampling path the gate may not cover. Since plan B2
+    // the tap lives in ONE parameterised body (shadowTerm) both maps call.
+    expect(src.wgsl.split('unpackShadowDepth(textureSampleLevel(').length - 1).toBe(1);
+    expect(src.glsl!.fragment.split('unpackShadowDepth(textureLod(').length - 1).toBe(1);
   });
 
   it.each(SHADE_SHADERS.map((s) => s.name))('%s samples ONCE per fragment, not once per light', (name) => {
@@ -249,8 +252,10 @@ describe('both dialects sample the map only inside the gate', () => {
     expect(caster.wgsl).toContain('packShadowDepth(dot(world - obj.origin.xyz, obj.axis.xyz) * obj.axis.w)');
     expect(caster.glsl!.fragment).toContain('packShadowDepth(dot(vWorld - origin.xyz, axis.xyz) * axis.w)');
     for (const src of SHADE_SHADERS) {
-      expect(src.wgsl).toContain('dot(world - obj.shadowOrigin.xyz, obj.shadowAxis.xyz) * obj.shadowAxis.w');
-      expect(src.glsl!.fragment).toContain('dot(world - shadowOrigin.xyz, shadowAxis.xyz) * shadowAxis.w');
+      // The receiver's body is parameterised (plan B2): `origin`/`axis` are the
+      // block handed in, for either map — the expression is the caster's.
+      expect(src.wgsl).toContain('dot(world - origin.xyz, axis.xyz) * axis.w');
+      expect(src.glsl!.fragment).toContain('dot(world - origin.xyz, axis.xyz) * axis.w');
     }
   });
 
@@ -369,5 +374,37 @@ describe('the camera the caster pass and the shader share', () => {
     expect(shadowMapSizeOf(2048)).toBe(2048);
     expect(shadowMapSizeOf(99999)).toBe(2048);
     expect(shadowMapSizeOf(1)).toBe(512);
+  });
+});
+
+describe('the second mapped light (plan B2)', () => {
+  it('packs its own block after the first, indexed to its own light', () => {
+    const out = packTextured3D(MVP4, RECT, COLOR, 1, undefined, LIT({
+      lights: [spot({ shadowed: true }), spot({ gain: 0 }), spot({ shadowed2: true })],
+      shadow: SHADOW,
+      shadow2: { ...SHADOW, darkness: 0.5 },
+    }));
+    const b1 = out.length - SHADOW3D_TAIL_FLOATS;
+    const b2 = out.length - SHADOW3D_FLOATS;
+    // Block 1 → light 0; block 2 → light 1 in the FILTERED array (the zero-gain
+    // light between them is dropped), each with its own darkness.
+    expect(out[b1 + 16 + 7]).toBe(0);
+    expect(out[b1 + 16 + 8]).toBe(1);
+    expect(out[b2 + 16 + 7]).toBe(1);
+    expect(out[b2 + 16 + 8]).toBe(0.5);
+  });
+
+  it('a second block without a second shadowed light stays zero', () => {
+    const out = packTextured3D(MVP4, RECT, COLOR, 1, undefined, LIT({
+      lights: [spot({ shadowed: true })],
+      shadow: SHADOW,
+      shadow2: SHADOW,
+    }));
+    expect([...out.slice(out.length - SHADOW3D_FLOATS)]).toEqual(new Array(SHADOW3D_FLOATS).fill(0));
+  });
+
+  it.each(LIT_3D)('$name declares the second map at 13/14 with its own sampler', ({ material }) => {
+    expect(material.layout.find((e) => e.binding === 13)?.type).toBe('texture');
+    expect(material.layout.find((e) => e.binding === 14)?.type).toBe('sampler');
   });
 });

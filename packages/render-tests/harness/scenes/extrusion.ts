@@ -193,7 +193,7 @@ function roundedBevelScene(): Scene {
  * those gaps open into visible stair-stepping along the trailing edge.
  *
  * Both depths are rendered because the shallow one is the control that shows the
- * stack was never broken, only under-sampled — and because a single deep scene
+ * body was never broken, only under-sampled — and because a single deep scene
  * would need someone to know what "correct" looks like, whereas the pair makes
  * the claim comparative: at the same yaw, the deep body must be as solid as the
  * shallow one.
@@ -214,8 +214,19 @@ function sliceDensityScenes(): Scene[] {
     }));
     graph.addNode(node('cam', { kind: 'camera', position: CENTER, transform: CAM }));
   };
-  // Raised tolerance: many thin slice plates × depth-tested AA puts ~1–2% of pixels
-  // on glyph fringe rows, and those rows wobble between SwiftShader builds/OSes.
+  /*
+    These two now render through the MESH, not the plate stack they were written
+    for. The outline reader used to need a Text COMPONENT and returned nothing
+    for a bare transform `text` prop, so this subject fell to the slices; it
+    reads the render layer now, and a layer with no content draws the same
+    `Text` placeholder the front face does — so the body matches what is drawn
+    instead of punting. The pair still earns its place as the deep-vs-shallow
+    solidity comparison; the slice fallback itself is pinned under jsdom, where
+    no canvas exists to trace from (buildSnapshotExtrusion.test.ts).
+
+    Raised tolerance: depth-tested AA puts ~1–2% of pixels on glyph fringe rows,
+    and those rows wobble between SwiftShader builds/OSes.
+  */
   const sliceTol = 0.025;
   return [
     scene('ext-text-depth-40', 'Extruded text at depth 40 — the shallow control, always solid.', build(40), sliceTol),
@@ -344,6 +355,32 @@ function meshPathScenes(): Scene[] {
       }));
       light(graph);
     }, 0.04), // Arial outlines + bevel AA drift ~3.5% across OS/SwiftShader; 2.5% is too tight.
+    scene('ext-mesh-gradient-walls', 'A gradient-filled extruded card, yawed so the WALL is in view — the ramp must continue onto it, not stop at the front edge.', (graph) => {
+      graph.addNode(node('card', {
+        kind: 'shape',
+        position: CENTER,
+        transform: { width: 220, height: 150, shapeType: 'rect', extrusionDepth: 90, rotationY: 42, rotationX: -14, z: 0 },
+        style: { fill: '#ff3b30' },
+        // The gradient lives on the fx component, which is where readNodeFill
+        // looks; the Style fill stays as the BASE colour a gradient never
+        // writes to — and which the walls used to show on their own.
+        components: [{
+          id: 'card_fx',
+          type: 'fx',
+          props: {
+            fill: {
+              type: 'linear',
+              angle: 90,
+              stops: [
+                { id: 'g0', offset: 0, color: '#ff3b30' },
+                { id: 'g1', offset: 1, color: '#0a4fd8' },
+              ],
+            },
+          },
+        }],
+      }));
+      graph.addNode(node('cam', { kind: 'camera', position: CENTER, transform: CAM }));
+    }),
     scene('ext-mesh-rounded-concave', 'A lit rounded card with a CONCAVE bevel — the cove catches the light along the rim.', (graph) => {
       graph.addNode(node('card', {
         kind: 'shape',

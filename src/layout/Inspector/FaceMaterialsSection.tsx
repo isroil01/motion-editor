@@ -19,6 +19,10 @@ import { useSceneRevision } from '@stores/sceneStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { readNode3D } from '@core/scene/threeD';
 import { readNodeMaterial } from '@core/scene/material';
+import { readNodeFill, sortedStops } from '@core/paint/fill';
+import { readNodeLayerStyles, styledSurfaceFill } from '@core/effects/layerStyles';
+import { EXTRUSION_WALL_FALLBACK_FILL } from '@core/scene/extrusion';
+import type { SceneNode } from '@core/types';
 import {
   getNodeFaceMaterials,
   setNodeFaceMaterial,
@@ -37,6 +41,31 @@ const KINDS: ReadonlyArray<{ kind: EditableKind; label: string; hint: string }> 
   { kind: 'back', label: 'Back', hint: 'The rear cap' },
 ];
 
+/**
+ * The colour a face without a fill of its own is shaded FROM — what the
+ * renderer hands `resolveFaceMaterial` as `layerFill` (buildSnapshot's
+ * `wallFill`), reduced to one `#rrggbb` for the swatch.
+ *
+ * A gradient has no single colour; the renderer samples it per face, so any
+ * one swatch is an approximation. The FIRST stop is the one the user set the
+ * gradient from and the one a solid conversion keeps, which makes it the
+ * honest stand-in. It used to fall through to a hard-coded blue, so the
+ * Side/Bevel/Back rows previewed a colour that appeared nowhere on canvas.
+ *
+ * With no fill at all this is the renderer's own wall fallback, so the rows
+ * still show what would actually draw — never a colour invented here. Layer
+ * styles are applied the way the renderer applies them: a Colour or Gradient
+ * Overlay repaints the front face and every derived face with it.
+ */
+function derivedLayerFill(node: SceneNode): string {
+  const paint = readNodeFill(node);
+  const base = paint?.type === 'solid' ? paint.color : paint ? sortedStops(paint.stops)[0]?.color : undefined;
+  const hex = typeof base === 'string' && base.startsWith('#') ? base : EXTRUSION_WALL_FALLBACK_FILL;
+  // `#rrggbb` only: the picker's swatch carries no alpha, and the front face's
+  // opacity is the layer's, not a face's.
+  return styledSurfaceFill(readNodeLayerStyles(node), hex).slice(0, 7);
+}
+
 export function FaceMaterialsSection({ nodeId }: { nodeId: string }): JSX.Element | null {
   useSceneRevision((s) => s.rev);
   const faceSel = useFaceSelectionStore();
@@ -52,11 +81,7 @@ export function FaceMaterialsSection({ nodeId }: { nodeId: string }): JSX.Elemen
   // The canvas picker and these rows are two views of one selection: picking a
   // side on canvas highlights its row, and hovering a row previews nothing else.
   const pickedKind = faceSel.nodeId === nodeId ? faceSel.kind : null;
-  const layerFill = (() => {
-    const c = node.components.find((x) => x.type === 'Style' || x.type === 'Text');
-    const f = c?.props.fill;
-    return typeof f === 'string' && f.startsWith('#') ? f.slice(0, 7) : '#2b7eff';
-  })();
+  const layerFill = derivedLayerFill(node);
   const anyOverride = Object.keys(mats).length > 0;
   // With Accepts Lights on, real per-fragment shading replaces the flat gain, so
   // say so rather than showing a knob that does nothing.

@@ -140,6 +140,28 @@ export interface RenderLayer {
    *  offscreen texture, then this layer composites that texture as one unit
    *  (its opacity / blend / filter / mask apply to the whole nested result). */
   precompLayers?: ReadonlyArray<RenderLayer>;
+  /**
+   * A SEALED comp instance's own 3D frame — the nested composition's camera,
+   * lights and environment reflection, exactly as its own `buildSnapshot` pass
+   * resolved them (inner-comp world space, inner-comp pixel projection).
+   *
+   * Present only when the referenced composition has 3D content, so every
+   * instance of a 2D comp (and every plain Pre-compose group) is unchanged.
+   * The adapter forces such a container through the ISOLATED path, lifts the
+   * instance placement into the projection, and the renderer swaps these in
+   * for the host's while it draws the subtree — so the inner 3D layers get a
+   * real depth test, per-fragment lighting and shadow maps through the camera
+   * of the comp they live in, never the host's.
+   *
+   * Not carried: SSAO. The nested pass inherits `comp.ssao` from the HOST's
+   * settings (there is no per-comp settings lookup), so passing it on would be
+   * the host's switch, not the inner comp's.
+   */
+  precompScene3d?: {
+    camera3d: NonNullable<RenderSnapshot['camera3d']>;
+    lights3d?: RenderSnapshot['lights3d'];
+    envMap?: RenderSnapshot['envMap'];
+  };
   /** A light layer's 2D wash: a glow drawn at x,y and screen-blended to brighten
    *  the layers beneath. A SPOT is shaped by `angle`/`cone`/`coneFeather`; every
    *  other type is a plain radial falloff. `coneFeather` is a PERCENT of the
@@ -538,7 +560,19 @@ export interface RenderLayer {
       gain: number;
       /** Sample the layer's own texture (image/video back cap) instead of `fill`. */
       textured?: boolean;
+      /**
+       * Sample the layer's FILL PAINT plate (`paint.key` below) instead of
+       * `fill` — what puts a gradient on the walls. The mesh's uv is the layer
+       * box, so the plate is that box painted edge to edge with the gradient.
+       */
+      paintTextured?: boolean;
     }>;
+    /**
+     * The gradient plate the `paintTextured` ranges sample: the layer box
+     * (`width × height`) filled with `fillPaint`, no glyph mask, no padding.
+     * The texture provider rasterises it under `key` (MotionRendererBackend).
+     */
+    paint?: { key: string; fillPaint: FillPaint; fill?: string; width: number; height: number };
     /**
      * An imported glTF material's maps beyond base colour, as this session's
      * object URLs. Present only when the material carries at least one — which
@@ -633,7 +667,8 @@ export interface RenderSnapshot {
   roi?: { x: number; y: number; width: number; height: number };
   /**
    * False when the frame is being rendered through an ORTHO or CUSTOM view
-   * rather than the active camera. Those are inspection views and must not be
+   * rather than a scene camera (Active Camera, or a `camera:<id>` view — both
+   * are the shot and clip). Those are inspection views and must not be
    * clipped to the composition rectangle — a Top view exists precisely to show
    * where layers sit outside the render frame. Defaults to true (clip).
    */

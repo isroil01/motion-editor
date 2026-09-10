@@ -238,7 +238,10 @@ export type EffectType =
   | 'rainfall'
   | 'write-on'
   | 'light-burst'
+  | 'beam-path'
+  | 'plexus'
   // Stylize — surface shading and per-cell resamples.
+  | 'deep-glow'
   | 'glass'
   | 'texturize'
   | 'threads'
@@ -265,7 +268,38 @@ export type EffectType =
   | 'radial-fast-blur'
   | 'cross-blur'
   | 'scale-wipe'
-  | 'plastic';
+  | 'plastic'
+  // ── Round seven: the AE families still thin after six rounds ──────────
+  //
+  // Eighteen effects. Fifteen are a shader plus a retained Canvas2D kernel,
+  // like every port before them. Three (Color Offset, Threshold RGB, Cineon
+  // Converter) are per-channel transfers and so join `LUT_BUILDERS` instead — free on
+  // both backends, no bake, no shader. Particle Systems II is the one clock
+  // driven member (see `TIME_DEPENDENT`): a point emitter indexes its births
+  // by absolute time, and a keyframed phase would leave it static by default.
+  //
+  // Distort / Transition — inverse-map resamples and completion reveals.
+  | 'cc-tiler'
+  | 'ripple-pulse'
+  | 'radial-scale-wipe'
+  | 'glass-wipe'
+  | 'image-wipe'
+  // Keying / Colour — two keys, a legaliser, HLS grain, and the three LUTs.
+  | 'color-difference-key'
+  | 'wire-removal'
+  | 'broadcast-colors'
+  | 'noise-hls'
+  | 'color-offset'
+  | 'threshold-rgb'
+  | 'cineon-converter'
+  // Stylize / Perspective / Generate.
+  | 'block-load'
+  | 'kernel'
+  | '3d-glasses'
+  | 'fractal'
+  // Simulation — an emitter on the clock, and bubbles on a keyframed evolution.
+  | 'particle-systems'
+  | 'cc-bubbles';
 
 /** Curve control points: `[inputX, outputY]` pairs in 0–255. */
 export type CurvePoints = ReadonlyArray<readonly [number, number]>;
@@ -367,7 +401,17 @@ export interface EffectParamDef {
    * like every other numeric param; only the CONTROL differs. Requires
    * `options`, which `effectRegistryComplete.test.ts` enforces.
    */
-  type: 'number' | 'color' | 'checkbox' | 'curve' | 'layer' | 'resolved' | 'enum';
+  /**
+   * `'maskPath'` is a reference to one of THIS layer's mask paths (stored as
+   * the path id, '' = none) — the spine a path-following effect draws along.
+   * Rendered as a dropdown of the layer's masks; the render pipeline resolves
+   * the referenced path into the companion `resolved` polyline param at
+   * snapshot time (buildSnapshot), the same hand-off Audio Spectrum uses, so
+   * the drawing kernels stay pure functions of their params — and a TRACKED
+   * mask (maskAnim) re-resolves per frame, which is what makes an effect
+   * follow a tracked object for free.
+   */
+  type: 'number' | 'color' | 'checkbox' | 'curve' | 'layer' | 'resolved' | 'enum' | 'maskPath';
   /** The choices for an `'enum'` param, in menu order. Ignored for other types. */
   options?: ReadonlyArray<{ value: number; label: string }>;
   /**
@@ -568,6 +612,15 @@ const TIME_DEPENDENT: ReadonlyMap<string, string> = new Map<string, string>([
     effects that cannot be expressed that way.
   */
   ['strobe-light', 'time'],
+  /*
+    CC Particle Systems II (round seven). Same test, passed the same way: a
+    point emitter's picture differs every frame BECAUSE particles are born and
+    die on the clock, and the alive set is indexed by absolute time
+    (`floor(time·birthRate)`). CC Bubbles, added beside it, deliberately took
+    the snowfall route — a keyframed `evolution` — because a wrapping field
+    needs no absolute origin. An emitter does.
+  */
+  ['particle-systems', 'time'],
 ]);
 
 export function isTimeDependentEffect(type: string): boolean {
@@ -799,6 +852,9 @@ export const EFFECT_DEFS: EffectDef[] = [
     params: [
       { key: 'shutterAngle', label: 'Shutter Angle', type: 'number', unit: '°', min: 0, max: 720, default: 180 },
       { key: 'samples', label: 'Samples', type: 'number', min: 2, max: 32, default: 12 },
+      // Per-layer shutter phase (AE's is comp-wide): −90 centres the exposure
+      // on the frame, 0 trails it, −180 leads it — the streak's direction.
+      { key: 'shutterPhase', label: 'Shutter Phase', type: 'number', unit: '°', min: -360, max: 360, default: -90 },
     ],
     css: () => '',
   },
@@ -1669,6 +1725,11 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'threshold', label: 'Threshold', type: 'number', unit: '', min: 1, max: 254, default: 128 },
       { key: 'color', label: 'Color', type: 'color', default: '#ffffff' },
       { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      // A mask path as the contour instead of the alpha silhouette — the AE
+      // "Stroke: Mask/Path" reading of this effect. With a TRACKED mask the
+      // lights chase around a moving object.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
     ],
     css: () => '',
   },
@@ -2678,6 +2739,11 @@ export const EFFECT_DEFS: EffectDef[] = [
       // content hash is useless and the export flickers. Keyframe to re-strike.
       { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
       { key: 'composite', label: 'Composite', type: 'number', min: 0, max: 4, precision: 0, default: 1 },
+      // Path-guided bolt: the mask path is the baseline the midpoint
+      // displacement forks around instead of the Start→End segment, so a
+      // tracked mask makes the lightning crawl around the object.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
     ],
     css: () => '',
   },
@@ -3216,6 +3282,11 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'brushColor', label: 'Color', type: 'color', default: '#ffffff' },
       { key: 'wobble', label: 'Wobble', type: 'number', unit: '%', min: 0, max: 100, default: 25 },
       { key: 'taper', label: 'Taper', type: 'number', unit: '%', min: 0, max: 100, default: 40 },
+      // Draw along a mask path instead of the Start→End line (Start/End/Wobble
+      // are ignored then — the path IS the shape). Keyframe `completion` to
+      // reveal the stroke along it; with a tracked mask, along the OBJECT.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
     ],
     css: () => '',
   },
@@ -3236,7 +3307,118 @@ export const EFFECT_DEFS: EffectDef[] = [
     css: () => '',
   },
 
+  {
+    /*
+      Energy Beam — the Saber class. A lit core stroke with an inverse-power
+      glow along a MASK PATH (a tracked mask makes it follow the object), the
+      layer's own text outline, or a Start→End line; Start/End reveal it,
+      Start/End Size taper it, Distortion bends it with curl noise, Flicker
+      breathes it. Evolution and Flicker Phase are KEYFRAMED phases (an
+      expression such as `time * 10` animates them) rather than the wall
+      clock — the rule every generator here follows, see TIME_DEPENDENT.
+      See beamPath.ts for the model; fxBeamPath.ts is its GPU twin.
+    */
+    type: 'beam-path',
+    label: 'Energy Beam',
+    params: [
+      { key: 'source', label: 'Path', type: 'enum', default: 0, options: [{ value: 0, label: 'Mask path (or line)' }, { value: 1, label: 'Start → End line' }, { value: 2, label: 'Text outline' }] },
+      { key: 'pathMaskId', label: 'Mask Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
+      { key: 'startX', label: 'Start X', type: 'number', unit: 'px', min: -4000, max: 4000, default: -200 },
+      { key: 'startY', label: 'Start Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'endX', label: 'End X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 200 },
+      { key: 'endY', label: 'End Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'start', label: 'Start', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'end', label: 'End', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      { key: 'coreWidth', label: 'Core Size', type: 'number', unit: 'px', min: 0, max: 200, default: 6 },
+      { key: 'coreSoftness', label: 'Core Softness', type: 'number', unit: '%', min: 0, max: 100, default: 30 },
+      { key: 'coreColor', label: 'Core Color', type: 'color', default: '#ffffff' },
+      { key: 'startSize', label: 'Start Size', type: 'number', unit: '%', min: 0, max: 400, default: 100 },
+      { key: 'endSize', label: 'End Size', type: 'number', unit: '%', min: 0, max: 400, default: 100 },
+      { key: 'glowColor', label: 'Glow Color', type: 'color', default: '#3fa8ff' },
+      { key: 'glowIntensity', label: 'Glow Intensity', type: 'number', unit: '%', min: 0, max: 400, default: 100 },
+      { key: 'glowSpread', label: 'Glow Spread', type: 'number', unit: 'px', min: 1, max: 400, default: 30 },
+      { key: 'glowBias', label: 'Glow Bias', type: 'number', unit: '%', min: 0, max: 100, default: 33 },
+      { key: 'distortion', label: 'Distortion', type: 'number', unit: 'px', min: 0, max: 200, default: 0 },
+      { key: 'distortionScale', label: 'Distortion Scale', type: 'number', unit: 'px', min: 4, max: 800, default: 80 },
+      { key: 'evolution', label: 'Evolution', type: 'number', min: -100000, max: 100000, default: 0 },
+      { key: 'flicker', label: 'Flicker', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'flickerRate', label: 'Flicker Rate', type: 'number', unit: 'Hz', min: 0, max: 120, default: 12 },
+      { key: 'flickerPhase', label: 'Flicker Phase', type: 'number', unit: 's', min: -86400, max: 86400, precision: 3, default: 0 },
+      { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
+      { key: 'composite', label: 'Composite', type: 'enum', default: 0, options: [{ value: 0, label: 'Add over layer' }, { value: 1, label: 'Beam only' }] },
+    ],
+    css: () => '',
+  },
+  {
+    /*
+      Plexus — the point/line network (the Rowbyte class). A deterministic
+      point cloud drifting on value noise as Evolution advances — or, with a
+      mask path assigned, the path's vertices (a tracked mask makes the
+      network follow the object) — with every pair closer than Max Distance
+      linked by a line whose opacity falls with distance, and optional
+      triangles between mutually-close triples. Canvas2D-only like Lightning:
+      it DRAWS, with no per-pixel form. The particle system has the same
+      network over its live particles (Plexus Distance in the Particle
+      section). See plexus.ts.
+    */
+    type: 'plexus',
+    label: 'Plexus',
+    params: [
+      { key: 'pathMaskId', label: 'Points From Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
+      { key: 'pathStep', label: 'Path Step', type: 'number', min: 1, max: 32, precision: 0, default: 4 },
+      { key: 'pointCount', label: 'Points', type: 'number', min: 0, max: 700, precision: 0, default: 80 },
+      { key: 'spread', label: 'Spread', type: 'number', unit: '%', min: 0, max: 100, default: 90 },
+      { key: 'drift', label: 'Drift', type: 'number', unit: 'px', min: 0, max: 1000, default: 40 },
+      { key: 'evolution', label: 'Evolution', type: 'number', min: -100000, max: 100000, default: 0 },
+      { key: 'maxDistance', label: 'Max Distance', type: 'number', unit: 'px', min: 0, max: 2000, default: 140 },
+      { key: 'lineWidth', label: 'Line Width', type: 'number', unit: 'px', min: 0, max: 20, precision: 1, default: 1 },
+      { key: 'lineOpacity', label: 'Line Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 60 },
+      { key: 'lineColor', label: 'Line Color', type: 'color', default: '#9fd0ff' },
+      { key: 'triangles', label: 'Triangles', type: 'checkbox', default: false },
+      { key: 'triangleOpacity', label: 'Triangle Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 15 },
+      { key: 'pointSize', label: 'Point Size', type: 'number', unit: 'px', min: 0, max: 60, default: 3 },
+      { key: 'pointColor', label: 'Point Color', type: 'color', default: '#ffffff' },
+      { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
+      { key: 'composite', label: 'Composite', type: 'number', min: 0, max: 4, precision: 0, default: 0 },
+    ],
+    css: () => '',
+  },
+
   // ── Round five · Stylize ──────────────────────────────────────────
+  {
+    /*
+      Deep Glow — the physically based glow (the Plugin Everything class):
+      an octave pyramid of Gaussians summed with equal weight, which IS an
+      inverse-square falloff, in linear light. The built-in `glow` above is a
+      single Gaussian ring and stays as it is — documents depend on it.
+      Exposure is in stops so it composes like a light; Aspect stretches the
+      glow (positive = wider than tall, the anamorphic-streak convention);
+      Chromatic Aberration widens red and narrows blue. See deepGlow.ts.
+    */
+    type: 'deep-glow',
+    label: 'Deep Glow',
+    params: [
+      { key: 'radius', label: 'Radius', type: 'number', unit: 'px', min: 0, max: 500, default: 60 },
+      { key: 'exposure', label: 'Exposure', type: 'number', unit: 'EV', min: -4, max: 4, default: 0 },
+      { key: 'threshold', label: 'Threshold', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'aspect', label: 'Aspect Ratio', type: 'number', unit: '%', min: -100, max: 100, default: 0 },
+      { key: 'chromatic', label: 'Chromatic Aberration', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'tint', label: 'Tint', type: 'color', default: '#ffffff' },
+      { key: 'tintAmount', label: 'Tint Amount', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'glowOnly', label: 'Glow Only', type: 'checkbox', default: false },
+      // One output code of per-pixel noise on the glow: a 1/r² tail crosses the
+      // 8-bit floor over a wide band, and without this that band is a visible disc.
+      { key: 'dither', label: 'Dither', type: 'checkbox', default: true },
+      {
+        key: 'quality', label: 'Quality', type: 'enum', default: 1,
+        options: [{ value: 0, label: 'Low (4 octaves)' }, { value: 1, label: 'Medium (6 octaves)' }, { value: 2, label: 'High (8 octaves)' }],
+      },
+    ],
+    css: () => '',
+  },
   {
     /*
       CC Glass — the layer's own luminance as a bump map: refract, then a
@@ -3592,6 +3774,418 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'lightAngle', label: 'Light Angle', type: 'number', unit: '°', min: 0, max: 360, default: 45 },
       { key: 'lightIntensity', label: 'Light Intensity', type: 'number', unit: '%', min: 0, max: 200, default: 100 },
       { key: 'specular', label: 'Specular', type: 'number', unit: '%', min: 0, max: 100, default: 50 },
+    ],
+    css: () => '',
+  },
+  // -- Round seven --
+  {
+    /*
+      CC Tiler. `scale` is a PERCENTAGE and 100 is the identity, which is why
+      the default is 100 rather than something that shows the effect: adding an
+      effect must never change the picture on its own. Every round-seven def
+      below holds to that, and the Canvas2D and GPU paths both return early at
+      the neutral setting so the identity is exact rather than a resample.
+    */
+    type: 'cc-tiler',
+    label: 'CC Tiler',
+    params: [
+      { key: 'scale', label: 'Scale', type: 'number', unit: '%', min: 1, max: 100, default: 100 },
+      { key: 'centerX', label: 'Center X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'centerY', label: 'Center Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'blendWithOriginal', label: 'Blend With Original', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+    ],
+    css: () => '',
+  },
+  {
+    /*
+      CC Ripple Pulse. `pulseRadius` is the KEYFRAMED property -- the ring does
+      not travel on its own. See the TIME_DEPENDENT note: a keyframed phase
+      keeps the effect cacheable and under the animator's control, and only an
+      effect that cannot be expressed that way earns a place on the clock.
+    */
+    type: 'ripple-pulse',
+    label: 'CC Ripple Pulse',
+    params: [
+      { key: 'centerX', label: 'Center X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'centerY', label: 'Center Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'pulseRadius', label: 'Pulse Radius', type: 'number', unit: 'px', min: 0, max: 4000, default: 0 },
+      { key: 'amplitude', label: 'Amplitude', type: 'number', unit: 'px', min: -200, max: 200, default: 40 },
+      { key: 'width', label: 'Width', type: 'number', unit: 'px', min: 1, max: 500, default: 60 },
+      { key: 'renderBump', label: 'Render Bump Map', type: 'checkbox', default: true },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'radial-scale-wipe',
+    label: 'CC Radial ScaleWipe',
+    params: [
+      { key: 'completion', label: 'Completion', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'centerX', label: 'Center X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'centerY', label: 'Center Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'reverse', label: 'Reverse Transition', type: 'checkbox', default: false },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'glass-wipe',
+    label: 'CC Glass Wipe',
+    params: [
+      { key: 'completion', label: 'Completion', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'displacement', label: 'Displacement', type: 'number', unit: 'px', min: 0, max: 200, default: 40 },
+      { key: 'softness', label: 'Softness', type: 'number', unit: '%', min: 0, max: 100, default: 30 },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'image-wipe',
+    label: 'CC Image Wipe',
+    params: [
+      { key: 'completion', label: 'Completion', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'borderSoftness', label: 'Border Softness', type: 'number', unit: '%', min: 0, max: 100, default: 20 },
+      {
+        key: 'gradientChannel',
+        label: 'Gradient Channel',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Luminance' },
+          { value: 1, label: 'Alpha' },
+          { value: 2, label: 'Red' },
+          { value: 3, label: 'Green' },
+          { value: 4, label: 'Blue' },
+        ],
+      },
+      { key: 'invertGradient', label: 'Invert Gradient', type: 'checkbox', default: false },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'color-difference-key',
+    label: 'Color Difference Key',
+    params: [
+      { key: 'keyColor', label: 'Key Color', type: 'color', default: '#00ff00' },
+      { key: 'matteInBlack', label: 'Matte In Black', type: 'number', min: 0, max: 255, default: 0, group: 'Matte' },
+      { key: 'matteInWhite', label: 'Matte In White', type: 'number', min: 0, max: 255, default: 255, group: 'Matte' },
+      { key: 'matteGamma', label: 'Matte Gamma', type: 'number', min: 0.1, max: 10, precision: 2, default: 1, group: 'Matte' },
+      {
+        key: 'viewMode',
+        label: 'View',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Final Output' },
+          { value: 1, label: 'Matte Only' },
+        ],
+      },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'wire-removal',
+    label: 'CC Simple Wire Removal',
+    params: [
+      { key: 'pointAX', label: 'Point A X', type: 'number', unit: 'px', min: -4000, max: 4000, default: -100 },
+      { key: 'pointAY', label: 'Point A Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'pointBX', label: 'Point B X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 100 },
+      { key: 'pointBY', label: 'Point B Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'thickness', label: 'Thickness', type: 'number', unit: 'px', min: 1, max: 50, default: 4 },
+      { key: 'slope', label: 'Slope', type: 'number', unit: '%', min: 0, max: 100, default: 50 },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'broadcast-colors',
+    label: 'Broadcast Colors',
+    params: [
+      {
+        key: 'standard',
+        label: 'Broadcast Locale',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'NTSC' },
+          { value: 1, label: 'PAL' },
+        ],
+      },
+      {
+        key: 'howToMakeColorSafe',
+        label: 'How To Make Color Safe',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Reduce Luminance' },
+          { value: 1, label: 'Reduce Saturation' },
+          { value: 2, label: 'Key Out Unsafe' },
+          { value: 3, label: 'Key Out Safe' },
+        ],
+      },
+      { key: 'maxSignalAmplitude', label: 'Maximum Signal Amplitude', type: 'number', unit: 'IRE', min: 90, max: 120, default: 110 },
+    ],
+    css: () => '',
+  },
+  {
+    /*
+      Noise HLS. Three independent amounts because that IS the effect: shifting
+      only hue leaves every pixel as bright as it was, which RGB noise cannot
+      express. `noisePhase` is an ordinary keyframed parameter, not the clock.
+    */
+    type: 'noise-hls',
+    label: 'Noise HLS',
+    params: [
+      {
+        key: 'noiseType',
+        label: 'Noise',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Uniform' },
+          { value: 1, label: 'Squared' },
+        ],
+      },
+      { key: 'hue', label: 'Hue', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'lightness', label: 'Lightness', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'saturation', label: 'Saturation', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'grainSize', label: 'Grain Size', type: 'number', unit: 'px', min: 0.5, max: 50, precision: 1, default: 1 },
+      { key: 'noisePhase', label: 'Noise Phase', type: 'number', min: 0, max: 36000, default: 0 },
+    ],
+    css: () => '',
+  },
+  /*
+    The three per-channel transfers. Each is in `LUT_BUILDERS` rather than in
+    `CANVAS2D_ONLY`, so it renders on both backends with no bake -- see
+    `aeRoundSevenLuts.ts` for the shape rule that decides which side an effect
+    lands on. None has a shader of its own; the LUT strip IS the shader.
+  */
+  {
+    type: 'color-offset',
+    label: 'CC Color Offset',
+    params: [
+      { key: 'redPhase', label: 'Red Phase', type: 'number', unit: '°', min: 0, max: 360, default: 0 },
+      { key: 'greenPhase', label: 'Green Phase', type: 'number', unit: '°', min: 0, max: 360, default: 0 },
+      { key: 'bluePhase', label: 'Blue Phase', type: 'number', unit: '°', min: 0, max: 360, default: 0 },
+      {
+        key: 'overflow',
+        label: 'Overflow',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Wrap' },
+          { value: 1, label: 'Solarize' },
+          { value: 2, label: 'Polarize' },
+        ],
+      },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'threshold-rgb',
+    label: 'CC Threshold RGB',
+    params: [
+      { key: 'redLevel', label: 'Red Level', type: 'number', min: 0, max: 255, default: 128 },
+      { key: 'greenLevel', label: 'Green Level', type: 'number', min: 0, max: 255, default: 128 },
+      { key: 'blueLevel', label: 'Blue Level', type: 'number', min: 0, max: 255, default: 128 },
+    ],
+    css: () => '',
+  },
+  {
+    type: 'cineon-converter',
+    label: 'Cineon Converter',
+    params: [
+      {
+        key: 'conversionType',
+        label: 'Conversion Type',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Log to Linear' },
+          { value: 1, label: 'Linear to Log' },
+          { value: 2, label: 'Log to Log' },
+        ],
+      },
+      { key: 'tenBitBlackPoint', label: '10 Bit Black Point', type: 'number', min: 0, max: 1023, default: 95 },
+      { key: 'internalBlackPoint', label: 'Internal Black Point', type: 'number', min: 0, max: 255, default: 0 },
+      { key: 'tenBitWhitePoint', label: '10 Bit White Point', type: 'number', min: 0, max: 1023, default: 685 },
+      { key: 'internalWhitePoint', label: 'Internal White Point', type: 'number', min: 0, max: 255, default: 255 },
+      { key: 'gamma', label: 'Gamma', type: 'number', min: 0.1, max: 5, precision: 2, default: 1.7 },
+      { key: 'highlightRolloff', label: 'Highlight Rolloff', type: 'number', min: 0, max: 100, default: 20 },
+    ],
+    css: () => '',
+  },
+  {
+    /* CC Block Load. Completion 100 is the FINISHED load, the opposite polarity
+       from the wipes in this round, and the polarity AE's own control uses. */
+    type: 'block-load',
+    label: 'CC Block Load',
+    params: [
+      { key: 'completion', label: 'Completion', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      { key: 'scans', label: 'Scans', type: 'number', min: 1, max: 8, precision: 0, default: 4 },
+      { key: 'blockSize', label: 'Start Block Size', type: 'number', unit: 'px', min: 8, max: 512, precision: 0, default: 64 },
+    ],
+    css: () => '',
+  },
+  {
+    /* CC Kernel -- the identity kernel is the default, so adding it is inert. */
+    type: 'kernel',
+    label: 'CC Kernel',
+    params: [
+      { key: 'k00', label: 'Kernel 00', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k01', label: 'Kernel 01', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k02', label: 'Kernel 02', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k10', label: 'Kernel 10', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k11', label: 'Kernel 11', type: 'number', min: -10, max: 10, precision: 2, default: 1, group: 'Kernel' },
+      { key: 'k12', label: 'Kernel 12', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k20', label: 'Kernel 20', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k21', label: 'Kernel 21', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'k22', label: 'Kernel 22', type: 'number', min: -10, max: 10, precision: 2, default: 0, group: 'Kernel' },
+      { key: 'divisor', label: 'Divisor', type: 'number', min: 0.01, max: 100, precision: 2, default: 1 },
+      { key: 'offset', label: 'Offset', type: 'number', min: -255, max: 255, default: 0 },
+    ],
+    css: () => '',
+  },
+  {
+    /*
+      3D Glasses. AE's takes TWO source layers; this one synthesises the second
+      eye by shifting the layer, which is what makes it usable on the ordinary
+      footage people actually have. `swapLeftRight` therefore flips the sign of
+      the convergence rather than exchanging two inputs.
+    */
+    type: '3d-glasses',
+    label: '3D Glasses',
+    params: [
+      { key: 'convergenceOffset', label: 'Convergence Offset', type: 'number', unit: 'px', min: -100, max: 100, default: 8 },
+      {
+        key: 'view',
+        label: '3D View',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Red Cyan LR' },
+          { value: 1, label: 'Red Green LR' },
+          { value: 2, label: 'Red Blue LR' },
+          { value: 3, label: 'Balanced Colored Red Blue' },
+          { value: 4, label: 'Stereo Pair' },
+          { value: 5, label: 'Interlace Upper L Lower R' },
+        ],
+      },
+      { key: 'balance', label: 'Balance', type: 'number', unit: '%', min: 0, max: 100, default: 50 },
+      { key: 'swapLeftRight', label: 'Swap Left-Right', type: 'checkbox', default: false },
+    ],
+    css: () => '',
+  },
+  {
+    /* Fractal -- a GENERATOR: it replaces the pixels in the layer box rather
+       than filtering them, the same contract Checkerboard holds. */
+    type: 'fractal',
+    label: 'Fractal',
+    params: [
+      {
+        key: 'setType',
+        label: 'Set Type',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Mandelbrot' },
+          { value: 1, label: 'Julia' },
+        ],
+      },
+      { key: 'centerX', label: 'Center X', type: 'number', min: -2, max: 2, precision: 4, default: -0.5 },
+      { key: 'centerY', label: 'Center Y', type: 'number', min: -2, max: 2, precision: 4, default: 0 },
+      { key: 'magnification', label: 'Magnification', type: 'number', min: 0.1, max: 100000, precision: 2, default: 1 },
+      { key: 'iterations', label: 'Iterations', type: 'number', min: 1, max: 256, precision: 0, default: 64 },
+      { key: 'juliaX', label: 'Julia Center X', type: 'number', min: -2, max: 2, precision: 4, default: -0.7, group: 'Julia' },
+      { key: 'juliaY', label: 'Julia Center Y', type: 'number', min: -2, max: 2, precision: 4, default: 0.27, group: 'Julia' },
+      { key: 'colorPhase', label: 'Color Phase', type: 'number', unit: '°', min: 0, max: 360, default: 0, group: 'Color' },
+      { key: 'colorCycles', label: 'Color Cycles', type: 'number', min: 0.1, max: 20, precision: 1, default: 2, group: 'Color' },
+      { key: 'insideColor', label: 'Inside Color', type: 'color', default: '#000000', group: 'Color' },
+    ],
+    css: () => '',
+  },
+  {
+    /*
+      CC Particle Systems II. The one round-seven member on the clock -- see
+      `TIME_DEPENDENT`, and the module note in `aeRoundSevenSimulation.ts` for
+      why the model is CLOSED FORM rather than integrated: a simulator would
+      scrub differently from how it plays, and could not start an export at
+      frame 400. `time` is resolved, not a control.
+    */
+    type: 'particle-systems',
+    label: 'CC Particle Systems II',
+    params: [
+      { key: 'birthRate', label: 'Birth Rate', type: 'number', min: 0, max: 200, precision: 1, default: 20 },
+      { key: 'longevity', label: 'Longevity', type: 'number', unit: 's', min: 0.1, max: 10, precision: 2, default: 1.5 },
+      { key: 'producerX', label: 'Producer X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0, group: 'Producer' },
+      { key: 'producerY', label: 'Producer Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0, group: 'Producer' },
+      { key: 'producerRadiusX', label: 'Radius X', type: 'number', unit: 'px', min: 0, max: 2000, default: 0, group: 'Producer' },
+      { key: 'producerRadiusY', label: 'Radius Y', type: 'number', unit: 'px', min: 0, max: 2000, default: 0, group: 'Producer' },
+      {
+        key: 'animation',
+        label: 'Animation',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Explosive' },
+          { value: 1, label: 'Direction Axis' },
+          { value: 2, label: 'Fountain' },
+        ],
+        group: 'Physics',
+      },
+      { key: 'direction', label: 'Direction', type: 'number', unit: '°', min: 0, max: 360, default: 0, group: 'Physics' },
+      { key: 'spread', label: 'Spread', type: 'number', unit: '°', min: 0, max: 360, default: 60, group: 'Physics' },
+      { key: 'velocity', label: 'Velocity', type: 'number', unit: 'px/s', min: 0, max: 2000, default: 300, group: 'Physics' },
+      { key: 'velocityVariation', label: 'Velocity Variation', type: 'number', unit: '%', min: 0, max: 100, default: 30, group: 'Physics' },
+      { key: 'gravity', label: 'Gravity', type: 'number', min: -2000, max: 2000, default: 200, group: 'Physics' },
+      { key: 'resistance', label: 'Resistance', type: 'number', min: 0, max: 10, precision: 2, default: 0, group: 'Physics' },
+      { key: 'birthSize', label: 'Birth Size', type: 'number', unit: 'px', min: 0.5, max: 200, precision: 1, default: 8, group: 'Particle' },
+      { key: 'deathSize', label: 'Death Size', type: 'number', unit: 'px', min: 0, max: 200, precision: 1, default: 2, group: 'Particle' },
+      { key: 'sizeVariation', label: 'Size Variation', type: 'number', unit: '%', min: 0, max: 100, default: 25, group: 'Particle' },
+      { key: 'birthColor', label: 'Birth Color', type: 'color', default: '#ffe27a', group: 'Particle' },
+      { key: 'deathColor', label: 'Death Color', type: 'color', default: '#ff3b00', group: 'Particle' },
+      { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 100, group: 'Particle' },
+      {
+        key: 'blend',
+        label: 'Transfer Mode',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Add' },
+          { value: 1, label: 'Normal' },
+        ],
+        group: 'Particle',
+      },
+      { key: 'seed', label: 'Random Seed', type: 'number', min: 1, max: 10000, precision: 0, default: 1 },
+      // RESOLVED from the clock -- see `TIME_DEPENDENT`. This is what makes the
+      // emitter emit; it is not a control.
+      { key: 'time', label: 'Time (resolved)', type: 'resolved', default: 0 },
+    ],
+    css: () => '',
+  },
+  {
+    /* CC Bubbles -- keyframed on `evolution` like Snowfall, deliberately NOT on
+       the clock: a wrapping field has no birth event to index. */
+    type: 'cc-bubbles',
+    label: 'CC Bubbles',
+    params: [
+      { key: 'bubbleAmount', label: 'Bubble Amount', type: 'number', min: 0, max: 500, precision: 0, default: 100 },
+      { key: 'bubbleSpeed', label: 'Bubble Speed', type: 'number', unit: 'px', min: 0, max: 2000, default: 300 },
+      { key: 'wobbleAmplitude', label: 'Wobble Amplitude', type: 'number', unit: 'px', min: 0, max: 100, default: 10 },
+      { key: 'wobbleFrequency', label: 'Wobble Frequency', type: 'number', min: 0, max: 20, precision: 1, default: 2 },
+      { key: 'bubbleSize', label: 'Bubble Size', type: 'number', unit: 'px', min: 1, max: 100, default: 12 },
+      { key: 'sizeVariation', label: 'Size Variation', type: 'number', unit: '%', min: 0, max: 100, default: 40 },
+      {
+        key: 'shading',
+        label: 'Shading Type',
+        type: 'enum',
+        default: 0,
+        options: [
+          { value: 0, label: 'Fade Inwards' },
+          { value: 1, label: 'Fade Outwards' },
+          { value: 2, label: 'Sphere' },
+        ],
+      },
+      { key: 'color', label: 'Bubble Color', type: 'color', default: '#ffffff' },
+      { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 80 },
+      { key: 'evolution', label: 'Evolution', type: 'number', min: 0, max: 36000, default: 0 },
+      { key: 'seed', label: 'Random Seed', type: 'number', min: 1, max: 10000, precision: 0, default: 1 },
     ],
     css: () => '',
   },

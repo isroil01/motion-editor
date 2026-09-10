@@ -7,7 +7,7 @@
  * out or clips an image, so it's tested directly.
  */
 
-import { buildChannelLut, applyChannelLut, applyChannelLutFloat, isLutEffect } from './colorLut';
+import { buildChannelLut, applyChannelLut, applyChannelLutFloat, isLutEffect, lutStripByte, sampleChannelLutAsUploaded } from './colorLut';
 import type { Effect } from './effects';
 
 function levels(params: Record<string, number>): Effect {
@@ -212,5 +212,50 @@ describe('applyChannelLutFloat', () => {
     expect(data[0]).toBeLessThan(0.1);
     expect(data[4]).toBeGreaterThan(0.9);
     expect(data[3]).toBe(1);
+  });
+});
+
+/**
+ * The CPU reading of the GPU strip. Flat 3D surfaces (extruded walls, solid
+ * quads, untextured model ranges) are graded on the CPU while a textured cap
+ * beside them is graded through the `lut:<id>` strip on the GPU; this is what
+ * keeps the two on the same level, so each GPU-side detail is pinned.
+ */
+describe('sampleChannelLutAsUploaded', () => {
+  const lut = buildChannelLut([levels({ inputBlack: 20, inputWhite: 235, gamma: 1.2, outputBlack: 0, outputWhite: 255 })])!;
+
+  it('hits the strip byte exactly at a texel centre, U = (i + 0.5) / 256', () => {
+    for (const i of [0, 1, 77, 128, 254, 255]) {
+      const u = (i + 0.5) / 256;
+      expect(sampleChannelLutAsUploaded(lut, [u, u, u])[1]).toBeCloseTo(lutStripByte(lut.g[i]!) / 255, 12);
+    }
+  });
+
+  it('filters LINEARLY between texel centres (u·256 − 0.5), not over u·255', () => {
+    const v = 0.3;
+    const x = v * 256 - 0.5;
+    const i0 = Math.floor(x);
+    const f = x - i0;
+    const want = (lutStripByte(lut.r[i0]!) * (1 - f) + lutStripByte(lut.r[i0 + 1]!) * f) / 255;
+    expect(sampleChannelLutAsUploaded(lut, [v, v, v])[0]).toBeCloseTo(want, 12);
+  });
+
+  it('clamps the input first and holds the edge texels, as the shader and the clamp sampler do', () => {
+    const lo = lutStripByte(lut.r[0]!) / 255;
+    const hi = lutStripByte(lut.r[255]!) / 255;
+    expect(sampleChannelLutAsUploaded(lut, [0, -3, NaN])).toEqual([lo, lo, lo]);
+    expect(sampleChannelLutAsUploaded(lut, [1, 7, 1])).toEqual([hi, hi, hi]);
+  });
+
+  it('reads the BYTES the upload writes, not the float table', () => {
+    // 100.4 is 100 on the card; a float read would land 0.4 of a level off.
+    const t = new Float32Array(256).map((_, i) => i + 0.4);
+    const u = (100 + 0.5) / 256;
+    expect(sampleChannelLutAsUploaded({ r: t, g: t, b: t }, [u, u, u])[0]).toBe(100 / 255);
+  });
+
+  it('packs a strip byte the way the upload does — rounded, clamped, NaN as 0', () => {
+    expect([lutStripByte(-4), lutStripByte(12.5), lutStripByte(254.4), lutStripByte(900), lutStripByte(NaN)])
+      .toEqual([0, 13, 254, 255, 0]);
   });
 });

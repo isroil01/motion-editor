@@ -9,7 +9,7 @@ import type { BlendMode, ColorAttachment, SamplerHandle, TextureHandle, BufferHa
 import type { Viewport } from '../../viewport/Viewport';
 import type { RenderPassContext } from '../RenderPass';
 import type { CommandBuffer } from '../../commands/DrawCommand';
-import { SOLID_MATERIAL, TEXTURED_MATERIAL, TEXTURED_LINEAR_MATERIAL, SCENE_BLIT_MATERIAL, SCENE_BLIT_LUT_MATERIAL, MASKED_TEXTURED_MATERIAL, MASKED_TEXTURED_LINEAR_MATERIAL, LUT_TEXTURED_MATERIAL, LUT_TEXTURED_LINEAR_MATERIAL, MATTE_COMBINE_MATERIAL, BLEND_COMBINE_MATERIAL, DEFORMED_MESH_MATERIAL, DEFORMED_MESH_LINEAR_MATERIAL, SOLID3D_MATERIAL, TEXTURED3D_MATERIAL, TEXTURED3D_LINEAR_MATERIAL, TEXTURED3D_NO_DEPTH_WRITE_MATERIAL, TEXTURED3D_LINEAR_NO_DEPTH_WRITE_MATERIAL, MASKED_TEXTURED3D_MATERIAL, MASKED_TEXTURED3D_LINEAR_MATERIAL, MESH3D_SOLID_MATERIAL, MESH3D_TEXTURED_MATERIAL, MESH3D_TEXTURED_LINEAR_MATERIAL, MESH3D_PBR_MATERIAL, SHADOW_DEPTH_MATERIAL, SHADOW_DEPTH_MESH_MATERIAL, SSAO_MATERIAL, SSAO_BLUR_MATERIAL } from '../../shaders/Material';
+import { SOLID_MATERIAL, TEXTURED_MATERIAL, TEXTURED_LINEAR_MATERIAL, SCENE_BLIT_MATERIAL, SCENE_BLIT_LUT_MATERIAL, MASKED_TEXTURED_MATERIAL, MASKED_TEXTURED_LINEAR_MATERIAL, LUT_TEXTURED_MATERIAL, LUT_TEXTURED_LINEAR_MATERIAL, MATTE_COMBINE_MATERIAL, BLEND_COMBINE_MATERIAL, DEFORMED_MESH_MATERIAL, DEFORMED_MESH_LINEAR_MATERIAL, SOLID3D_MATERIAL, TEXTURED3D_MATERIAL, TEXTURED3D_LINEAR_MATERIAL, TEXTURED3D_NO_DEPTH_WRITE_MATERIAL, TEXTURED3D_LINEAR_NO_DEPTH_WRITE_MATERIAL, MASKED_TEXTURED3D_MATERIAL, MASKED_TEXTURED3D_LINEAR_MATERIAL, MESH3D_SOLID_MATERIAL, MESH3D_TEXTURED_MATERIAL, MESH3D_TEXTURED_LINEAR_MATERIAL, MESH3D_PBR_MATERIAL, MESH3D_PBR_LUT_MATERIAL, MESH3D_TEXTURED_LUT_MATERIAL, MESH3D_TEXTURED_LUT_LINEAR_MATERIAL, TEXTURED3D_LUT_MATERIAL, TEXTURED3D_LUT_LINEAR_MATERIAL, SHADOW_DEPTH_MATERIAL, SHADOW_DEPTH_MESH_MATERIAL, SSAO_MATERIAL, SSAO_BLUR_MATERIAL } from '../../shaders/Material';
 import { TEXTURED_SILHOUETTE_MATERIAL } from '../../shaders/Material';
 import { packSolid, packTextured, packSceneBlitLut, packDeformedMesh, packSolid3D, packTextured3D, packMesh3DPbr, packShadowDepth, packSsao, packSsaoBlur, type SolidShape, type ColorTransform, type Shade3D, type PbrMapParams } from '../../pipeline/uniforms';
 import { HARDWARE_SRGB_UPLOADS, LINEAR_INTERMEDIATE_STORAGE } from '../../shaders/linearWorkingSpace';
@@ -42,12 +42,15 @@ function envBinding(cmds: CommandBuffer): {
   envSampler?: SamplerHandle;
   shadowTexture?: TextureHandle;
   shadowSampler?: SamplerHandle;
+  shadow2Texture?: TextureHandle;
+  shadow2Sampler?: SamplerHandle;
   aoTexture?: TextureHandle;
   aoSampler?: SamplerHandle;
 } {
   return {
     ...(cmds.env ? { envTexture: cmds.env.texture, envSampler: cmds.env.sampler } : {}),
     ...(cmds.shadow ? { shadowTexture: cmds.shadow.texture, shadowSampler: cmds.shadow.sampler } : {}),
+    ...(cmds.shadow2 ? { shadow2Texture: cmds.shadow2.texture, shadow2Sampler: cmds.shadow2.sampler } : {}),
     ...(cmds.ao ? { aoTexture: cmds.ao.texture, aoSampler: cmds.ao.sampler } : {}),
   };
 }
@@ -245,6 +248,42 @@ export function emitTextured3D(
 }
 
 /**
+ * Queue a depth-tested 3D textured quad remapped through the layer's colour
+ * LUT strip (Levels / Curves / …) — the 3D twin of {@link emitLutTextured}, and
+ * {@link emitTextured3D} with the `textured3d-lut` material in place of its own.
+ *
+ * Always depth-writing. The one no-depth-write textured3d caller draws an
+ * effect RESULT, whose colour — LUT included — was resolved on the 2D path
+ * before it reached the group, so it never has a strip left to apply.
+ */
+export function emitLutTextured3D(
+  cmds: CommandBuffer,
+  mvp: Mat4,
+  tint: Color,
+  opacity: number,
+  blend: BlendMode,
+  texture: TextureHandle,
+  sampler: SamplerHandle,
+  lutTexture: TextureHandle,
+  uvRect: Rect = FULL_UV,
+  color?: ColorTransform,
+  shade?: Shade3D,
+  sampleLinear = false,
+): void {
+  const lin = texturedSkipsDecode(sampleLinear);
+  cmds.add({
+    batchKey: `tex3d_lut|${texture.id}|${lutTexture.id}|${blend}|${lin ? 'lin' : 'srgb'}`,
+    material: lin ? TEXTURED3D_LUT_LINEAR_MATERIAL : TEXTURED3D_LUT_MATERIAL,
+    blend,
+    uniforms: packTextured3D(mvp, uvRect, tint, opacity, color, shade, lin),
+    texture,
+    sampler,
+    lutTexture,
+    ...envBinding(cmds),
+  });
+}
+
+/**
  * Queue one material group of an extruded mesh (walls / bevel / cap) as a
  * depth-tested indexed draw off the mesh's shared buffers. `mvp` and
  * `shade.model` map the mesh's layer-centred pixel frame straight to 3D comp
@@ -258,7 +297,21 @@ export function emitMesh3D(
   blend: BlendMode,
   geometry: { vertexBuffer: BufferHandle; indexBuffer: BufferHandle; indexFormat: 'uint16' | 'uint32'; firstIndex: number; indexCount: number },
   shade?: Shade3D,
-  textured?: { texture: TextureHandle; sampler: SamplerHandle; uvRect?: Rect; color?: ColorTransform; sampleLinear?: boolean },
+  textured?: {
+    texture: TextureHandle;
+    sampler: SamplerHandle;
+    uvRect?: Rect;
+    color?: ColorTransform;
+    sampleLinear?: boolean;
+    /**
+     * The layer's colour LUT strip. Present ⇒ the `-lut` variant of whichever
+     * textured mesh material the draw would otherwise use; absent ⇒ that exact
+     * material, batch key and bind group, unchanged. Only for a range whose
+     * texture carries UNGRADED colour — a flat range's colour arrives already
+     * graded (LUT included) from the CPU, and must not be remapped twice.
+     */
+    lut?: TextureHandle;
+  },
   /**
    * The rest of a glTF material's maps. Only meaningful alongside `textured`
    * (base colour is binding 1 of the same layout); a model with maps but no
@@ -276,8 +329,9 @@ export function emitMesh3D(
     const lin = texturedSkipsDecode(textured.sampleLinear ?? false);
     cmds.add({
       batchKey: `mesh3d-pbr|${textured.texture.id}|${pbr.normal.id}|${pbr.metallicRoughness.id}`
-        + `|${pbr.occlusion.id}|${pbr.emissive.id}|${blend}`,
-      material: MESH3D_PBR_MATERIAL,
+        + `|${pbr.occlusion.id}|${pbr.emissive.id}|${blend}`
+        + (textured.lut ? `|lut${textured.lut.id}` : ''),
+      material: textured.lut ? MESH3D_PBR_LUT_MATERIAL : MESH3D_PBR_MATERIAL,
       blend,
       uniforms: packMesh3DPbr(mvp, textured.uvRect ?? FULL_UV, color, opacity, textured.color, shade, lin, pbr.params),
       texture: textured.texture,
@@ -288,6 +342,7 @@ export function emitMesh3D(
         occlusion: pbr.occlusion,
         emissive: pbr.emissive,
       },
+      ...(textured.lut ? { lutTexture: textured.lut } : {}),
       ...envBinding(cmds),
       vertexBuffer: geometry.vertexBuffer,
       indexBuffer: geometry.indexBuffer,
@@ -299,13 +354,17 @@ export function emitMesh3D(
   }
   if (textured) {
     const lin = texturedSkipsDecode(textured.sampleLinear ?? false);
+    const lut = textured.lut;
     cmds.add({
-      batchKey: `mesh3d-tex|${textured.texture.id}|${blend}|${lin ? 'lin' : 'srgb'}`,
-      material: lin ? MESH3D_TEXTURED_LINEAR_MATERIAL : MESH3D_TEXTURED_MATERIAL,
+      batchKey: `mesh3d-tex|${textured.texture.id}|${blend}|${lin ? 'lin' : 'srgb'}` + (lut ? `|lut${lut.id}` : ''),
+      material: lut
+        ? (lin ? MESH3D_TEXTURED_LUT_LINEAR_MATERIAL : MESH3D_TEXTURED_LUT_MATERIAL)
+        : (lin ? MESH3D_TEXTURED_LINEAR_MATERIAL : MESH3D_TEXTURED_MATERIAL),
       blend,
       uniforms: packTextured3D(mvp, textured.uvRect ?? FULL_UV, color, opacity, textured.color, shade, lin),
       texture: textured.texture,
       sampler: textured.sampler,
+      ...(lut ? { lutTexture: lut } : {}),
       ...envBinding(cmds),
       vertexBuffer: geometry.vertexBuffer,
       indexBuffer: geometry.indexBuffer,

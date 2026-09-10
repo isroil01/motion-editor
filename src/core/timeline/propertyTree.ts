@@ -80,6 +80,8 @@ export type TimelineGroupKey =
   | 'effects'
   | 'transform'
   | 'styles'
+  | 'camera'
+  | 'light'
   | 'material'
   | 'audio'
   | 'time';
@@ -91,9 +93,13 @@ export const TIMELINE_GROUP_ORDER: Readonly<Record<TimelineGroupKey, number>> = 
   effects: 3,
   transform: 4,
   styles: 5,
-  material: 6,
-  audio: 7,
-  time: 8,
+  // AE twirls Camera Options / Light Options right under Transform; a layer
+  // only ever has one of the two, so they share the slot in spirit.
+  camera: 6,
+  light: 7,
+  material: 8,
+  audio: 9,
+  time: 10,
 };
 
 /** The synthetic path of the whole-mask keyframe row (see `maskRow` below). */
@@ -140,7 +146,7 @@ function materialRows(node: SceneNode, nodeId: string): StaticPropertyRow[] {
   // Keep order aligned with MATERIAL_ANIMATABLE / the inspector panel.
   const props = [
     'acceptsLights', 'ambient', 'diffuse', 'specular', 'shininess', 'metal',
-    'castsShadows', 'acceptsShadows', 'lightTransmission', 'roughness',
+    'castsShadows', 'acceptsShadows', 'lightTransmission', 'roughness', 'displacement',
   ] as const;
   return props.map((prop) => row(prop, 'material', [prop], { nodeId }));
 }
@@ -178,6 +184,10 @@ export function groupForProp(prop: string, nodeId?: string): TimelineGroupKey {
       return 'material';
     case 'audio':
       return 'audio';
+    case 'camera':
+      return 'camera';
+    case 'light':
+      return 'light';
     default:
       // geometry / fill / stroke / trim / repeater / other — the layer's own
       // shape and paint, which is what AE calls Contents.
@@ -402,7 +412,9 @@ function componentPropRows(
     for (const [key, value] of Object.entries(c.props as Record<string, unknown>)) {
       if (typeof value !== 'number') continue;
       if (key.startsWith('_') || seen.has(key) || taken.has(key)) continue;
-      if (!hasPropertyMeta(key)) continue;
+      // Node-aware: `intensity`/`radius` are properties only on a light, and
+      // the resolver that says so needs to see which layer is asking.
+      if (!hasPropertyMeta(key, nodeId)) continue;
       seen.add(key);
       const group = groupForProp(key, nodeId);
       // A property the registry marks `keyframeable: false` is read once by the
@@ -522,6 +534,10 @@ export function buildStaticPropertyTree(nodeId: string): StaticPropertyRow[] {
     ...scanned.filter((r) => r.group === 'effects'),
     ...transform,
     ...scanned.filter((r) => r.group === 'transform'),
+    // Camera Options / Light Options — right under Transform, AE's twirl
+    // order. Only the layer's own kind produces props in these groups.
+    ...scanned.filter((r) => r.group === 'camera'),
+    ...scanned.filter((r) => r.group === 'light'),
     ...layerStyleRows(nodeId),
     ...materialRows(node, nodeId),
     ...scanned.filter((r) => r.group === 'material'),

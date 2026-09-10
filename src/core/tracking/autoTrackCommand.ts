@@ -19,6 +19,10 @@ export interface AutoTrackCommandOptions {
   nodeId: string;
   /** Where the user clicked, in source display px. Omit for the frame centre. */
   hint?: { x: number; y: number };
+  /** Half-size of the marquee the user drew around the object, in source
+   *  display px — constrains the feature search to that region. Omit for a
+   *  plain click (the analysis uses its default radius). */
+  radius?: number;
 }
 
 /** Enough of a track to be worth applying — two samples is a line, one is a
@@ -48,6 +52,7 @@ export async function runAutoTrack(opts: AutoTrackCommandOptions): Promise<void>
       anchorCompTime: time,
       fps,
       ...(opts.hint ? { hint: opts.hint } : {}),
+      ...(opts.radius !== undefined ? { radius: opts.radius } : {}),
       onProgress: (f) => {
         store.getState().setProgress(f);
         // The store's `tracking` flag is the cancel channel — clearing it
@@ -61,6 +66,12 @@ export async function runAutoTrack(opts: AutoTrackCommandOptions): Promise<void>
         null,
         'Nothing trackable there — that patch has no corner to lock onto. Try a hard edge, a marker, or a high-contrast detail.',
       );
+      // Stay armed: the note asks the person to try a different spot, so the
+      // next click should BE that try — not a trip back to the panel button.
+      // Esc still leaves, and only a click that came from a pick re-arms
+      // (Track again supplies a hint from the panel, where re-arming would
+      // steal the pointer unannounced).
+      if (opts.hint) store.getState().setAutoPhase('picking');
       return;
     }
 
@@ -128,7 +139,18 @@ function summarize(
   // there are is the difference between trusting the curve and checking it.
   const coasted = samples.reduce((n, s) => n + (s.coasted ? 1 : 0), 0);
   const guessed = coasted > 0 ? ` · ${coasted} predicted through occlusion` : '';
-  const warning = plan.distinctness < 0.5 ? ' · look-alikes nearby, check the path' : '';
+  // Distinctness is a PRIOR, measured on one frame before the walk; the walk
+  // itself is the evidence. Warning on the prior alone flagged clean tracks —
+  // any object with repeated corners (a wheel's nuts, a window grid) scores
+  // mid-range — and a caution that fires on good results teaches people to
+  // ignore it. So mid-range ambiguity only warns when the walk showed strain
+  // (coasting, or an early stop); genuinely low distinctness still always
+  // warns, because a confident lock onto the WRONG look-alike is exactly the
+  // failure a completed, high-confidence walk cannot rule out.
+  const risky =
+    plan.distinctness < 0.35 ||
+    (plan.distinctness < 0.5 && (coasted > 0 || status !== 'completed'));
+  const warning = risky ? ' · look-alikes nearby, check the path' : '';
   const rotation = hasCompanion ? ' · rotation & scale available' : '';
   return `${outcome}${motion}.${guessed}${warning}${rotation}`;
 }

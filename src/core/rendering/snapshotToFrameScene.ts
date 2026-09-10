@@ -22,10 +22,13 @@ import { Mat3, Color, depthEligible3D, squareToQuad, isConvexQuad, isIdentityQua
 import { Matrix4Math } from '@motion/scene';
 import type { LayerBlendMode } from '@core/effects/blendMode';
 import { effectColorMatrix, applyColorMatrix, IDENTITY_COLOR_MATRIX } from '@core/effects/effectColorMatrix';
-import { isLutEffect } from '@core/effects/colorLut';
+import { isLutEffect, buildChannelLut, sampleChannelLutAsUploaded, type ChannelLut } from '@core/effects/colorLut';
+import type { Effect } from '@core/effects/effects';
 import { readCubeLutParam } from '@core/effects/cubeLut';
 import { readMatte } from '@core/effects/matte';
 import { effectNumber, effectParam, paramsOf, withAlpha, isGpuOnlyEffect } from '@core/effects/effects';
+import { deepGlowSettings } from '@core/effects/deepGlow';
+import { beamPathRows, beamPathSettings, beamPathSpreadPx } from '@core/effects/beamPath';
 import { effectById, beginEffectDraw, endEffectDraw } from '@core/plugins/pluginEffects';
 import { layerParamNames, packParameters, effectSpreadFor } from '@core/plugins/effectSchema';
 import { layerIsBaked, cpuBakeStats } from '@core/effects/effectBake';
@@ -277,6 +280,58 @@ function isIdentityMat3(m: Mat3): boolean {
   );
 }
 
+/**
+ * May a layer flattened under `parentMatrix` keep its true-3D placement?
+ *
+ * `placement3d` is the 2D matrix the CAMERA it will be drawn through already
+ * carries: absent = the host camera, which carries none (identity — the
+ * legacy gate); a sealed comp's own camera carries the instance placement
+ * (see `precompCamera3d`). The 3D model is in that camera's world, so the
+ * layer's parent must be exactly that placement — any OTHER transform folded
+ * into its mat3 is one the mat4 world never saw, and the layer keeps the
+ * affine path. Exact comparison, like `isIdentityMat3`: an inline-collapsed
+ * group carrier multiplies by an exact identity, so equal inputs stay equal.
+ */
+function threeDPlacementOk(parentMatrix: Mat3 | undefined, placement3d: Mat3 | undefined): boolean {
+  if (!placement3d) return !parentMatrix || isIdentityMat3(parentMatrix);
+  if (!parentMatrix) return isIdentityMat3(placement3d);
+  for (let i = 0; i < 9; i++) if (parentMatrix[i] !== placement3d[i]) return false;
+  return true;
+}
+
+/**
+ * A sealed comp instance's own 3D frame, placed on the host.
+ *
+ * The isolated offscreen is viewport-sized and drawn with the host viewport's
+ * 2D camera, i.e. in HOST comp px — while the inner camera's P·V outputs
+ * homogeneous INNER comp px. `placement` (`precompChildParent`) is exactly the
+ * inner px → host px map, and it is affine in x/y, so lifting it onto the
+ * projection (lift(placement) · P) moves the homogeneous x/y without touching
+ * z or w: depth order, the DOF depth row (projection[10]/[14]) and the
+ * perspective divide are the inner camera's, unchanged. `view` and `eye` stay
+ * in inner world space, which is where the children's models, the lights and
+ * the shadow maps live.
+ */
+function precompCamera3d(
+  own: NonNullable<RenderLayer['precompScene3d']>,
+  placement: Mat3,
+): Pick<NonNullable<Renderable['precomp']>, 'camera3d' | 'lights3d' | 'envMap'> {
+  const a = placement[0]!, b = placement[1]!, c = placement[3]!, d = placement[4]!;
+  const tx = placement[6]!, ty = placement[7]!;
+  const lift: import('@motion/scene').Matrix4 = [
+    a, b, 0, 0,
+    c, d, 0, 0,
+    0, 0, 1, 0,
+    tx, ty, 0, 1,
+  ];
+  const projection = Matrix4Math.multiply(lift, own.camera3d.projection as import('@motion/scene').Matrix4);
+  return {
+    camera3d: { ...own.camera3d, projection },
+    ...(own.lights3d && own.lights3d.length > 0 ? { lights3d: own.lights3d } : {}),
+    ...(own.envMap ? { envMap: own.envMap } : {}),
+  };
+}
+
 /** World-space AABB of the transformed unit quad, for the renderer's culling. */
 /**
  * Corner Pin, resolved for the render.
@@ -360,25 +415,56 @@ function representativeColor(layer: RenderLayer): string {
   return p && p.type === 'solid' ? p.color : '#000000';
 }
 
-/** One mesh-range fill graded by the layer's colour effects — the per-range
- *  form of {@link gradedSolidColor}, for extruded walls / bevels / caps. */
-function gradeFillByEffects(layer: RenderLayer, fill: string): Color {
-  const base = Color.fromHex(fill);
-  if (!layer.effects || layer.effects.length === 0) return base;
-  const cm = effectColorMatrix(layer.effects);
-  const [r, g, b] = applyColorMatrix(cm, [base.r, base.g, base.b]);
-  return { r, g, b, a: base.a };
+/**
+ * The composed per-channel table for an effect stack, memoised on the stack
+ * ARRAY: an extrusion grades three or four ranges off one layer per frame, and
+ * the snapshot hands each layer a fresh array, so this only ever saves the
+ * repeats within a frame and never serves a stale table.
+ */
+const uniformLutCache = new WeakMap<ReadonlyArray<Effect>, ChannelLut | null>();
+function uniformLutFor(effects: ReadonlyArray<Effect>): ChannelLut | null {
+  let lut = uniformLutCache.get(effects);
+  if (lut === undefined) {
+    lut = buildChannelLut(effects);
+    uniformLutCache.set(effects, lut);
+  }
+  return lut;
 }
 
-/** The layer's solid fill graded by its colour effects (brightness/contrast/…),
- *  applied on the CPU since the colour is uniform. Spatial effects (blur/glow)
- *  are ignored here — they need offscreen passes. */
-function gradedSolidColor(layer: RenderLayer): Color {
-  const base = Color.fromHex(representativeColor(layer));
+/**
+ * A UNIFORM colour graded by the layer's colour effects on the CPU: the affine
+ * matrix, then the per-channel LUT (Levels, Curves, Posterize, Exposure,
+ * Lumetri, …) — the order the GPU runs them in on a textured layer, where
+ * `lut-textured` remaps after the matrix whatever the stack order.
+ *
+ * The LUT is the SAME table `MotionRendererBackend` uploads as `lut:<id>`
+ * (`buildChannelLut` over the stack), read the way the shader reads the strip
+ * (`sampleChannelLutAsUploaded`). Before it ran here, a Levels reached only the
+ * textured half of a layer: an extruded title's cap graded and its walls,
+ * bevels and back cap did not, and a solid quad — 2D or 3D — ignored it
+ * outright, because only textured renderables carry a `lutTextureKey`.
+ */
+function gradeUniformColor(layer: RenderLayer, base: Color): Color {
   if (!layer.effects || layer.effects.length === 0) return base;
   const cm = effectColorMatrix(layer.effects);
-  const [r, g, b] = applyColorMatrix(cm, [base.r, base.g, base.b]);
-  return { r, g, b, a: base.a };
+  let rgb = applyColorMatrix(cm, [base.r, base.g, base.b]);
+  const lut = uniformLutFor(layer.effects);
+  if (lut) rgb = sampleChannelLutAsUploaded(lut, rgb);
+  return { r: rgb[0], g: rgb[1], b: rgb[2], a: base.a };
+}
+
+/** One mesh-range fill graded by the layer's colour effects — the per-range
+ *  form of {@link gradedSolidColor}, for extruded walls / bevels / caps and
+ *  untextured model ranges. */
+function gradeFillByEffects(layer: RenderLayer, fill: string): Color {
+  return gradeUniformColor(layer, Color.fromHex(fill));
+}
+
+/** The layer's solid fill graded by its colour effects (brightness/contrast/…,
+ *  and any colour LUT), applied on the CPU since the colour is uniform. Spatial
+ *  effects (blur/glow) are ignored here — they need offscreen passes. */
+function gradedSolidColor(layer: RenderLayer): Color {
+  return gradeUniformColor(layer, Color.fromHex(representativeColor(layer)));
 }
 
 /**
@@ -527,6 +613,24 @@ export function extractSpatialEffects(
         ...(spread01 > 0 ? { spreadPx: size * spread01 } : {}),
         color: c('color', n('intensity') / 100),
       });
+    }
+    if (e.type === 'deep-glow') {
+      const s = deepGlowSettings(e);
+      if (s.radius > 0 || s.glowOnly) {
+        spatial.push({
+          type: 'deep-glow',
+          radiusPx: s.radius,
+          gain: s.gain,
+          threshold: s.threshold,
+          aspect: s.aspect,
+          chroma: s.chroma,
+          tint: s.tint,
+          tintAmount: s.tintAmount,
+          glowOnly: s.glowOnly,
+          dither: s.dither,
+          octaves: s.octaves,
+        });
+      }
     }
     if (e.type === 'drop-shadow') {
       const rad = (n('angle') * Math.PI) / 180;
@@ -1389,6 +1493,255 @@ export function extractSpatialEffects(
       if (e.type === 'hex-tile') {
         spatial.push({ type: 'hex-tile', R: Math.max(2, n('radius')), bd: clamp01(n('border') / 100), lw, lh });
       }
+      /*
+        Effects round seven. Each pushes its shader's vec4 slots verbatim as
+        `p` — what every slot holds is documented on the shader in
+        `fxRoundFifteen.ts`, which is the only place that documentation can be
+        checked against the code that reads it.
+
+        Every one of these skips the push at its NEUTRAL setting, under exactly
+        the condition the Canvas2D handler returns early on. That pairing is
+        the contract: if the two disagreed, a layer sitting at an effect's
+        default would render one way on the GPU and another through a bake.
+      */
+      if (e.type === 'cc-tiler') {
+        const scale = n('scale');
+        if (scale < 100 || n('centerX') !== 0 || n('centerY') !== 0) {
+          spatial.push({
+            type: 'cc-tiler',
+            p: [
+              [lw, lh, Math.max(0.01, scale / 100), clamp01(n('blendWithOriginal') / 100)],
+              [lw / 2 + n('centerX'), lh / 2 + n('centerY'), 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'ripple-pulse') {
+        const amplitude = n('amplitude');
+        if (amplitude !== 0) {
+          spatial.push({
+            type: 'ripple-pulse',
+            p: [
+              [lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')],
+              [n('pulseRadius'), amplitude, Math.max(1, n('width')), effectParam(e, 'renderBump') === false ? 0 : 1],
+            ],
+          });
+        }
+      }
+      if (e.type === 'radial-scale-wipe') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          // The forward map reads FURTHER out as completion rises, so the
+          // picture shrinks; reversed it reads nearer and the picture blows up.
+          const reverse = effectParam(e, 'reverse') === true;
+          const k = t >= 1 ? 0 : (reverse ? 1 - t : 1 / (1 - t));
+          spatial.push({
+            type: 'radial-scale-wipe',
+            p: [
+              [lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')],
+              [k, 1 - t, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'glass-wipe') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          spatial.push({
+            type: 'glass-wipe',
+            p: [
+              [lw, lh, t, Math.max(0.02, clamp01(n('softness') / 100))],
+              [n('displacement'), 0, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'image-wipe') {
+        const t = clamp01(n('completion') / 100);
+        if (t > 0) {
+          const band = Math.max(0.001, clamp01(n('borderSoftness') / 100));
+          spatial.push({
+            type: 'image-wipe',
+            p: [
+              [lw, lh, t * (1 + 2 * band) - band, band],
+              [Math.max(0, Math.min(4, Math.round(n('gradientChannel')))), effectParam(e, 'invertGradient') === true ? 1 : 0, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'color-difference-key') {
+        const key = c('keyColor');
+        const len = Math.hypot(key.r, key.g, key.b) || 1;
+        // Which channel the key LEADS on decides partial B — see the kernel.
+        const keyIdx = key.r >= key.g && key.r >= key.b ? 0 : key.g >= key.b ? 1 : 2;
+        const black = clamp01(n('matteInBlack') / 255);
+        const white = clamp01(n('matteInWhite') / 255);
+        spatial.push({
+          type: 'color-difference-key',
+          p: [
+            [key.r / len, key.g / len, key.b / len, keyIdx],
+            [black, 1 / Math.max(0.0001, white - black), 1 / Math.max(0.01, n('matteGamma')), Math.round(n('viewMode'))],
+          ],
+        });
+      }
+      if (e.type === 'wire-removal') {
+        const ax = lw / 2 + n('pointAX');
+        const ay = lh / 2 + n('pointAY');
+        const dx = (lw / 2 + n('pointBX')) - ax;
+        const dy = (lh / 2 + n('pointBY')) - ay;
+        const len = Math.hypot(dx, dy);
+        const thickness = n('thickness');
+        if (len >= 0.0001 && thickness > 0) {
+          const half = thickness / 2;
+          spatial.push({
+            type: 'wire-removal',
+            p: [
+              [lw, lh, ax, ay],
+              [dx / len, dy / len, len, half],
+              [half + clamp01(n('slope') / 100) * thickness + 1, thickness, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'broadcast-colors') {
+        // NTSC carries a 7.5 IRE setup pedestal and PAL does not, so black sits
+        // at a different place on the scale and the gain differs with it.
+        const pedestal = Math.round(n('standard')) === 0 ? 7.5 : 0;
+        spatial.push({
+          type: 'broadcast-colors',
+          p: [[pedestal, 100 - pedestal, Math.max(90, Math.min(120, n('maxSignalAmplitude'))), Math.round(n('howToMakeColorSafe'))]],
+        });
+      }
+      if (e.type === 'noise-hls') {
+        const hue = clamp01(n('hue') / 100);
+        const lightness = clamp01(n('lightness') / 100);
+        const saturation = clamp01(n('saturation') / 100);
+        if (hue > 0 || lightness > 0 || saturation > 0) {
+          spatial.push({
+            type: 'noise-hls',
+            p: [
+              [lw, lh, Math.max(0.5, n('grainSize')), Math.floor(n('noisePhase'))],
+              [hue, lightness, saturation, Math.round(n('noiseType'))],
+            ],
+          });
+        }
+      }
+      if (e.type === 'block-load') {
+        const completion = n('completion');
+        if (completion < 100) {
+          spatial.push({
+            type: 'block-load',
+            p: [
+              [lw, lh, clamp01(completion / 100), Math.max(1, Math.min(8, Math.round(n('scans'))))],
+              [Math.max(1, Math.round(n('blockSize'))), 0, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'kernel') {
+        const k = [
+          n('k00'), n('k01'), n('k02'),
+          n('k10'), n('k11'), n('k12'),
+          n('k20'), n('k21'), n('k22'),
+        ];
+        const divisor = n('divisor');
+        const offset = n('offset');
+        const isIdentity = divisor === 1 && offset === 0
+          && k.every((v, i) => v === (i === 4 ? 1 : 0));
+        if (!isIdentity) {
+          spatial.push({
+            type: 'kernel',
+            p: [
+              [k[0]!, k[1]!, k[2]!, k[3]!],
+              [k[4]!, k[5]!, k[6]!, k[7]!],
+              [k[8]!, Math.abs(divisor) < 0.0001 ? 1 : divisor, offset / 255, 0],
+              [lw, lh, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === '3d-glasses') {
+        const shift = effectParam(e, 'swapLeftRight') === true
+          ? -n('convergenceOffset')
+          : n('convergenceOffset');
+        spatial.push({
+          type: '3d-glasses',
+          p: [
+            [lw, lh, shift, Math.round(n('view'))],
+            [clamp01(n('balance') / 100), 0, 0, 0],
+          ],
+        });
+      }
+      if (e.type === 'fractal') {
+        const inside = c('insideColor');
+        // The classic window is +-2 on the SHORTER side, so the framing holds
+        // when the layer's aspect changes.
+        const scale = 4 / (Math.min(lw, lh) * Math.max(0.1, n('magnification')));
+        spatial.push({
+          type: 'fractal',
+          p: [
+            [lw, lh, Math.round(n('setType')), Math.max(1, Math.min(256, Math.round(n('iterations'))))],
+            [n('centerX'), n('centerY'), scale, 0],
+            [n('juliaX'), n('juliaY'), n('colorPhase') / 360, Math.max(0.1, n('colorCycles'))],
+            [inside.r, inside.g, inside.b, 0],
+          ],
+        });
+      }
+      if (e.type === 'particle-systems') {
+        const birthRate = n('birthRate');
+        // `time` is RESOLVED from the clock — see `TIME_DEPENDENT`.
+        const time = n('time');
+        if (birthRate > 0 && time >= 0) {
+          const longevity = Math.max(0.0001, n('longevity'));
+          const rate = Math.max(0.0001, birthRate);
+          // The alive window, computed HERE so the shader never iterates past
+          // it: births are ordered by index, so the live set is a contiguous
+          // range. Widened by one either side to cover the birth jitter, and
+          // capped at the shader's own 512-iteration loop bound.
+          const first = Math.max(0, Math.floor((time - longevity) * rate) - 1);
+          const last = Math.min(Math.floor(time * rate) + 1, first + 511);
+          const animation = Math.round(n('animation'));
+          // A fountain aims UP: screen y grows downward, so 270 degrees is up,
+          // and a fountain left at 0 would spray sideways.
+          const direction = animation === 2 && n('direction') === 0 ? 270 : n('direction');
+          const birth = c('birthColor');
+          const death = c('deathColor');
+          spatial.push({
+            type: 'particle-systems',
+            p: [
+              [lw, lh, time, rate],
+              [longevity, n('producerX'), n('producerY'), n('producerRadiusX')],
+              [n('producerRadiusY'), animation === 0 ? 0 : 1, rad(direction), rad(n('spread'))],
+              [n('velocity'), clamp01(n('velocityVariation') / 100), n('gravity'), n('resistance')],
+              [n('birthSize'), n('deathSize'), clamp01(n('sizeVariation') / 100), clamp01(n('opacity') / 100)],
+              [birth.r, birth.g, birth.b, Math.round(n('blend'))],
+              [death.r, death.g, death.b, Math.floor(n('seed'))],
+              [first, last, 0, 0],
+            ],
+          });
+        }
+      }
+      if (e.type === 'cc-bubbles') {
+        const count = Math.max(0, Math.round(n('bubbleAmount')));
+        const opacity = n('opacity');
+        if (count > 0 && opacity > 0) {
+          const size = n('bubbleSize');
+          const cell = Math.max(4, Math.sqrt((lw * lh) / Math.max(1, count)));
+          const col = c('color');
+          spatial.push({
+            type: 'cc-bubbles',
+            p: [
+              [lw, lh, cell, Math.max(1, Math.ceil(lw / cell))],
+              [Math.max(1, Math.ceil(lh / cell)), count, n('bubbleSpeed'), n('wobbleAmplitude')],
+              [n('wobbleFrequency'), size, clamp01(n('sizeVariation') / 100), Math.round(n('shading'))],
+              [col.r, col.g, col.b, clamp01(opacity / 100)],
+              // The wrap span is one bubble taller than the layer, so a bubble
+              // leaving the top is not seen re-entering at the bottom.
+              [n('evolution'), Math.floor(n('seed')), lh + size * 2, 0],
+            ],
+          });
+        }
+      }
       if (e.type === 'vector-blur') {
         const amount = n('amount');
         if (amount > 0) {
@@ -1565,6 +1918,12 @@ export function extractSpatialEffects(
           spatial.push({ type: 'radio-waves', p: [[lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')], [Math.max(1, Math.min(64, Math.round(n('waveCount')))), maxRadius > 0 ? maxRadius : Math.hypot(lw, lh) / 2, n('phase') / 360, Math.max(0.5, n('thickness'))], [col[0], col[1], col[2], a], [clamp01(n('fadeOut') / 100), Math.round(n('composite')), 0, 0]] });
         }
       }
+      if (e.type === 'beam-path') {
+        const s = beamPathSettings(e, lw, lh);
+        if (s.points.length >= 4 && s.totalLen > 0) {
+          spatial.push({ type: 'beam-path', p: beamPathRows(s, lw, lh), spreadPx: beamPathSpreadPx(s) });
+        }
+      }
       if (e.type === 'light-burst') {
         const gain = Math.max(0, n('intensity') / 100); const reach = clamp01(n('rayLength') / 100);
         if (n('intensity') > 0 && gain > 0 && reach > 0) spatial.push({ type: 'light-burst', p: [[lw, lh, lw / 2 + n('centerX'), lh / 2 + n('centerY')], [gain, reach, 0, 0]] });
@@ -1609,14 +1968,15 @@ export function extractSpatialEffects(
           const glow = e.type === 'inner-glow';
           const size = Math.max(0, glow ? n('size') : n('softness'));
           const dist = glow ? 0 : Math.max(0, n('distance')); const a = rad(glow ? 0 : n('angle'));
-          const col = lin3('color', glow ? '#ffd070' : '#000000');
+          // Display sRGB, not linear: the kernels shade in the CPU pass's space (fxRoundThirteen).
+          const col = unit3('color', glow ? '#ffd070' : '#000000');
           spatial.push({ type: e.type, p: [[Math.cos(a) * dist, Math.sin(a) * dist, opacity, glow ? 1 : 0], [col[0], col[1], col[2], 0], [lw, lh, 0, 0]], sigmaPx: size });
         }
       }
       if (e.type === 'satin') {
         const opacity = clamp01(n('opacity') / 100); const size = Math.max(0, n('size')); const dist = Math.max(0, n('distance'));
         if (opacity > 0 && (size > 0 || dist > 0)) {
-          const a = rad(n('angle')); const col = lin3('color', '#000000');
+          const a = rad(n('angle')); const col = unit3('color', '#000000');
           spatial.push({ type: 'satin', p: [[Math.cos(a) * dist, Math.sin(a) * dist, opacity, flag('invert', false)], [col[0], col[1], col[2], 0], [lw, lh, 0, 0]], sigmaPx: size });
         }
       }
@@ -1626,7 +1986,7 @@ export function extractSpatialEffects(
         if (depth > 0 && (hiOp > 0 || loOp > 0)) {
           const down = effectParam(e, 'direction') === 'down';
           const a = rad(n('angle') + (down ? 180 : 0)); const alt = rad(Math.max(0, Math.min(90, n('altitude'))));
-          const hi = lin3('highlightColor', '#ffffff'); const lo = lin3('shadowColor', '#000000');
+          const hi = unit3('highlightColor', '#ffffff'); const lo = unit3('shadowColor', '#000000');
           spatial.push({ type: 'bevel', p: [[Math.cos(a) * Math.cos(alt), Math.sin(a) * Math.cos(alt), Math.sin(alt), depth * 8], [hi[0], hi[1], hi[2], hiOp], [lo[0], lo[1], lo[2], loOp], [lw, lh, 0, 0]], sigmaPx: Math.max(0.5, size) });
         }
       }
@@ -2117,7 +2477,14 @@ export function needsShapeRaster(layer: RenderLayer): boolean {
   return false;
 }
 
-export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, parentOpacity?: number): Renderable {
+export function layerToRenderable(
+  layer: RenderLayer,
+  parentMatrix?: Mat3,
+  parentOpacity?: number,
+  /** The 2D placement the camera this layer draws through already carries —
+   *  absent for the host camera (see `threeDPlacementOk`). */
+  placement3d?: Mat3,
+): Renderable {
   // Raster padding grows the placement quad to match the padded stroke texture
   // (0 for unstroked shapes/text/image). Used by every matrix branch below.
   const pad = rasterPadding(layer);
@@ -2274,15 +2641,26 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
     effects: baked ? extractSpatialEffects(layer, true) : extractSpatialEffects(layer),
     ...(layer.deformedMesh ? { deformedMesh: normalizeDeformedMesh(layer.deformedMesh, layer.width, layer.height, pad) } : {}),
     // True-3D placement for the depth-tested GPU path. Only meaningful for a
-    // layer whose 2D model came from the projected affine (`layer.matrix`) —
-    // an inline-collapsed precomp child folds an extra parent transform into
-    // the mat3 that the mat4 world doesn't know about, so it must keep the
-    // affine path (the top-level flatten passes an identity parent).
+    // layer whose 2D model came from the projected affine (`layer.matrix`),
+    // and only when the camera it will be drawn through knows every 2D
+    // transform folded into that mat3 (`threeDPlacementOk`):
+    //  • host layers (the top-level flatten, an identity parent) draw through
+    //    the host camera, which carries no placement;
+    //  • a SEALED comp instance with its own 3D frame flattens its children
+    //    under the instance placement — and its precomp carries the inner
+    //    camera with exactly that placement lifted onto the projection, so
+    //    they keep `threeD` in INNER world space and depth-test / light / shadow
+    //    through the comp they live in (never the host's camera — the leak
+    //    `buildSnapshotCollapseTransforms.test.ts` pins — and that includes an
+    //    instance whose frame happens to equal the host's, whose identity
+    //    placement used to pass the old gate and draw through the host camera);
+    //  • any other extra parent (a transformed inline-collapsed carrier) is a
+    //    transform the mat4 world doesn't know about, so the affine path.
     // A corner-pinned layer stays on the 2D pinned path: the 3D path uses its own
     // mat4 (model3dFor) which does not carry the 2D homography, so taking it would
     // silently drop the pin. Combining corner pin with a true-3D camera is a
     // documented follow-up (lift the 3x3 pin into the mat4 in front of mvp3dFor).
-    ...(layer.world3d && layer.matrix && !pinned && (!parentMatrix || isIdentityMat3(parentMatrix))
+    ...(layer.world3d && layer.matrix && !pinned && threeDPlacementOk(parentMatrix, placement3d)
       ? { threeD: { model: model3dFor(layer.world3d, layer) } }
       : {}),
     // Extruded mesh: the vertices are already in the layer's centred pixel
@@ -2294,9 +2672,25 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
     // raster padding — the quad path absorbs that by growing the quad, which a
     // mesh cap cannot. So the carrier maps the box into the padded texture via
     // uvRect; pad 0 (media assets keep their own crop rect above) is identity.
-    ...(layer.extrudedMesh && layer.world3d && layer.matrix && (!parentMatrix || isIdentityMat3(parentMatrix))
+    // Same placement gate as the quad above — a sealed comp's extrusion is in
+    // its INNER world and draws through the inner camera like its front face.
+    ...(layer.extrudedMesh && layer.world3d && layer.matrix && threeDPlacementOk(parentMatrix, placement3d)
       ? {
           threeD: { model: layer.world3d },
+          // Gradient walls sample their paint plate, whose texels are UNGRADED.
+          // Colour effects reach a texture sample only through `colorMatrix` /
+          // `lutTextureKey`, which the spread above sets for textured layers
+          // alone — and a bare (non-content) carrier is a 'rect'. So an Invert
+          // or a Levels graded a solid extrusion's walls (on the CPU, below)
+          // and skipped a gradient-filled one's. Both fields are read only
+          // where a texture is sampled, so the solid ranges and any solid draw
+          // of this carrier stay exactly as they were.
+          ...(!textured && !baked && layer.extrudedMesh.paint && layer.extrudedMesh.ranges.some((r) => r.paintTextured)
+            ? {
+                colorMatrix: texturedColorMatrix(layer),
+                ...(hasLutEffect(layer) ? { lutTextureKey: `lut:${layer.id}` } : {}),
+              }
+            : {}),
           ...(!layer.uvRect && pad > 0
             ? {
                 uvRect: {
@@ -2318,9 +2712,13 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
               // Solid ranges are uniform colour, so the layer's colour effects
               // grade them here on the CPU — the mesh equivalent of
               // gradedSolidColor, and what makes an Invert reach the walls.
-              color: r.textured ? Color.fromHex(r.fill) : gradeFillByEffects(layer, r.fill),
+              color: r.textured || r.paintTextured ? Color.fromHex(r.fill) : gradeFillByEffects(layer, r.fill),
               gain: r.gain,
               ...(r.textured ? { textured: true } : {}),
+              // A gradient wall: textured off the paint plate, not the layer.
+              ...(r.paintTextured && layer.extrudedMesh!.paint
+                ? { textured: true, textureKey: layer.extrudedMesh!.paint.key }
+                : {}),
             })),
             // Texture KEYS, matching what MotionRendererBackend feeds under
             // `pbrmap:<layerId>:*` — the same contract every other textureKey
@@ -2422,6 +2820,12 @@ export function precompChildParent(layer: RenderLayer, parentMatrix: Mat3): Mat3
  */
 export function precompNeedsIsolation(layer: RenderLayer): boolean {
   if (!layer.precompLayers || layer.precompLayers.length === 0) return false;
+  // A sealed comp with its own 3D frame needs its own render SCOPE (its camera
+  // and lights swapped in for the host's), which only the isolated path has —
+  // collapsed inline, its 3D children would draw through the host camera.
+  // Normally already isolated by its frame mask; this covers an instance whose
+  // referenced size is unknown (no `compSizeOf`, so no frame and no mask).
+  if (layer.precompScene3d) return true;
   if (layer.blend && layer.blend !== 'normal') return true;
   if (layer.mask && layer.mask.paths.length > 0) return true;
   if (readMatte(layer.matte) && layer.matteSourceId) return true;
@@ -2450,7 +2854,12 @@ function precompSubtreeHasAdjustment(layers: ReadonlyArray<RenderLayer>): boolea
  *  texture under `precomp:<id>`, and then composites this renderable through
  *  the ordinary per-layer machinery (blend / advanced blend / effects / matte),
  *  so the whole group behaves exactly like a single layer. */
-function precompToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpacity: number): Renderable {
+function precompToRenderable(
+  layer: RenderLayer,
+  parentMatrix: Mat3,
+  parentOpacity: number,
+  placement3d?: Mat3,
+): Renderable {
   // Children flatten under the container's OWN transform — the same matrix the
   // inline-collapse path below builds, so the two agree.
   //
@@ -2460,7 +2869,12 @@ function precompToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpaci
   // instance has a real position, size and rotation, and the isolated path threw
   // all three away — so the moment a precomp got a blend mode, a mask, a matte
   // or an effect (the things that force isolation) it jumped back to the origin.
-  const inner = flattenLayers(layer.precompLayers!, precompChildParent(layer, parentMatrix), 1);
+  const childParent = precompChildParent(layer, parentMatrix);
+  // A sealed comp with its own 3D frame: its children's 3D is in the INNER
+  // world and draws through the inner camera, which carries `childParent` (see
+  // `precompCamera3d`). Anything else inherits the camera it is drawn under.
+  const own = layer.precompScene3d;
+  const inner = flattenLayers(layer.precompLayers!, childParent, 1, [], own ? childParent : placement3d);
   const local = centerModel(layer);
   const model = Mat3.multiply(parentMatrix, local);
   const advBlend = advancedBlendId(layer.blend);
@@ -2482,7 +2896,7 @@ function precompToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpaci
     ...(layer.isMatteSource ? { matteSource: true } : {}),
     colorMatrix: texturedColorMatrix(layer),
     effects: extractSpatialEffects(layer),
-    precomp: { renderables: inner },
+    precomp: { renderables: inner, ...(own ? precompCamera3d(own, childParent) : {}) },
   };
 }
 
@@ -2603,6 +3017,9 @@ function lightToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpacity
     blend: 'screen',
     color: Color.white(),
     textureKey: `light:${layer.id}`,
+    // Marks the quad so CompositionPass can hoist it past a 3D depth run
+    // instead of splitting the run (see Renderable.lightWash).
+    lightWash: true,
   };
 }
 
@@ -2610,7 +3027,11 @@ function flattenLayers(
   layers: ReadonlyArray<RenderLayer>,
   parentMatrix: Mat3,
   parentOpacity: number,
-  result: Renderable[] = []
+  result: Renderable[] = [],
+  /** The 2D placement the camera these layers draw through carries — absent
+   *  for the host camera; a sealed comp's own camera carries its instance
+   *  placement (see `threeDPlacementOk`). Inherited by nested groups. */
+  placement3d?: Mat3,
 ): Renderable[] {
   // A layer's leaf renderable, honouring the special content sources (particle
   // fields, isolated precomps) so matte sources and plain draws share one path.
@@ -2618,8 +3039,8 @@ function flattenLayers(
     layer.particles
       ? particlesToRenderable(layer, parentMatrix, parentOpacity)
       : layer.precompLayers && layer.precompLayers.length > 0 && precompNeedsIsolation(layer)
-        ? precompToRenderable(layer, parentMatrix, parentOpacity)
-        : layerToRenderable(layer, parentMatrix, parentOpacity);
+        ? precompToRenderable(layer, parentMatrix, parentOpacity, placement3d)
+        : layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
 
   for (const layer of layers) {
     if (!layer.visible) continue;
@@ -2661,16 +3082,18 @@ function flattenLayers(
       if (precompNeedsIsolation(layer)) {
         // True isolation: render offscreen, composite as one unit with the
         // container's opacity / blend / mask / matte / effects.
-        result.push(precompToRenderable(layer, parentMatrix, parentOpacity));
+        result.push(precompToRenderable(layer, parentMatrix, parentOpacity, placement3d));
         continue;
       }
       // Fast path (plain transform + full/single-child opacity, no compositing
-      // features): collapse inline — transform folds, opacity multiplies.
+      // features): collapse inline — transform folds, opacity multiplies. The
+      // children draw under the same camera, so they inherit its placement.
       flattenLayers(
         layer.precompLayers,
         precompChildParent(layer, parentMatrix),
         parentOpacity * layer.opacity,
         result,
+        placement3d,
       );
     } else if (layer.kind === 'video' && layer.frameBlend && layer.frameBlend.mode === 'pixelMotion') {
       // Pixel Motion: ONE renderable sampling the motion-compensated
@@ -2678,7 +3101,7 @@ function flattenLayers(
       // bracket frames — see rendering/pixelMotion.ts). The feed falls back to
       // the ordinary `vfm:` video ladder when either bracket frame has not
       // decoded yet, so the degradation is nearest-frame, never a hole.
-      const r = layerToRenderable(layer, parentMatrix, parentOpacity);
+      const r = layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
       r.textureKey = `vfm:${layer.id}`;
       result.push(r);
     } else if (layer.kind === 'video' && layer.frameBlend) {
@@ -2688,17 +3111,17 @@ function flattenLayers(
       // `vfa:`/`vfb:` from the decoded-frame cache (falling back to the live
       // element's frame for both until the cache lands, which degrades to
       // nearest-frame instead of showing nothing).
-      const a = layerToRenderable(layer, parentMatrix, parentOpacity);
+      const a = layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
       a.textureKey = `vfa:${layer.id}`;
       result.push(a);
-      const b = layerToRenderable(layer, parentMatrix, parentOpacity);
+      const b = layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
       b.id = `${layer.id}::fb`;
       b.textureKey = `vfb:${layer.id}`;
       b.opacity = a.opacity * layer.frameBlend.weight;
       result.push(b);
     } else {
       // Leaf layer: map to renderable with parent transformations applied
-      result.push(layerToRenderable(layer, parentMatrix, parentOpacity));
+      result.push(layerToRenderable(layer, parentMatrix, parentOpacity, placement3d));
     }
   }
   return result;
@@ -2813,7 +3236,9 @@ function dropMeshesOutsideDepthPath(renderables: Renderable[]): void {
 function dropMeshesEverywhere(renderables: Renderable[]): void {
   for (let i = renderables.length - 1; i >= 0; i--) {
     const r = renderables[i]!;
-    if (r.precomp) dropMeshesEverywhere(r.precomp.renderables as Renderable[]);
+    // A sealed comp with its own camera has a depth path of its own, whatever
+    // the host has — its meshes stay.
+    if (r.precomp && !r.precomp.camera3d) dropMeshesEverywhere(r.precomp.renderables as Renderable[]);
     if (r.extrudedMesh) renderables.splice(i, 1);
   }
 }

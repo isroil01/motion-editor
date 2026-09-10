@@ -10,7 +10,7 @@ If you want to help, the **Now** section is where help changes the most.
 ## Where it stands today
 
 Working and used daily: compositions and nesting, 2D/3D layers with cameras and
-lights, keyframes and the graph editor, 183 effects, masks and mattes, shape
+lights, keyframes and the graph editor, 204 effects, masks and mattes, shape
 layers, per-glyph text animators, expressions, bone and puppet rigging,
 particles, SVG and Lottie import, and export to mp4/mov/webm/GIF/PNG/Lottie
 through a local ffmpeg.
@@ -73,6 +73,40 @@ on-canvas **gradient editor**, **smart guides** with distance badges and
 equal-spacing detection, **project swatches**, an interactive **onboarding
 tour**, one home for the preview controls (with Cache Work Area Now, Purge RAM
 and Purge Disk), and Window ▸ Workspace.
+
+Added 2026-09-10, from a user report that "one light shows two lights": the
+Ambient Fill companion a first light brings no longer masquerades as a second
+light — ambient/environment lights draw their badge only while selected, and
+the ambient wash became a flat frame lift instead of a radial blob pinned to
+the comp centre (settling the question three known-divergent goldens had on
+record). Flipping a layer's 3D switch now writes `acceptsLights: true`, so
+lights and shadow maps act on new 3D layers out of the box. The camera and
+light became first-class in the timeline — Camera Options / Light Options
+twirls with stopwatches for Zoom, orbit, POI, DOF, intensity, cone and the
+shadow dials — Layer ▸ New ▸ Camera…/Light… open their dialogs, **Distribute
+Layers in Z** builds a size-compensated parallax rig in one command, a Camera
+preset folder ships the standard moves (Push In / Pull Out / Orbit Sweep /
+Drift Parallax / Dolly Zoom / Handheld), and outward-reaching effects on 3D
+layers stopped being clipped at the layer rectangle (`effectSpreadPx` now
+covers the blur family, beam, light rays, lens flare and motion tile). A
+second pass the same day: the View menu lists every camera by name so you can
+look through any of them, not just the topmost; a light's glow no longer
+splits a shadow-mapped 3D scene into groups that each missed half of a
+caster/receiver pair; unticking Cast Shadows now turns the shadow map off
+too; 3D solids cast projected shadows like any other plane; imported glTF
+models take colour-matrix effects (Hue/Saturation, Tint, Invert, Brightness &
+Contrast, Channel Mixer — LUT effects like Levels and Curves still do not
+reach any mesh); and the AI's camera move is described to the model as the
+real camera move it has been since July. A third pass closed that LUT gap:
+Levels, Curves, Posterize, Exposure and Lumetri now reach extrusions,
+primitives and imported models — flat faces graded on the CPU through the same
+table the GPU uploads, textured ones through new `-lut` mesh and 3D-quad
+materials — and a gradient-filled extrusion's walls take colour effects at all.
+A sealed comp instance now renders its 3D layers through its OWN camera and
+lights on the GPU (depth test, per-fragment lighting, shadow maps, reflections)
+instead of a flat projection, and the host camera no longer leaks into a
+same-sized instance. Still open there: SSAO inside a sealed comp, and DOF blur
+radii that do not scale with the instance.
 
 The engine is one GPU render graph (WebGPU, falling back to WebGL2) shared by the
 viewport and the exporter, covered by golden-image render tests.
@@ -198,7 +232,7 @@ storage layer.
   one mapped light per run, point lights along their aim. What remains is
   **SSAO** (blocked: every 3D run draws into a multisampled target, so neither
   backend can sample its depth — it needs a linear-depth prepass bound before
-  the run draws) and **height displacement** (not started). The target remains
+  the run draws) and ~~height displacement~~ — **height displacement shipped 2026-09-09** (Material Options ▸ Displacement). The target remains
   AE's *Classic* 3D, plus extrusion/bevels and this imported-model foothold —
   full parametric Advanced 3D is not planned.
 - **Local AI conversation persistence.** The assistant ships in the local

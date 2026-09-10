@@ -68,6 +68,7 @@ import {
   focusRangeAt,
   readNodeDof,
 } from '@core/scene/camera3d';
+import { isSceneCameraView } from '@core/scene/cameraViewMode';
 import type { RenderView } from '@core/rendering/RenderBackend';
 import { useSceneRefGeometry } from './useSceneRefGeometry';
 import { beginViewportGesture, endViewportGesture } from '@core/workspace/viewportGesture';
@@ -221,7 +222,7 @@ export function FocusPlaneOverlay({ mode: modeProp, getView, viewRev }: FocusPla
     if (!node && visibility === 'always') node = activeCameraNode(defaultSceneGraph, compRootId);
     if (!node) return null;
     // Never for the camera this view looks THROUGH — see the header note.
-    if (camera3dMode === 'active' && node.id === activeCameraId) return null;
+    if (isSceneCameraView(camera3dMode) && node.id === activeCameraId) return null;
 
     const cameraNode = node;
     const values = defaultAnimation.evaluateNode(cameraNode.id, getRemappedTime(cameraNode.id, time));

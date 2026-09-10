@@ -55,7 +55,7 @@ describe('mesh3d-pbr — the map set is declared in both dialects', () => {
     }
     // 1 base colour + normal/MR/AO/emissive + the environment atlas + the
     // shadow map, which the lit-3d materials all carry at 9.
-    expect(declared).toEqual([1, 3, 4, 5, 6, 7, 9, 11]);
+    expect(declared).toEqual([1, 3, 4, 5, 6, 7, 9, 11, 13]);
   });
 
   it('★ declares its GLSL samplers in the same ORDER the bind group binds them', () => {
@@ -63,7 +63,7 @@ describe('mesh3d-pbr — the map set is declared in both dialects', () => {
     // pushed base-colour → normal → MR → AO → emissive → env → shadow, so the
     // names must appear in the fragment source in that order too.
     const names = MESH3D_PBR_MATERIAL.glslSamplers!;
-    expect(names).toEqual(['uTex', 'uNormalTex', 'uMRTex', 'uAOTex', 'uEmissiveTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex']);
+    expect(names).toEqual(['uTex', 'uNormalTex', 'uMRTex', 'uAOTex', 'uEmissiveTex', 'uEnvTex', 'uShadowTex', 'uSsaoTex', 'uShadow2Tex']);
     const at = names.map((n) => {
       const i = pbr.glsl.fragment.indexOf(`uniform sampler2D ${n};`);
       expect(i).toBeGreaterThanOrEqual(0);
@@ -168,7 +168,7 @@ describe('★ the narrow mesh shader is untouched — the goldens gate', () => {
     // 7 is the environment atlas, 9 the shadow map and 11 the AO buffer — all
     // three scene- or run-wide, all three on every lit-3d material, none of
     // them a per-layer MAP.
-    expect(textures).toEqual([1, 7, 9, 11]);
+    expect(textures).toEqual([1, 7, 9, 11, 13]);
     // The PBR set is what claims 3-6; nothing else on this path may.
     expect(textures).not.toContain(3);
   });

@@ -97,6 +97,22 @@ export type RenderableEffect =
       dofSource?: boolean;
     }
   | { type: 'glow'; radiusPx: number; color?: Color; /** Comp-px alpha dilate before blur (Spread). */ spreadPx?: number }
+  | {
+      /** Octave-pyramid glow (fxDeepGlow.ts). Numbers resolved by `deepGlowSettings`; `radiusPx` is the widest octave's sigma. */
+      type: 'deep-glow';
+      radiusPx: number;
+      gain: number;
+      threshold: number;
+      aspect: readonly [number, number];
+      chroma: readonly [number, number, number];
+      /** Linear-light tint. */
+      tint: readonly [number, number, number];
+      tintAmount: number;
+      glowOnly: boolean;
+      /** Screen-space one-code noise on the glow (the 8-bit tail band). */
+      dither: boolean;
+      octaves: number;
+    }
   | { type: 'drop-shadow'; radiusPx: number; color?: Color; offsetX: number; offsetY: number; spreadPx?: number }
   | {
       type: 'gradient-ramp';
@@ -409,6 +425,8 @@ export type RenderableEffect =
   | { type: 'cell-pattern'; p: readonly FxVec4[] }
   | { type: 'radio-waves'; p: readonly FxVec4[] }
   | { type: 'light-burst'; p: readonly FxVec4[] }
+  /** Energy Beam (fxBeamPath.ts): rows from `beamPathRows`; `spreadPx` is how far the glow leaves the spine. */
+  | { type: 'beam-path'; p: readonly FxVec4[]; spreadPx: number }
   | { type: 'write-on'; p: readonly FxVec4[] }
   | { type: 'star-burst'; p: readonly FxVec4[] }
   | { type: 'snowfall'; p: readonly FxVec4[] }
@@ -418,6 +436,22 @@ export type RenderableEffect =
   | { type: 'inner-glow'; p: readonly FxVec4[]; sigmaPx: number }
   | { type: 'satin'; p: readonly FxVec4[]; sigmaPx: number }
   | { type: 'bevel'; p: readonly FxVec4[]; sigmaPx: number }
+  /** Round seven (effects): packed slots verbatim, documented per shader in fxRoundFifteen*.ts. */
+  | { type: 'cc-tiler'; p: readonly FxVec4[] }
+  | { type: 'ripple-pulse'; p: readonly FxVec4[] }
+  | { type: 'radial-scale-wipe'; p: readonly FxVec4[] }
+  | { type: 'glass-wipe'; p: readonly FxVec4[] }
+  | { type: 'image-wipe'; p: readonly FxVec4[] }
+  | { type: 'color-difference-key'; p: readonly FxVec4[] }
+  | { type: 'wire-removal'; p: readonly FxVec4[] }
+  | { type: 'broadcast-colors'; p: readonly FxVec4[] }
+  | { type: 'noise-hls'; p: readonly FxVec4[] }
+  | { type: 'block-load'; p: readonly FxVec4[] }
+  | { type: 'kernel'; p: readonly FxVec4[] }
+  | { type: '3d-glasses'; p: readonly FxVec4[] }
+  | { type: 'fractal'; p: readonly FxVec4[] }
+  | { type: 'particle-systems'; p: readonly FxVec4[] }
+  | { type: 'cc-bubbles'; p: readonly FxVec4[] }
   /** Round fourteen: histogram colour autos. `p` = the fx-auto-table slots (fxRoundFourteen.ts) — the reduction runs in CompositionPass. */
   | { type: 'equalize'; p: readonly FxVec4[]; lw: number; lh: number }
   | { type: 'auto-levels'; p: readonly FxVec4[]; lw: number; lh: number }
@@ -731,15 +765,63 @@ export interface Renderable {
   matte?: { mode: 'alpha' | 'luma'; inverted: boolean; sourceId: string };
   matteSource?: boolean;
   /**
+   * A light's screen-blended glow quad (the 2D wash the adapter emits at the
+   * light layer's stacking position). It is the ONE 2D renderable that must
+   * not break a contiguous 3D depth run: the shadow map is built per run, so
+   * a light sitting between its caster and its receiver used to split them
+   * into groups that each lacked half the pair — the failure that reads as
+   * "shadows are not implemented". CompositionPass hoists it past the run.
+   */
+  lightWash?: boolean;
+  /**
    * Isolated precomp (nested composition): CompositionPass renders these child
    * renderables into an offscreen target, then composites that texture as ONE
    * unit with this renderable's opacity / blend / effects / mask / matte —
    * exactly like a single layer. Used when the container carries group opacity
-   * over multiple children, a mask/matte, a non-normal blend, or effects; the
-   * adapter keeps the cheap inline-collapse path otherwise. Children are in
-   * the container's local (comp) space with identity parent transform.
+   * over multiple children, a mask/matte, a non-normal blend, or effects (a
+   * sealed comp instance always carries its frame mask, and one with its own 3D
+   * frame is isolated regardless); the adapter keeps the cheap inline-collapse
+   * path otherwise.
+   *
+   * The offscreen target is VIEWPORT-sized and drawn with the host viewport's
+   * 2D camera, so children are in HOST comp space: a sealed comp instance's
+   * children flatten under the instance's placement (`precompChildParent`,
+   * inner comp px → host comp px), so their `modelMatrix` arrives translated /
+   * scaled.
+   *
+   * 3D inside. A plain Pre-compose group's children live in the host's 3D
+   * space and draw through whichever camera the precomp is drawn under. A
+   * SEALED comp instance is a frame of its own: when its composition has 3D
+   * content, `camera3d` (+ `lights3d` / `envMap`) carry the nested comp's OWN
+   * 3D frame, and CompositionPass swaps them in for the current scene's while
+   * it draws `renderables` — replacing all four 3D fields wholesale (SSAO
+   * included, which is therefore off inside), deriving a fresh context rather
+   * than mutating, so host lights / shadow-mapped lamps / env never reach in
+   * and the inner ones never reach out; nested instances swap in turn. The
+   * children keep `threeD` with the model in the INNER comp's world space, and
+   * `camera3d.projection` already has the instance placement lifted onto it
+   * (lift(placement) · P_inner), so `mvp3dFor(viewport, camera3d, model)` lands
+   * each draw exactly where the CPU-projected `modelMatrix` fallback puts it.
+   * `view`, `eye` and the projection's z row are the inner camera's untouched,
+   * so depth order, specular, shadow-map light space and DOF depth are exact.
+   * Depth groups, per-fragment lighting, shadow maps, env reflections and the
+   * light-wash hoist then just run against the inner frame.
+   *
+   * Approximate: no SSAO inside a sealed comp (the nested pass only sees the
+   * HOST's composition settings, so there is no inner switch to honour); a DOF
+   * CoC in px is the inner comp's px, not rescaled by the instance's scale on
+   * the host (the per-layer DOF fallback has always had the same limit).
+   * Absent `camera3d` — every 2D comp instance, every Pre-compose group —
+   * renders exactly as before. Composing the placement into the MODEL and
+   * drawing through the host camera instead would be the leak
+   * `buildSnapshotCollapseTransforms.test.ts` pins against.
    */
-  precomp?: { renderables: Renderable[] };
+  precomp?: {
+    renderables: Renderable[];
+    camera3d?: FrameScene['camera3d'];
+    lights3d?: FrameScene['lights3d'];
+    envMap?: FrameScene['envMap'];
+  };
   /** Dynamic CPU-skinned mesh geometry for puppet deformation. */
   deformedMesh?: {
     vertices: Float32Array;
@@ -774,6 +856,12 @@ export interface Renderable {
       gain: number;
       /** Sample the layer's own texture instead of the flat colour. */
       textured?: boolean;
+      /**
+       * With `textured`: sample THIS texture (identity uv over the mesh's
+       * layer-box uv) rather than the renderable's own. An extrusion's walls
+       * sample the layer's fill-paint plate here, so a gradient reaches them.
+       */
+      textureKey?: string;
     }>;
     /**
      * An imported glTF material's maps beyond base colour. Present only when

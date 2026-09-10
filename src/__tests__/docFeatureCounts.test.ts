@@ -137,6 +137,26 @@ describe('docs/EDITOR_REFERENCE.md feature counts', () => {
       expect(unionMembersIn(spliced, 'Demo')).toHaveLength(4);
     });
 
+    it('a SEMICOLON in a comment does not truncate the union', () => {
+      /*
+        The bug this pins, found when round seven landed. The terminating `;`
+        is located by a non-greedy match, so a semicolon inside a comment
+        between two members ended the match there and every member below it
+        vanished. Eighteen effects were added and the counter reported the
+        count from before them — silently, and in the one script whose entire
+        job is to stop hand-miscounted registries.
+
+        Worse than a crash, because `docFeatureCounts` then holds every doc to
+        the stale number and the whole pinning apparatus certifies it.
+      */
+      const withSemicolon = UNION.replace(
+        "  | 'beta'",
+        "  // one; two — a semicolon in prose\n  | 'beta'",
+      );
+      expect(withSemicolon).not.toBe(UNION);
+      expect(unionMembersIn(withSemicolon, 'Demo')).toEqual(unionMembersIn(UNION, 'Demo'));
+    });
+
     it('the real EffectType union has no apostrophe casualties', () => {
       const src = readFileSync(join(__dirname, '../core/effects/effects.ts'), 'utf8');
       const members = unionMembersIn(src, 'EffectType');

@@ -40,6 +40,7 @@ import {
 } from '@core/effects/layerStyles';
 import { POSITION_PSEUDO_PROP } from '@motion/animation';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
+import { readNodeKind } from '@core/scene/sceneDerive';
 import { readAnimatorData } from '@core/text/textAnimators';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -75,6 +76,10 @@ export type PropertyGroup =
   | 'material'
   /** AE's Audio group. */
   | 'audio'
+  /** AE's Camera Options — lens, orbit, point of interest, depth of field. */
+  | 'camera'
+  /** AE's Light Options — intensity, cone, falloff, shadow dials. */
+  | 'light'
   | 'other';
 
 export interface PropertyMeta {
@@ -178,6 +183,8 @@ export const ORDER = {
   // anyway; the number only orders rows WITHIN a group.
   material: 17,
   audio: 18,
+  camera: 19,
+  light: 20,
 } as const;
 
 // ── The static table ────────────────────────────────────────────────
@@ -365,6 +372,8 @@ const STATIC: Record<string, MetaSpec> = {
   metal: { ...PCT('Metal', 'material', ORDER.material), defaultValue: 0 },
   lightTransmission: { ...PCT('Light Transmission', 'material', ORDER.material), defaultValue: 0 },
   roughness: { ...PCT('Roughness', 'material', ORDER.material), defaultValue: 50 },
+  // Height displacement, px along the normal (B1); negative sinks.
+  displacement: { ...PX('Displacement', 'material', ORDER.material), min: -2000, max: 2000 },
   // Hold tracks: 0/1 for Accepts Lights; 0=Off, 1=On, 2=Only for shadow switches.
   acceptsLights: {
     label: 'Accepts Lights', group: 'material', type: 'boolean', unit: '',
@@ -384,6 +393,78 @@ const STATIC: Record<string, MetaSpec> = {
   audioLevelDb: {
     label: 'Audio Levels', group: 'audio', type: 'number', unit: 'dB',
     min: -60, max: 12, step: 0.5, precision: 1, defaultValue: 0, resettable: true, order: ORDER.audio,
+  },
+
+  // ── Camera Options ──
+  //
+  // Every one of these was keyframeable from the inspector (CameraSection's
+  // KeyframeRows) but invisible to the timeline, because the timeline's
+  // generic component-prop scan admits only registered paths — so a fresh
+  // camera showed Position + Orientation and nothing else, and a Zoom
+  // animation could not be STARTED from the timeline at all. Ranges and
+  // labels mirror CameraSection; stored units are comp px / degrees.
+  // `poiX/Y/Z` are NOT here: lights share them, so a resolver below picks
+  // the group by the node's kind.
+  focalLength: {
+    label: 'Zoom', group: 'camera', type: 'number', unit: 'px',
+    // No reset target: the honest default depends on the comp (the New Camera
+    // dialog derives it from a lens preset and the comp width).
+    min: 50, step: 1, precision: 1, defaultValue: null, resettable: false, order: ORDER.camera,
+  },
+  orbitYaw: { ...DEG('Orbit Yaw', 'camera', ORDER.camera), min: -180, max: 180 },
+  orbitPitch: { ...DEG('Orbit Pitch', 'camera', ORDER.camera), min: -89, max: 89 },
+  dofStrength: {
+    label: 'Blur Strength', group: 'camera', type: 'number', unit: 'px',
+    min: 0, max: 60, step: 1, precision: 1, defaultValue: 0, resettable: true, order: ORDER.camera,
+  },
+  focusDistance: {
+    // Defaults to the camera's focal length when absent — comp-dependent, so
+    // no reset target.
+    label: 'Focus Distance', group: 'camera', type: 'number', unit: 'px',
+    min: 1, step: 1, precision: 1, defaultValue: null, resettable: false, order: ORDER.camera,
+  },
+  dofAperture: {
+    label: 'Aperture', group: 'camera', type: 'number', unit: 'px',
+    min: 0, step: 1, precision: 1, defaultValue: null, resettable: false, order: ORDER.camera,
+  },
+  fStop: {
+    // 0 = the legacy symmetric ramp (see CameraSection's lens-model note);
+    // resetting restores that, deliberately.
+    label: 'F-Stop', group: 'camera', type: 'number', unit: '',
+    min: 0, max: 32, step: 0.1, precision: 1, defaultValue: 0, resettable: true, order: ORDER.camera,
+  },
+  irisBlades: {
+    label: 'Iris Blades', group: 'camera', type: 'number', unit: '',
+    min: 0, max: 11, step: 1, precision: 0, defaultValue: 0, resettable: true, order: ORDER.camera,
+  },
+  irisRoundness: {
+    label: 'Iris Roundness', group: 'camera', type: 'number', unit: '',
+    min: 0, max: 1, step: 0.01, precision: 2, defaultValue: 0.65, resettable: true, order: ORDER.camera,
+  },
+  highlightGain: {
+    label: 'Highlight Gain', group: 'camera', type: 'number', unit: '',
+    min: 0, max: 4, step: 0.05, precision: 2, defaultValue: 0, resettable: true, order: ORDER.camera,
+  },
+
+  // ── Light Options ──
+  //
+  // Same story as the camera set: LightSection keyframes all of these, the
+  // timeline listed none of them. Defaults are LIGHT_DEFAULTS' values.
+  // `intensity` and `radius` are NOT here — those names are not light-specific
+  // (a circle shape can store `radius`), so a kind-checking resolver below
+  // claims them only on light layers.
+  falloffDistance: { ...PX('Falloff Distance', 'light', ORDER.light), min: 1, defaultValue: 500 },
+  lightAngle: DEG('Direction', 'light', ORDER.light),
+  lightCone: { ...DEG('Cone Angle', 'light', ORDER.light), min: 1, max: 179, defaultValue: 45 },
+  lightConeFeather: { ...PCT('Cone Feather', 'light', ORDER.light), defaultValue: 50 },
+  envRotation: DEG('Sky Rotation', 'light', ORDER.light),
+  envReflections: { ...PCT('Reflections', 'light', ORDER.light), max: 200 },
+  shadowDarkness: PCT('Shadow Darkness', 'light', ORDER.light),
+  shadowDiffusion: { ...PX('Shadow Diffusion', 'light', ORDER.light), min: 0 },
+  shadowBias: { ...PX('Shadow Bias', 'light', ORDER.light), min: 0, defaultValue: 3 },
+  shadowSoftness: {
+    label: 'Map Softness', group: 'light', type: 'number', unit: 'tx',
+    min: 0, step: 0.1, precision: 1, defaultValue: 1, resettable: true, order: ORDER.light,
   },
 };
 
@@ -737,6 +818,59 @@ function resolveColorChannel(path: string, nodeId?: string): PropertyMeta | null
   };
 }
 
+/**
+ * `intensity` / `radius` on a LIGHT layer — Light Options rows.
+ *
+ * Not STATIC entries because the names are not light-specific: a circle shape
+ * can store `radius` (readGeometry reads it), and claiming the bare path
+ * unconditionally would put a shape's radius row under a "Light Options"
+ * heading. On any other kind these fall through to the raw-path fallback,
+ * exactly as they did before lights were registered.
+ */
+function resolveLightOption(path: string, nodeId?: string): PropertyMeta | null {
+  if (path !== 'intensity' && path !== 'radius') return null;
+  const node = nodeId ? defaultSceneGraph.getNode(nodeId) : undefined;
+  if (!node || readNodeKind(node) !== 'light') return null;
+  return path === 'intensity'
+    ? {
+        // Unbounded above on purpose: over-driving a light past 100% is a look.
+        path, label: 'Intensity', group: 'light', type: 'percent', unit: '%',
+        min: 0, step: 1, precision: 1, defaultValue: 100, resettable: true, order: ORDER.light,
+      }
+    : {
+        path, label: 'Radius', group: 'light', type: 'number', unit: 'px',
+        min: 1, step: 1, precision: 1, defaultValue: 500, resettable: true, order: ORDER.light,
+      };
+}
+
+/**
+ * `poiX` / `poiY` / `poiZ` — the Point of Interest of a two-node camera OR a
+ * targeted light. A resolver rather than a STATIC entry because the group
+ * (and so the timeline heading) depends on which kind of layer holds it:
+ * "Camera Options" on a camera, "Light Options" on a light. Without a node
+ * the camera reading wins — cameras are where a POI is most often keyframed.
+ */
+function resolvePointOfInterest(path: string, nodeId?: string): PropertyMeta | null {
+  const axis = path === 'poiX' ? 'X' : path === 'poiY' ? 'Y' : path === 'poiZ' ? 'Z' : null;
+  if (!axis) return null;
+  const node = nodeId ? defaultSceneGraph.getNode(nodeId) : undefined;
+  const kind = node ? readNodeKind(node) : undefined;
+  const group: PropertyGroup = kind === 'light' ? 'light' : 'camera';
+  return {
+    path,
+    label: `Point of Interest ${axis}`,
+    group,
+    type: 'number',
+    unit: 'px',
+    step: 1,
+    precision: 1,
+    // The default is the comp centre — comp-dependent, so no reset target.
+    defaultValue: null,
+    resettable: false,
+    order: group === 'light' ? ORDER.light : ORDER.camera,
+  };
+}
+
 /** `ctrl_<name>` — a user-defined expression control slider. */
 function resolveControl(path: string): PropertyMeta | null {
   if (!path.startsWith('ctrl_')) return null;
@@ -905,6 +1039,8 @@ const RESOLVERS: ReadonlyArray<(path: string, nodeId?: string) => PropertyMeta |
   resolveMaskProperty,
   resolveGroupPlaceholder,
   resolveControl,
+  resolveLightOption,
+  resolvePointOfInterest,
   resolveColorChannel,
   resolveTextAnimator,
   resolveEffectParam,

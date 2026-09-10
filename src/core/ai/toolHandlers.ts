@@ -1289,9 +1289,17 @@ const defineStyle: AiTool['handler'] = (input) => {
 
 const addCameraMove: AiTool['handler'] = (input, ctx) => {
   const i = input as { kind?: 'push_in' | 'pull_out'; style?: string; durationSec?: number };
-  const scaled = recipeCameraMove(ctx, { kind: i.kind, durationSec: i.durationSec });
+  const move = recipeCameraMove(ctx, { kind: i.kind, durationSec: i.durationSec });
   bumpScene();
-  return ok(`Added a slow ${i.kind ?? 'push_in'} across ${scaled} layer(s).`);
+  // The camera is named on its own, not counted: it is what moves, not one of
+  // the layers the move is across. The old `targets.length + 1` told the model
+  // it had one more content layer than it made — and hid that a camera layer
+  // was created at all, which the next call needs to know to animate it.
+  return ok(
+    `Added a slow ${i.kind ?? 'push_in'} across ${move.layers} layer(s) (now 3D), driven by ` +
+      `${move.createdCamera ? 'a new' : 'the existing'} 3D camera (id ${move.cameraId}).`,
+    { cameraId: move.cameraId },
+  );
 };
 
 const addKineticTitle: AiTool['handler'] = (input, ctx) => {

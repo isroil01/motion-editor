@@ -467,6 +467,17 @@ export function RenderQueuePanel(): JSX.Element {
                 </div>
               </div>
 
+              {/* Something to know before this job runs — a restore that found
+                  last session's frames gone, or a composition that is not in
+                  the open project. Warning, not danger: the job is still queued
+                  and Render All still takes it (or refuses it, and says so). */}
+              {job.attention && (
+                <div className={styles.jobAttention} title={job.attention}>
+                  <Icon name="warning" size="sm" />
+                  <span>{job.attention}</span>
+                </div>
+              )}
+
               {/* A failed job used to show the word "Failed" and nothing else —
                   the reason was captured on the job and never rendered, so every
                   failure looked identical and none of them were actionable. */}

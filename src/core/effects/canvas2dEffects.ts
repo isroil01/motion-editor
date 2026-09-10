@@ -32,6 +32,9 @@
 
 import type { Effect } from './effects';
 import { effectNumber, paramsOf } from './effects';
+import { deepGlowData, deepGlowSettings } from './deepGlow';
+import { beamPathData, beamPathSettings } from './beamPath';
+import { drawPlexus } from './plexus';
 import { applyKeyData, chokeAlpha, softenAlpha } from './keylight';
 import { waveWarpData, turbulentDisplaceData, curlNoiseData } from './warp';
 import { blurRgba, radialBlurData, blurDimensions, channelBlurData, unsharpMaskData } from './blurs';
@@ -87,7 +90,7 @@ import {
 } from './aeTransitionsAdvanced';
 // ── Round five kernels ──
 import {
-  starBurstData, snowfallData, rainfallData, writeOnData, lightBurstData,
+  starBurstData, snowfallData, rainfallData, writeOnData, writeOnPathData, lightBurstData,
 } from './generateRoundFive';
 import {
   glassData, texturizeData, threadsData, chromaticAberrationData, hexTileData, vectorBlurData,
@@ -112,6 +115,31 @@ import {
   scaleWipeData,
   plasticData,
 } from './aeRoundSix';
+import {
+  ccTilerData,
+  ripplePulseData,
+  radialScaleWipeData,
+  glassWipeData,
+  imageWipeData,
+  type ImageWipeChannel,
+} from './aeRoundSevenDistort';
+import {
+  colorDifferenceKeyData,
+  wireRemovalData,
+  broadcastColorsData,
+  noiseHlsData,
+} from './aeRoundSevenColor';
+import {
+  blockLoadData,
+  kernelConvolveData,
+  glasses3dData,
+  fractalData,
+} from './aeRoundSevenStylize';
+import {
+  bubblesData,
+  particleSystemsData,
+  type ParticleOptions,
+} from './aeRoundSevenSimulation';
 
 /** Effects implemented only by the Canvas2D backend, with no GPU shader form.
  *  (Distinct from `isCanvas2dProcedural`, whose two members ALSO have GPU
@@ -225,6 +253,8 @@ const CANVAS2D_ONLY = new Set<string>([
   // Perspective — projects a silhouette, then blurs and composites it.
   // Generate — these DRAW, like Beam, Lens Flare and Checkerboard.
   'lightning',
+  // Plexus (2026-09-09) — a point/line network; draws, no per-pixel form.
+  'plexus',
   // 'light-rays' PORTED 2026-08-14 — GPU shader; Canvas2D retained below.
   // 'light-sweep' PORTED 2026-08-14 — GPU shader; Canvas2D retained below.
   'audio-waveform',
@@ -245,6 +275,14 @@ const CANVAS2D_ONLY = new Set<string>([
   // GPU material, so each forces a bake and needs a `case` below.
   // 'chromatic-aberration' PORTED 2026-08-15 (round six waves 2-3) — GPU shader; Canvas2D retained below.
   // ── Round six ──
+  // ── Effects round seven ──
+  //
+  // Nothing. All fifteen shipped WITH their shaders (fxRoundFifteen.ts), so
+  // none forces a bake and none belongs here — they are listed in
+  // `CANVAS2D_IMPLEMENTED` below instead, which is the position every ported
+  // effect holds. The round's other three (Color Offset, Threshold RGB,
+  // Cineon Converter) are per-channel transfers in `LUT_BUILDERS` and have no
+  // Canvas2D pass at all.
 ]);
 
 export function isCanvas2dOnlyEffect(type: string): boolean {
@@ -282,6 +320,15 @@ const CANVAS2D_IMPLEMENTED: ReadonlySet<string> = new Set<string>([
   'equalize', 'auto-levels', 'auto-contrast', 'auto-color',
   // Rounds twelve + thirteen — same position.
   'turbulent-displace', 'curl-noise', 'roughen-edges', 'scatter', 'colorama', 'selective-color', 'turbulent-noise', 'add-grain', 'median', 'dust-scratches', 'block-dissolve', 'gradient-wipe', 'card-wipe', 'strobe-light', 'burn-film', 'light-wipe', 'grid-wipe', 'noise-alpha', 'brush-strokes', 'bilateral-blur', 'smart-blur', 'camera-lens-blur', 'mesh-warp', 'liquify', 'bezier-warp', 'cell-pattern', 'radio-waves', 'light-burst', 'write-on', 'star-burst', 'snowfall', 'rainfall', 'cartoon', 'inner-shadow', 'inner-glow', 'satin', 'bevel',
+  // Effects round seven — same position: shipped with a shader, so the CPU pass
+  // is the parity reference and the route for layers baked for another reason.
+  'cc-tiler', 'ripple-pulse', 'radial-scale-wipe', 'glass-wipe', 'image-wipe',
+  'color-difference-key', 'wire-removal', 'broadcast-colors', 'noise-hls',
+  'block-load', 'kernel', '3d-glasses', 'fractal', 'particle-systems', 'cc-bubbles',
+  // Deep Glow (2026-09-08) — same position: the GPU runs the octave pyramid,
+  // this pass is its parity twin for baked layers.
+  'deep-glow',
+  'beam-path',
   // Round eleven, advanced distort / transition / stylize — same position.
   'polar-coordinates', 'optics-compensation', 'warp', 'page-turn', 'split', 'slant', 'smear', 'rolling-shutter', 'flo-motion', 'lens', 'griddler', 'ball-action', 'drizzle', 'jaws', 'pixel-polly', 'twister', 'card-dance', 'unmult', 'cc-composite', 'cc-scatterize', 'radial-fast-blur', 'scale-wipe', 'texturize', 'threads', 'hex-tile', 'radial-shadow', 'cross-blur', 'plastic', 'glass', 'vector-blur', 'cc-repetile',
   // Round ten, neighbourhood passes + drawn generators — same position.
@@ -574,6 +621,8 @@ export function applyCanvas2dEffect(
       return applyRadioWaves(oc, w, h, e);
     case 'lightning':
       return applyLightning(oc, w, h, e);
+    case 'plexus':
+      return drawPlexus(oc, w, h, e);
     case 'light-rays':
       return applyLightRays(oc, w, h, e);
     case 'light-sweep':
@@ -653,6 +702,10 @@ export function applyCanvas2dEffect(
       return applyWriteOn(oc, w, h, e);
     case 'light-burst':
       return applyLightBurst(oc, w, h, e);
+    case 'deep-glow':
+      return applyRemapEffect(oc, w, h, (d) => deepGlowData(d, w, h, deepGlowSettings(e)));
+    case 'beam-path':
+      return applyRemapEffect(oc, w, h, (d) => beamPathData(d, w, h, beamPathSettings(e, w, h)));
     case 'glass':
       return applyGlass(oc, w, h, e);
     case 'texturize':
@@ -700,6 +753,37 @@ export function applyCanvas2dEffect(
       return applyScaleWipe(oc, w, h, e);
     case 'plastic':
       return applyPlastic(oc, w, h, e);
+    // ── Round seven ──
+    case 'cc-tiler':
+      return applyCcTiler(oc, w, h, e);
+    case 'ripple-pulse':
+      return applyRipplePulse(oc, w, h, e);
+    case 'radial-scale-wipe':
+      return applyRadialScaleWipe(oc, w, h, e);
+    case 'glass-wipe':
+      return applyGlassWipe(oc, w, h, e);
+    case 'image-wipe':
+      return applyImageWipe(oc, w, h, e);
+    case 'color-difference-key':
+      return applyColorDifferenceKey(oc, w, h, e);
+    case 'wire-removal':
+      return applyWireRemoval(oc, w, h, e);
+    case 'broadcast-colors':
+      return applyBroadcastColors(oc, w, h, e);
+    case 'noise-hls':
+      return applyNoiseHls(oc, w, h, e);
+    case 'block-load':
+      return applyBlockLoad(oc, w, h, e);
+    case 'kernel':
+      return applyKernel(oc, w, h, e);
+    case '3d-glasses':
+      return apply3dGlasses(oc, w, h, e);
+    case 'fractal':
+      return applyFractal(oc, w, h, e);
+    case 'particle-systems':
+      return applyParticleSystems(oc, w, h, e);
+    case 'cc-bubbles':
+      return applyBubbles(oc, w, h, e);
   }
 }
 
@@ -2689,6 +2773,18 @@ function applyRadioWaves(oc: CanvasRenderingContext2D, w: number, h: number, e: 
 }
 
 function applyLightning(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  // A resolved mask-path polyline (centred px, from buildSnapshot) is the
+  // spine the bolt forks around; shift it to raster space here.
+  const flat = paramsOf(e).pathPoints;
+  let spine: number[] | undefined;
+  if (Array.isArray(flat) && flat.length >= 4) {
+    spine = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const x = flat[i]; const y = flat[i + 1];
+      if (typeof x === 'number' && typeof y === 'number' && x < 1e9) spine.push(w / 2 + x, h / 2 + y);
+    }
+    if (spine.length < 4) spine = undefined;
+  }
   drawLightning(
     oc, w, h,
     effectNumber(e, 'startX'), effectNumber(e, 'startY'),
@@ -2696,6 +2792,7 @@ function applyLightning(oc: CanvasRenderingContext2D, w: number, h: number, e: E
     effectNumber(e, 'detail'), effectNumber(e, 'amplitude'), effectNumber(e, 'branches'),
     effectNumber(e, 'thickness'), str(e, 'color', '#cfe8ff'), effectNumber(e, 'glow'),
     effectNumber(e, 'opacity'), effectNumber(e, 'seed'), effectNumber(e, 'composite'),
+    spine,
   );
 }
 
@@ -2837,6 +2934,19 @@ function applyRainfall(oc: CanvasRenderingContext2D, w: number, h: number, e: Ef
 }
 
 function applyWriteOn(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  // A resolved mask-path polyline switches the geometry: the brush follows the
+  // path (buildSnapshot filled `pathPoints` from `pathMaskId` at this frame's
+  // time), and Start/End/Wobble stop meaning anything — the path is the shape.
+  const flat = paramsOf(e).pathPoints;
+  if (Array.isArray(flat) && flat.length >= 4) {
+    applyRemapEffect(oc, w, h, (d) => writeOnPathData(
+      d, w, h, flat as number[],
+      effectNumber(e, 'completion'), effectNumber(e, 'brushSize'),
+      parseHex(str(e, 'brushColor', '#ffffff')),
+      effectNumber(e, 'taper'),
+    ));
+    return;
+  }
   applyRemapEffect(oc, w, h, (d) => writeOnData(
     d, w, h,
     effectNumber(e, 'startX'), effectNumber(e, 'startY'),
@@ -3279,5 +3389,188 @@ function applyPlastic(oc: CanvasRenderingContext2D, w: number, h: number, e: Eff
     effectNumber(e, 'lightAngle'),
     effectNumber(e, 'lightIntensity'),
     effectNumber(e, 'specular'),
+  ));
+}
+
+// ── Round seven handlers ──
+//
+// Every one of these returns EARLY at its neutral setting, and that early
+// return is load-bearing rather than an optimisation: the GPU twin skips the
+// pass under exactly the same condition, so an effect that resampled at its
+// default here would put the two backends a bilinear tap apart on a layer
+// nobody had touched. The parity test drives both at NON-neutral settings for
+// the same reason.
+
+function applyCcTiler(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  const scale = effectNumber(e, 'scale');
+  if (scale >= 100 && effectNumber(e, 'centerX') === 0 && effectNumber(e, 'centerY') === 0) return;
+  applyRemapEffect(oc, w, h, (d) => ccTilerData(
+    d, w, h, scale,
+    effectNumber(e, 'centerX'), effectNumber(e, 'centerY'), effectNumber(e, 'blendWithOriginal'),
+  ));
+}
+
+function applyRipplePulse(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'amplitude') === 0) return;
+  applyRemapEffect(oc, w, h, (d) => ripplePulseData(
+    d, w, h,
+    effectNumber(e, 'centerX'), effectNumber(e, 'centerY'), effectNumber(e, 'pulseRadius'),
+    effectNumber(e, 'amplitude'), effectNumber(e, 'width'), bool(e, 'renderBump', true),
+  ));
+}
+
+function applyRadialScaleWipe(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'completion') <= 0) return;
+  applyRemapEffect(oc, w, h, (d) => radialScaleWipeData(
+    d, w, h, effectNumber(e, 'completion'),
+    effectNumber(e, 'centerX'), effectNumber(e, 'centerY'), bool(e, 'reverse', false),
+  ));
+}
+
+function applyGlassWipe(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'completion') <= 0) return;
+  applyRemapEffect(oc, w, h, (d) => glassWipeData(
+    d, w, h, effectNumber(e, 'completion'),
+    effectNumber(e, 'displacement'), effectNumber(e, 'softness'),
+  ));
+}
+
+function applyImageWipe(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'completion') <= 0) return;
+  applyRemapEffect(oc, w, h, (d) => imageWipeData(
+    d, w, h, effectNumber(e, 'completion'), effectNumber(e, 'borderSoftness'),
+    Math.max(0, Math.min(4, Math.round(effectNumber(e, 'gradientChannel')))) as ImageWipeChannel,
+    bool(e, 'invertGradient', false),
+  ));
+}
+
+function applyColorDifferenceKey(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  const [kr, kg, kb] = parseHex(str(e, 'keyColor', '#00ff00'));
+  applyRemapEffect(oc, w, h, (d) => colorDifferenceKeyData(
+    d, w, h, kr, kg, kb,
+    effectNumber(e, 'matteInBlack'), effectNumber(e, 'matteInWhite'),
+    effectNumber(e, 'matteGamma'), Math.round(effectNumber(e, 'viewMode')),
+  ));
+}
+
+function applyWireRemoval(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  applyRemapEffect(oc, w, h, (d) => wireRemovalData(
+    d, w, h,
+    effectNumber(e, 'pointAX'), effectNumber(e, 'pointAY'),
+    effectNumber(e, 'pointBX'), effectNumber(e, 'pointBY'),
+    effectNumber(e, 'thickness'), effectNumber(e, 'slope'),
+  ));
+}
+
+function applyBroadcastColors(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  applyRemapEffect(oc, w, h, (d) => broadcastColorsData(
+    d, w, h, Math.round(effectNumber(e, 'standard')),
+    Math.round(effectNumber(e, 'howToMakeColorSafe')), effectNumber(e, 'maxSignalAmplitude'),
+  ));
+}
+
+function applyNoiseHls(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  const hue = effectNumber(e, 'hue');
+  const lightness = effectNumber(e, 'lightness');
+  const saturation = effectNumber(e, 'saturation');
+  if (hue <= 0 && lightness <= 0 && saturation <= 0) return;
+  applyRemapEffect(oc, w, h, (d) => noiseHlsData(
+    d, w, h, Math.round(effectNumber(e, 'noiseType')), hue, lightness, saturation,
+    effectNumber(e, 'grainSize'), effectNumber(e, 'noisePhase'),
+  ));
+}
+
+function applyBlockLoad(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'completion') >= 100) return;
+  applyRemapEffect(oc, w, h, (d) => blockLoadData(
+    d, w, h, effectNumber(e, 'completion'),
+    effectNumber(e, 'scans'), effectNumber(e, 'blockSize'),
+  ));
+}
+
+function applyKernel(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  const k = [
+    effectNumber(e, 'k00'), effectNumber(e, 'k01'), effectNumber(e, 'k02'),
+    effectNumber(e, 'k10'), effectNumber(e, 'k11'), effectNumber(e, 'k12'),
+    effectNumber(e, 'k20'), effectNumber(e, 'k21'), effectNumber(e, 'k22'),
+  ];
+  const divisor = effectNumber(e, 'divisor');
+  const offset = effectNumber(e, 'offset');
+  // The identity kernel is the DEFAULT, so this early return is what makes
+  // adding the effect inert rather than a nine-tap no-op per pixel.
+  const isIdentity = divisor === 1 && offset === 0
+    && k.every((v, i) => v === (i === 4 ? 1 : 0));
+  if (isIdentity) return;
+  applyRemapEffect(oc, w, h, (d) => kernelConvolveData(d, w, h, k, divisor, offset));
+}
+
+function apply3dGlasses(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  applyRemapEffect(oc, w, h, (d) => glasses3dData(
+    d, w, h, effectNumber(e, 'convergenceOffset'), Math.round(effectNumber(e, 'view')),
+    effectNumber(e, 'balance'), bool(e, 'swapLeftRight', false),
+  ));
+}
+
+function applyFractal(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  const [ir, ig, ib] = parseHex(str(e, 'insideColor', '#000000'));
+  // A GENERATOR: the source pixels are not read at all, so this replaces the
+  // buffer rather than remapping it.
+  applyRemapEffect(oc, w, h, () => fractalData(
+    w, h, Math.round(effectNumber(e, 'setType')),
+    effectNumber(e, 'centerX'), effectNumber(e, 'centerY'), effectNumber(e, 'magnification'),
+    effectNumber(e, 'iterations'), effectNumber(e, 'juliaX'), effectNumber(e, 'juliaY'),
+    effectNumber(e, 'colorPhase'), effectNumber(e, 'colorCycles'), ir, ig, ib,
+  ));
+}
+
+/** The emitter's whole parameter set, read once per frame. */
+function particleOptions(e: Effect): ParticleOptions {
+  const [br, bg, bb] = parseHex(str(e, 'birthColor', '#ffe27a'));
+  const [dr, dg, db] = parseHex(str(e, 'deathColor', '#ff3b00'));
+  return {
+    birthRate: effectNumber(e, 'birthRate'),
+    longevity: effectNumber(e, 'longevity'),
+    producerX: effectNumber(e, 'producerX'),
+    producerY: effectNumber(e, 'producerY'),
+    producerRadiusX: effectNumber(e, 'producerRadiusX'),
+    producerRadiusY: effectNumber(e, 'producerRadiusY'),
+    animation: Math.round(effectNumber(e, 'animation')),
+    // Fountain aims UP by default — screen y grows downward, so 270 degrees is
+    // up, and a fountain that defaulted to 0 would spray sideways.
+    direction: Math.round(effectNumber(e, 'animation')) === 2 && effectNumber(e, 'direction') === 0
+      ? 270
+      : effectNumber(e, 'direction'),
+    spread: effectNumber(e, 'spread'),
+    velocity: effectNumber(e, 'velocity'),
+    velocityVariation: effectNumber(e, 'velocityVariation'),
+    gravity: effectNumber(e, 'gravity'),
+    resistance: effectNumber(e, 'resistance'),
+    birthSize: effectNumber(e, 'birthSize'),
+    deathSize: effectNumber(e, 'deathSize'),
+    sizeVariation: effectNumber(e, 'sizeVariation'),
+    birthR: br, birthG: bg, birthB: bb,
+    deathR: dr, deathG: dg, deathB: db,
+    opacity: effectNumber(e, 'opacity'),
+    blend: Math.round(effectNumber(e, 'blend')),
+    seed: Math.floor(effectNumber(e, 'seed')),
+  };
+}
+
+function applyParticleSystems(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'birthRate') <= 0) return;
+  // `time` is RESOLVED from the clock — see `TIME_DEPENDENT` in effects.ts.
+  const time = effectNumber(e, 'time');
+  applyRemapEffect(oc, w, h, (d) => particleSystemsData(d, w, h, time, particleOptions(e)));
+}
+
+function applyBubbles(oc: CanvasRenderingContext2D, w: number, h: number, e: Effect): void {
+  if (effectNumber(e, 'bubbleAmount') <= 0 || effectNumber(e, 'opacity') <= 0) return;
+  const [cr, cg, cb] = parseHex(str(e, 'color', '#ffffff'));
+  applyRemapEffect(oc, w, h, (d) => bubblesData(
+    d, w, h, effectNumber(e, 'bubbleAmount'), effectNumber(e, 'bubbleSpeed'),
+    effectNumber(e, 'wobbleAmplitude'), effectNumber(e, 'wobbleFrequency'),
+    effectNumber(e, 'bubbleSize'), effectNumber(e, 'sizeVariation'),
+    Math.round(effectNumber(e, 'shading')), cr, cg, cb,
+    effectNumber(e, 'opacity'), effectNumber(e, 'evolution'), effectNumber(e, 'seed'),
   ));
 }

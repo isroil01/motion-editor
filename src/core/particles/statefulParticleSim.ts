@@ -11,10 +11,9 @@
  * scope.
  */
 
-import { parseHex } from '@core/effects/canvas2dEffects';
 import { curlForce } from './particleField';
 import type { Simulation } from '@core/simulation/simulationCore';
-import type { Particle, ParticleConfig, ParticleShape } from './particleSim';
+import { colorRampAt, emitterOrigin, rampAt, type Particle, type ParticleConfig, type ParticleShape } from './particleSim';
 
 export interface StatefulParticleOptions {
   /** Comp frame rate — steps are one frame each. */
@@ -70,16 +69,6 @@ function hash01(i: number, salt: number, seed: number): number {
 }
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-function lerpColor(a: string, b: string, t: number, alpha: number): string {
-  const ca = parseHex(a);
-  const cb = parseHex(b);
-  const r = Math.round(lerp(ca[0], cb[0], t));
-  const g = Math.round(lerp(ca[1], cb[1], t));
-  const bl = Math.round(lerp(ca[2], cb[2], t));
-  const al = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
-  return `rgba(${r},${g},${bl},${al})`;
-}
 
 /**
  * The trail ring's geometry, derived in ONE place: the sim writes with it and
@@ -159,22 +148,14 @@ function spawnInto(
   const spreadRad = (cfg.spread * Math.PI) / 180;
   const dir = dirBase + spreadRad * (hash01(i, 3, seed) - 0.5);
 
-  let ox = 0;
-  let oy = 0;
-  if (cfg.emitterType === 'box') {
-    ox = (hash01(i, 4, seed) - 0.5) * cfg.emitterWidth;
-    oy = (hash01(i, 5, seed) - 0.5) * cfg.emitterHeight;
-  } else if (cfg.emitterType === 'circle') {
-    const ang = hash01(i, 4, seed) * Math.PI * 2;
-    const rad = Math.sqrt(hash01(i, 5, seed)) * (cfg.emitterWidth / 2);
-    ox = Math.cos(ang) * rad;
-    oy = Math.sin(ang) * rad;
-  }
+  // Point / box / disc / ball — the same origin sampler as the ballistic sim,
+  // so switching modes never moves the emitter.
+  const origin = emitterOrigin(cfg, i, seed, hash01);
 
   s.id[slot] = i;
-  s.x[slot] = ox;
-  s.y[slot] = oy;
-  s.z[slot] = (hash01(i, 6, seed) - 0.5) * (cfg.emitterDepth ?? 0);
+  s.x[slot] = origin.x;
+  s.y[slot] = origin.y;
+  s.z[slot] = origin.z;
   s.vz[slot] = (hash01(i, 8, seed) * 2 - 1) * (cfg.speedZ ?? 0);
   s.generation[slot] = 0;
   s.vx[slot] = Math.cos(dir) * speed;
@@ -246,7 +227,9 @@ export function createStatefulParticleSim(
   const dt = 1 / fps;
   const floorY = opts.floorY;
   const restitution = Math.max(0, Math.min(1, opts.restitution));
-  const damping = Math.max(0, Math.min(1, opts.damping));
+  // Air damping (per frame) and linear drag (1/s, `e^{−k·dt}` per frame) act
+  // together; the drag factor is what the ballistic sim's closed form has.
+  const damping = Math.max(0, Math.min(1, opts.damping)) * Math.exp(-Math.max(0, cfg.drag ?? 0) * dt);
   const birthPerFrame = Math.max(0, cfg.birthRate) / fps;
   const { ringSize } = trailRingSpec(cfg, fps);
   const subDeath = cfg.subEmit === 'death';
@@ -414,9 +397,10 @@ export function particlesFromSoA(
     const life = s.life[i]!;
     const age = s.age[i]!;
     const age01 = life > 0 ? Math.min(1, age / life) : 1;
-    const size = Math.max(0, lerp(cfg.sizeStart, cfg.sizeEnd, age01));
-    const opacity = lerp(cfg.opacityStart, cfg.opacityEnd, age01);
+    const size = Math.max(0, rampAt(cfg.sizeStart, cfg.sizeEnd, age01, cfg.sizeMid, cfg.midAge ?? 0.5));
+    const opacity = rampAt(cfg.opacityStart, cfg.opacityEnd, age01, cfg.opacityMid, cfg.midAge ?? 0.5);
     const trail = readTrail(i);
+    const streak = Math.max(0, cfg.motionBlur ?? 0) * Math.max(0, cfg.shutterSec ?? 0);
     // Children render at the config's size ramp scaled down — same ramp, same
     // colours, smaller, which is what makes a burst read as debris OF the
     // parent rather than as a second emitter.
@@ -436,11 +420,13 @@ export function particlesFromSoA(
       x: s.x[i]!,
       y: s.y[i]!,
       size: size * genScale,
-      color: lerpColor(cfg.colorStart, cfg.colorEnd, age01, opacity),
+      color: colorRampAt(cfg, age01, opacity),
       opacity,
       rotation: cfg.spin * age,
       age01,
       shape,
+      // The SoA's velocity is per FRAME; the streak wants px/s.
+      ...(streak > 0 && opts?.fps ? { vx: s.vx[i]! * opts.fps, vy: s.vy[i]! * opts.fps } : {}),
     });
   }
   return out;

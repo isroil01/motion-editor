@@ -47,6 +47,7 @@ import { TEXT_PRESETS } from './textPresets';
 import { BEHAVIOR_PRESETS } from './behaviorPresets';
 import { SCENERY_PRESETS } from './sceneryPresets';
 import { FILM_LOOK_PRESETS } from './filmLookPresets';
+import { CAMERA_PRESETS } from './cameraPresets';
 
 export interface PresetTrack {
   prop: PropPath;
@@ -70,8 +71,10 @@ export interface AnimationPreset {
   /** One line for the panel and the tooltip. */
   description?: string;
   /** What this preset needs to do anything. A text-animator preset applied to a
-   *  rectangle is a no-op, and the panel should say so rather than pretend. */
-  requires?: 'text' | 'any';
+   *  rectangle is a no-op, and the panel should say so rather than pretend.
+   *  `camera` presets keyframe props only a camera layer reads (orbit, focal
+   *  length), and on an ordinary layer would flip its 3D switch besides. */
+  requires?: 'text' | 'camera' | 'any';
   tracks: PresetTrack[];
   /**
    * Text animators the preset installs before its tracks run. This is what lets
@@ -517,9 +520,9 @@ export function exportPresets(names?: readonly string[]): string {
  * How many presets {@link exportPresets} would actually write.
  *
  * Filtering `listPresets()` by `!p.builtin` gives the same answer today — all
- * 73 compiled-in presets carry the flag, which was measured rather than
+ * 84 compiled-in presets carry the flag, which was measured rather than
  * assumed. But it gets there by a different route: `listPresets` concatenates
- * five shipped arrays with the user's, so that filter is only correct for as
+ * six shipped arrays with the user's, so that filter is only correct for as
  * long as every entry in all five stays flagged, and a new array added without
  * the flag would silently be counted as the user's.
  *
@@ -630,7 +633,7 @@ export const USER_PRESET_FOLDER = 'User Presets';
 export function listPresets(): AnimationPreset[] {
   return [
     ...BUILTIN_PRESETS, ...TEXT_PRESETS, ...BEHAVIOR_PRESETS, ...SCENERY_PRESETS,
-    ...FILM_LOOK_PRESETS, ...readUserPresets(), ...pluginPresets(),
+    ...FILM_LOOK_PRESETS, ...CAMERA_PRESETS, ...readUserPresets(), ...pluginPresets(),
   ];
 }
 
@@ -899,6 +902,14 @@ export function applyPreset(
   nodeId: string,
   atTime: number,
 ): boolean {
+  if (preset.requires === 'camera') {
+    // Refused here, not just greyed in the panel, so every entry point agrees —
+    // drag-drop and the palette land on the same gate. A camera preset on an
+    // ordinary layer would keyframe props the layer never reads AND flip its
+    // 3D switch via the z track (see applyPresetTracks).
+    const node = defaultSceneGraph.getNode(nodeId);
+    if (!node || readNodeKind(node) !== 'camera') return false;
+  }
   if (preset.applyFn) return preset.applyFn(nodeId, atTime, defaultAnimation);
 
   let tracks: ReadonlyArray<PresetTrack> = preset.tracks;

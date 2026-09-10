@@ -27,7 +27,8 @@ import { Icon, type IconName } from '@components/Icon';
 import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { customConfirm } from '@components/Modal';
 import { useSelectionStore } from '@stores/selectionStore';
-import { useSceneRevision, bumpScene } from '@stores/sceneStore';
+import { useSceneRevision } from '@stores/sceneStore';
+import { useAnimationRevision } from '@hooks/useAnimationRevision';
 import { useProjectStore } from '@stores/projectStore';
 import { useUIStore } from '@stores/uiStore';
 import { openContextMenu, type ContextMenuItem } from '@stores/contextMenuStore';
@@ -36,6 +37,7 @@ import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { renameLayer } from '@core/scene/renameLayer';
 import { type SceneKind } from '@core/scene/seedDefaultScene';
 import { flattenComposition, readNodeKind, stackOrderedChildren } from '@core/scene/sceneDerive';
+import { activeCompRootId } from '@core/scene/activeComp';
 import {
   toggleSelectedLocked,
   toggleSelectedSolo,
@@ -44,6 +46,8 @@ import {
   precomposeSelected,
   duplicateSelectedLayers,
   deleteSelectedLayers,
+  toggleNodeVisible,
+  toggleSelectedVisible,
 } from '@core/scene/sceneInsert';
 import { mergeSelectedPaths, liveMergeSelectedPaths } from '@core/scene/mergePaths';
 import { rigLogoForAnimation } from '@core/scene/rigLogo';
@@ -56,9 +60,11 @@ import { svgContextMenuItems } from '@layout/Inspector/svgLayerActions';
 import { getNodeEffects } from '@core/effects/effects';
 import { defaultAnimation } from '@motion/animation';
 import {
+  countSceneMatches,
   filterSceneTree,
   isSceneFilterActive,
   toggleKind,
+  withRevealed,
   type SceneFilter,
   type SceneNodeFacts,
 } from './sceneFilters';
@@ -195,6 +201,14 @@ function toTreeNode(node: SceneNode): TreeNode<SceneNodeData> {
   if (custom) {
     const registered = findLayerKind(custom.kind);
     iconName = (registered?.kind.icon as IconName) ?? 'plugin';
+  }
+
+  // A hidden layer reads as hidden in the tree, not only through its eye
+  // glyph: the eye is on the far right and fades out until the row is
+  // hovered, so a stack with three hidden layers looked identical to one
+  // with none. Dimmed, not removed — it is still the user's layer.
+  if (node.visible === false) {
+    label = <span className={styles.hiddenRow}>{label}</span>;
   }
 
   return {
@@ -387,11 +401,24 @@ export function ScenePanel(): JSX.Element {
   */
   const filter: SceneFilter = { kinds: kindFilter, label: labelFilter, animatedOnly, effectsOnly, query: q };
   const filterActive = isSceneFilterActive(filter);
+  // Keyframes and effects do not live in the scene graph: `sceneNodeFacts`
+  // reads them from the animation engine, which announces edits as
+  // `AnimationChanged` (effects edits emit it too — see `writeNodeEffects`)
+  // and never bumps the scene revision `tree` is keyed on. Without this the
+  // "with keyframes" / "with effects" filters kept the answer from whenever
+  // the tree last rebuilt: add a keyframe and the layer stayed filtered out.
+  const animRev = useAnimationRevision();
   const filtered = useMemo(
     () => filterSceneTree(tree, filter, sceneNodeFacts),
     // The filter object is rebuilt every render; its FIELDS are the dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tree, kindFilter, labelFilter, animatedOnly, effectsOnly, q],
+    [tree, kindFilter, labelFilter, animatedOnly, effectsOnly, q, animRev],
+  );
+  const matchCount = useMemo(
+    () => (filterActive ? countSceneMatches(filtered, filter, sceneNodeFacts) : 0),
+    // Same fields as `filtered`, which already carries them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filtered, filterActive],
   );
   const kindChoices = useMemo(() => presentKinds(tree), [tree]);
   const expandIds = useMemo(() => collectIds(filtered), [filtered]);
@@ -402,7 +429,15 @@ export function ScenePanel(): JSX.Element {
   // canvas already (see `selectionGroup`); the tree now agrees with that.
   // Searching still expands everything, so matches stay reachable.
   const defaultExpandIds = useMemo(() => filtered.map((n) => n.id), [filtered]);
-  const itemCount = defaultSceneGraph.size;
+  // The ACTIVE composition's layers, root excluded. `defaultSceneGraph.size`
+  // counted every node of every composition — each comp root included — so a
+  // project with three comps reported a number that matched no list on screen.
+  const itemCount = useMemo(
+    () => Math.max(0, flattenComposition(defaultSceneGraph, activeCompRootId()).length - 1),
+    // `activeCompRootId` reads the project store; the tab is the other input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rev, activeTabId],
+  );
 
   /*
    * Keep a reparented layer on screen.
@@ -433,18 +468,30 @@ export function ScenePanel(): JSX.Element {
     });
     return () => sub.dispose();
   }, []);
+  // While a filter drives the expansion set the tree is controlled and drops
+  // `revealIds` on the floor (a controlled caller owns its reveal — this is
+  // that caller). Merge the chain in here so a reparent during a search opens
+  // its branch the same way it does without one.
+  const controlledExpandIds = useMemo(() => withRevealed(expandIds, revealIds), [expandIds, revealIds]);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
-  const toggleVisible = (id: string): void => {
+  // Undoable, like every other visibility path (the timeline's eye, the Layer
+  // menu). This used to flip `visible` in place and bump — the one hide in the
+  // app that Ctrl+Z could not take back.
+  const toggleVisible = (id: string): void => toggleNodeVisible(id);
+
+  /** True (and says so) when the row is locked — locked means not editable here. */
+  const refuseIfLocked = (id: string, what: string): boolean => {
     const n = defaultSceneGraph.getNode(id);
-    if (!n) return;
-    n.visible = n.visible === false;
-    bumpScene();
+    if (!n?.locked) return false;
+    useUIStore.getState().notify({ level: 'info', message: `“${n.name ?? id}” is locked — unlock it to ${what}.`, durationMs: 3000 });
+    return true;
   };
 
   const commitRename = (id: string, name: string): void => {
     setRenamingId(null);
+    if (refuseIfLocked(id, 'rename it')) return;
 
     // Not a bare `node.name = name`. Expressions reference layers by NAME and
     // resolve at evaluation time, so a plain rename silently zeroes every
@@ -494,9 +541,13 @@ export function ScenePanel(): JSX.Element {
     targetId: string,
     pos: 'before' | 'after' | 'inside',
   ): void => {
+    if (refuseIfLocked(dragId, 'move it')) return;
     if (pos === 'inside') {
       if (canReparent(dragId, targetId)) reparentNode(dragId, targetId);
-      else moveNodeAdjacent(dragId, targetId, 'before');
+      // Cannot nest: land it just in front of the target instead. Display
+      // "before" is child-order "after" — the same flip as the branch below;
+      // passing the display word straight through dropped it on the far side.
+      else moveNodeAdjacent(dragId, targetId, 'after');
     } else {
       moveNodeAdjacent(dragId, targetId, pos === 'before' ? 'after' : 'before');
     }
@@ -522,9 +573,11 @@ export function ScenePanel(): JSX.Element {
         { id: 'arr-back', label: 'Send to Back', onSelect: () => { arrangeNodes(useSelectionStore.getState().ids, 'back'); } },
       ] },
       { id: 'sep1', separator: true },
-      { id: 'toggle', label: hidden ? 'Show' : 'Hide', onSelect: () => toggleVisible(id) },
-      { id: 'lock', label: locked ? 'Unlock' : 'Lock', onSelect: () => toggleSelectedLocked() },
-      { id: 'solo', label: solo ? 'Unsolo' : 'Solo', onSelect: () => toggleSelectedSolo() },
+      // Anchored on the clicked row, so the label ("Unlock") and the action
+      // agree even when the rest of the selection is in the other state.
+      { id: 'toggle', label: hidden ? 'Show' : 'Hide', onSelect: () => toggleSelectedVisible(id) },
+      { id: 'lock', label: locked ? 'Unlock' : 'Lock', onSelect: () => toggleSelectedLocked(id) },
+      { id: 'solo', label: solo ? 'Unsolo' : 'Solo', onSelect: () => toggleSelectedSolo(id) },
       { id: 'labelColor', label: 'Label Color', children: labelColorMenuItems(id) },
       { id: 'sep2', separator: true },
       { id: 'group', label: 'Group Selection', onSelect: () => groupSelectedLayers() },
@@ -740,7 +793,7 @@ export function ScenePanel(): JSX.Element {
             selectedIds={selected}
             onSelect={setSelected}
             defaultExpandedIds={defaultExpandIds}
-            expandedIds={filterActive ? expandIds : undefined}
+            expandedIds={filterActive ? controlledExpandIds : undefined}
             revealIds={revealIds}
             onNodeContextMenu={openNodeMenu}
             onReorder={handleReorder}
@@ -748,17 +801,54 @@ export function ScenePanel(): JSX.Element {
             onRename={commitRename}
             onRenameCancel={() => setRenamingId(null)}
             renderActions={(node) => {
-              const hidden = defaultSceneGraph.getNode(node.id)?.visible === false;
+              const n = defaultSceneGraph.getNode(node.id);
+              const hidden = n?.visible === false;
+              const locked = n?.locked === true;
+              const solo = n?.solo === true;
+              // Eye · solo · lock, the timeline's order (`TrackHeaderColumn`),
+              // and its glyphs, so the two panels read as one document. Lock
+              // and solo used to live only in the kebab: a locked layer looked
+              // exactly like an unlocked one until a drag on it was refused.
+              // `data-on` keeps a set switch visible without hover, the way the
+              // closed eye already stayed.
               return (
-                <button
-                  type="button"
-                  className={styles.rowAction}
-                  data-on={hidden || undefined}
-                  aria-label={hidden ? 'Show layer' : 'Hide layer'}
-                  onClick={(e) => { e.stopPropagation(); toggleVisible(node.id); }}
-                >
-                  <Icon name={hidden ? 'eye-off' : 'eye'} size="sm" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={styles.rowAction}
+                    data-kind="visible"
+                    data-on={hidden || undefined}
+                    aria-label={hidden ? 'Show layer' : 'Hide layer'}
+                    title={hidden ? 'Show' : 'Hide'}
+                    onClick={(e) => { e.stopPropagation(); toggleVisible(node.id); }}
+                  >
+                    <Icon name={hidden ? 'eye-off' : 'eye'} size="sm" />
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.rowAction}
+                    data-kind="solo"
+                    data-on={solo || undefined}
+                    aria-label={solo ? 'Unsolo layer' : 'Solo layer'}
+                    title={solo ? 'Unsolo' : 'Solo'}
+                    // Anchored on the row: the whole selection when the row is
+                    // part of it, just this layer otherwise — one undo step.
+                    onClick={(e) => { e.stopPropagation(); toggleSelectedSolo(node.id); }}
+                  >
+                    <Icon name="circle" size="sm" />
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.rowAction}
+                    data-kind="lock"
+                    data-on={locked || undefined}
+                    aria-label={locked ? 'Unlock layer' : 'Lock layer'}
+                    title={locked ? 'Unlock' : 'Lock'}
+                    onClick={(e) => { e.stopPropagation(); toggleSelectedLocked(node.id); }}
+                  >
+                    <Icon name={locked ? 'lock' : 'unlock'} size="sm" />
+                  </button>
+                </>
               );
             }}
           />
@@ -771,11 +861,11 @@ export function ScenePanel(): JSX.Element {
         )}
       </div>
       <div className={styles.footer}>
-        <span>{itemCount} items</span>
+        <span>{itemCount} {itemCount === 1 ? 'layer' : 'layers'}</span>
         {filterActive && (
           <>
             <span>·</span>
-            <span>{expandIds.length} shown</span>
+            <span>{matchCount} {matchCount === 1 ? 'match' : 'matches'}</span>
           </>
         )}
         <span>·</span>

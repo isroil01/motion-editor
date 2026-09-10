@@ -17,7 +17,7 @@ import { ColorPicker } from '@components/ColorPicker';
 import { openModal } from '@stores/modalStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { Project3D } from '@motion/scene';
-import { insertCamera, insertLight, insert3DPrimitive, type Primitive3DKind } from '@core/scene/sceneInsert';
+import { insertCamera, insertLight, insert3DPrimitive, nextDeviceName, type Primitive3DKind } from '@core/scene/sceneInsert';
 import {
   defaultPrimitiveSpec,
   isPrimitiveMeshType,
@@ -38,7 +38,7 @@ function fovForMm(mm: number): number {
 
 function CameraDialog({ close }: { close: () => void }): JSX.Element {
   const compWidth = useCompositionStore((s) => s.width);
-  const [name, setName] = useState('Camera 1');
+  const [name, setName] = useState(() => nextDeviceName('camera'));
   const [lensMm, setLensMm] = useState<number>(50);
   const [twoNode, setTwoNode] = useState(false);
 
@@ -109,7 +109,7 @@ function CameraDialog({ close }: { close: () => void }): JSX.Element {
 }
 
 function LightDialog({ close }: { close: () => void }): JSX.Element {
-  const [name, setName] = useState('Light 1');
+  const [name, setName] = useState(() => nextDeviceName('light'));
   const [type, setType] = useState<LightType>('point');
   const [intensity, setIntensity] = useState(100);
   const [color, setColor] = useState('#ffffff');

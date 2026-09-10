@@ -30,6 +30,9 @@ import { FX_ROUND_ELEVEN_SHADERS } from './fxRoundEleven';
 import { FX_ROUND_TWELVE_SHADERS } from './fxRoundTwelve';
 import { FX_ROUND_THIRTEEN_SHADERS } from './fxRoundThirteen';
 import { FX_ROUND_FOURTEEN_SHADERS } from './fxRoundFourteen';
+import { FX_ROUND_FIFTEEN_SHADERS } from './fxRoundFifteen';
+import { FX_DEEP_GLOW_SHADERS } from './fxDeepGlow';
+import { FX_BEAM_PATH_SHADERS } from './fxBeamPath';
 export { GLASS_COMPOSITE };
 
 import {
@@ -38,6 +41,7 @@ import {
   SRGB_TRANSFER_WGSL,
 } from './linearWorkingSpace';
 import { ENV_SPEC_LEVELS, ENV_SPEC_BAND_HEIGHT } from '../pipeline/uniforms';
+import { LUT3D_TEXTURE_BINDING } from '../gpu/types';
 
 /**
  * The environment atlas layout, as SHADER LITERALS.
@@ -4353,6 +4357,10 @@ struct Object {
   shadowAxis : vec4<f32>,
   shadowOrigin : vec4<f32>,
   shadowParams : vec4<f32>,
+  shadow2Matrix : mat4x4<f32>,
+  shadow2Axis : vec4<f32>,
+  shadow2Origin : vec4<f32>,
+  shadow2Params : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> obj : Object;
 
@@ -4366,6 +4374,9 @@ struct Object {
 // and a bilinear blend of two packed depths is not a depth.
 @group(0) @binding(9) var shadowTex : texture_2d<f32>;
 @group(0) @binding(10) var shadowSmp : sampler;
+// The run's SECOND shadow map, 13/14 (plan B2) — same contract as 9/10.
+@group(0) @binding(13) var shadow2Tex : texture_2d<f32>;
+@group(0) @binding(14) var shadow2Smp : sampler;
 
 // The run's ambient-occlusion buffer, 11/12. Its own sampler for the opposite
 // reason the shadow map has one: this one must be LINEAR (it is a half-res
@@ -4463,29 +4474,40 @@ fn unpackShadowDepth(c : vec4<f32>) -> f32 {
   return dot(c.rgb, vec3<f32>(1.0, 1.0 / 255.0, 1.0 / 65025.0));
 }
 
-fn shadowFactor(world : vec3<f32>) -> f32 {
-  if (obj.shadowParams.x < 0.0005) { return 1.0; }
-  let clip = obj.shadowMatrix * vec4<f32>(world, 1.0);
+// One body for both maps: the block's four uniforms and the map's handles are
+// parameters, so the second light's shadow (plan B2) is the same arithmetic
+// against its own map rather than a copy that could drift.
+fn shadowTerm(world : vec3<f32>, mtx : mat4x4<f32>, axis : vec4<f32>, origin : vec4<f32>, params : vec4<f32>, tex : texture_2d<f32>, smp : sampler) -> f32 {
+  if (params.x < 0.0005) { return 1.0; }
+  let clip = mtx * vec4<f32>(world, 1.0);
   if (clip.w <= 1e-6) { return 1.0; }
   var uv = (clip.xy / clip.w) * 0.5 + vec2<f32>(0.5);
-  if (obj.shadowParams.w > 0.5) { uv.y = 1.0 - uv.y; }
+  if (params.w > 0.5) { uv.y = 1.0 - uv.y; }
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
-  let d = dot(world - obj.shadowOrigin.xyz, obj.shadowAxis.xyz) * obj.shadowAxis.w - obj.shadowParams.y;
+  let d = dot(world - origin.xyz, axis.xyz) * axis.w - params.y;
   if (d <= 0.0 || d >= 1.0) { return 1.0; }
-  let s = obj.shadowParams.z;
+  let s = params.z;
   var lit = 0.0;
   for (var y = -1; y <= 1; y = y + 1) {
     for (var x = -1; x <= 1; x = x + 1) {
       // Explicit LOD, like envFetch: the map has no mip chain, and an implicit
       // derivative inside this nest is both meaningless and illegal in WGSL.
-      let occ = unpackShadowDepth(textureSampleLevel(shadowTex, shadowSmp, uv + vec2<f32>(f32(x), f32(y)) * s, 0.0));
+      let occ = unpackShadowDepth(textureSampleLevel(tex, smp, uv + vec2<f32>(f32(x), f32(y)) * s, 0.0));
       lit = lit + select(0.0, 1.0, d <= occ);
     }
   }
   // Darkness lerps the term back toward fully lit, so 100 % is a black shadow
   // and 60 % leaves 40 % of the light through — the same meaning the slider has
   // on the projected path.
-  return 1.0 - (1.0 - lit / 9.0) * obj.shadowParams.x;
+  return 1.0 - (1.0 - lit / 9.0) * params.x;
+}
+fn shadowFactor(world : vec3<f32>) -> f32 {
+  if (obj.shadowParams.x < 0.0005) { return 1.0; }
+  return shadowTerm(world, obj.shadowMatrix, obj.shadowAxis, obj.shadowOrigin, obj.shadowParams, shadowTex, shadowSmp);
+}
+fn shadowFactor2(world : vec3<f32>) -> f32 {
+  if (obj.shadow2Params.x < 0.0005) { return 1.0; }
+  return shadowTerm(world, obj.shadow2Matrix, obj.shadow2Axis, obj.shadow2Origin, obj.shadow2Params, shadow2Tex, shadow2Smp);
 }
 
 /*
@@ -4562,6 +4584,10 @@ fn shade3d(world : vec3<f32>, baseRgb : vec3<f32>) -> vec3<f32> {
   let shTerm = shadowFactor(world);
   let shadowIdx = i32(obj.shadowOrigin.w + 0.5);
   let shadowOn = obj.shadowParams.x > 0.0005;
+  // The second mapped light's term (plan B2), against its own map and index.
+  let shTerm2 = shadowFactor2(world);
+  let shadow2Idx = i32(obj.shadow2Origin.w + 0.5);
+  let shadow2On = obj.shadow2Params.x > 0.0005;
   // Sampled once, beside the shadow term and for the same reasons: it is a fact
   // about this fragment, and a tap per light would be seven wasted.
   let aoTerm = aoFactor(world);
@@ -4637,6 +4663,7 @@ fn shade3d(world : vec3<f32>, baseRgb : vec3<f32>) -> vec3<f32> {
     // the early continue above and never reaches here). That is what shadow
     // means: this lamp cannot see you.
     if (shadowOn && shadowIdx == i) { atten = atten * shTerm; }
+    if (shadow2On && shadow2Idx == i) { atten = atten * shTerm2; }
     let k = gain * lambert * atten;
     if (pbr) {
       // Cook-Torrance: D (GGX) · G (Smith-Schlick) · F (Schlick) / (4 N·L N·V),
@@ -4717,7 +4744,7 @@ fn shade3d(world : vec3<f32>, baseRgb : vec3<f32>) -> vec3<f32> {
 `;
 
 // GLSL twins of the above (UBO tail + light model), same layout contract.
-const GLSL_TEX3D_UBO = `layout(std140) uniform Object { mat4 mvp; vec4 uvRect; vec4 tint; vec4 cr0; vec4 cr1; vec4 cr2; vec4 srcSpace; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; };`;
+const GLSL_TEX3D_UBO = `layout(std140) uniform Object { mat4 mvp; vec4 uvRect; vec4 tint; vec4 cr0; vec4 cr1; vec4 cr2; vec4 srcSpace; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; mat4 shadow2Matrix; vec4 shadow2Axis; vec4 shadow2Origin; vec4 shadow2Params; };`;
 
 const GLSL_SHADE3D_FN = /* glsl */ `
 
@@ -4754,30 +4781,45 @@ uniform sampler2D uShadowTex;
 float unpackShadowDepth(vec4 c) {
   return dot(c.rgb, vec3(1.0, 1.0 / 255.0, 1.0 / 65025.0));
 }
-float shadowFactor(vec3 world) {
-  if (shadowParams.x < 0.0005) return 1.0;
-  vec4 clip = shadowMatrix * vec4(world, 1.0);
+// One body for both maps — see the WGSL twin.
+float shadowTerm(vec3 world, mat4 mtx, vec4 axis, vec4 origin, vec4 params, sampler2D tex) {
+  if (params.x < 0.0005) return 1.0;
+  vec4 clip = mtx * vec4(world, 1.0);
   if (clip.w <= 1e-6) return 1.0;
   vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
-  if (shadowParams.w > 0.5) uv.y = 1.0 - uv.y;
+  if (params.w > 0.5) uv.y = 1.0 - uv.y;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
-  float d = dot(world - shadowOrigin.xyz, shadowAxis.xyz) * shadowAxis.w - shadowParams.y;
+  float d = dot(world - origin.xyz, axis.xyz) * axis.w - params.y;
   if (d <= 0.0 || d >= 1.0) return 1.0;
-  float s = shadowParams.z;
+  float s = params.z;
   float lit = 0.0;
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
-      float occ = unpackShadowDepth(textureLod(uShadowTex, uv + vec2(float(x), float(y)) * s, 0.0));
+      float occ = unpackShadowDepth(textureLod(tex, uv + vec2(float(x), float(y)) * s, 0.0));
       lit += d <= occ ? 1.0 : 0.0;
     }
   }
   // Darkness lerps back toward fully lit — see the WGSL twin.
-  return 1.0 - (1.0 - lit / 9.0) * shadowParams.x;
+  return 1.0 - (1.0 - lit / 9.0) * params.x;
+}
+float shadowFactor(vec3 world) {
+  if (shadowParams.x < 0.0005) return 1.0;
+  return shadowTerm(world, shadowMatrix, shadowAxis, shadowOrigin, shadowParams, uShadowTex);
 }
 
 // Screen-space ambient occlusion. See the WGSL twin for the full note; the two
 // must stay identical term for term, including the off-buffer answer.
 uniform sampler2D uSsaoTex;
+// The second shadow map (13/14, plan B2) — declared AFTER uSsaoTex because the
+// WebGL2 backend names units in binding order and 13 comes after 11, and its
+// wrapper is defined HERE, after the declaration: GLSL, unlike WGSL, resolves
+// identifiers in order, and a wrapper above this line failed to compile on
+// every lit-3d shader ("uShadow2Tex: undeclared identifier").
+uniform sampler2D uShadow2Tex;
+float shadowFactor2(vec3 world) {
+  if (shadow2Params.x < 0.0005) return 1.0;
+  return shadowTerm(world, shadow2Matrix, shadow2Axis, shadow2Origin, shadow2Params, uShadow2Tex);
+}
 float aoFactor(vec3 world) {
   if (aoParams.x < 0.0005) return 1.0;
   vec4 clip = aoMatrix * vec4(world, 1.0);
@@ -4813,6 +4855,10 @@ vec3 shade3d(vec3 world, vec3 baseRgb) {
   float shTerm = shadowFactor(world);
   int shadowIdx = int(shadowOrigin.w + 0.5);
   bool shadowOn = shadowParams.x > 0.0005;
+  // The second mapped light's term (plan B2) — see the WGSL twin.
+  float shTerm2 = shadowFactor2(world);
+  int shadow2Idx = int(shadow2Origin.w + 0.5);
+  bool shadow2On = shadow2Params.x > 0.0005;
   // Sampled once, beside the shadow term — see the WGSL twin.
   float aoTerm = aoFactor(world);
   vec3 diff = vec3(0.0);
@@ -4877,6 +4923,7 @@ vec3 shade3d(vec3 world, vec3 baseRgb) {
     }
     // The shadow multiplies ATTENUATION — see the WGSL twin.
     if (shadowOn && shadowIdx == i) atten *= shTerm;
+    if (shadow2On && shadow2Idx == i) atten *= shTerm2;
     float k = gain * lambert * atten;
     if (pbr) {
       // Cook-Torrance: D (GGX) · G (Smith-Schlick) · F (Schlick) / (4 N·L N·V).
@@ -4962,6 +5009,10 @@ struct Object {
   shadowAxis : vec4<f32>,
   shadowOrigin : vec4<f32>,
   shadowParams : vec4<f32>,
+  shadow2Matrix : mat4x4<f32>,
+  shadow2Axis : vec4<f32>,
+  shadow2Origin : vec4<f32>,
+  shadow2Params : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> obj : Object;
 
@@ -4973,6 +5024,9 @@ struct Object {
 // The shadow map, 9/10 — see the note on the textured twin's block.
 @group(0) @binding(9) var shadowTex : texture_2d<f32>;
 @group(0) @binding(10) var shadowSmp : sampler;
+// The run's SECOND shadow map, 13/14 (plan B2) — same contract as 9/10.
+@group(0) @binding(13) var shadow2Tex : texture_2d<f32>;
+@group(0) @binding(14) var shadow2Smp : sampler;
 
 // The ambient-occlusion buffer, 11/12 — see the note on the textured twin's
 // block. This material has no layer sampler at all, which is exactly why the AO
@@ -5028,7 +5082,7 @@ fn fs(@location(0) local : vec2<f32>, @location(1) world : vec3<f32>) -> @locati
   glsl: {
     vertex: /* glsl */ `#version 300 es
 layout(location = 0) in vec2 pos;
-layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; };
+layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; mat4 shadow2Matrix; vec4 shadow2Axis; vec4 shadow2Origin; vec4 shadow2Params; };
 out vec2 vLocal;
 out vec3 vWorld;
 void main() {
@@ -5039,7 +5093,7 @@ void main() {
 `,
     fragment: /* glsl */ `#version 300 es
 precision highp float;
-layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; };
+layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; mat4 shadow2Matrix; vec4 shadow2Axis; vec4 shadow2Origin; vec4 shadow2Params; };
 in vec2 vLocal;
 in vec3 vWorld;
 out vec4 frag;
@@ -6110,6 +6164,75 @@ void main() {
   },
 };
 
+// ── Colour-LUT variants of the lit-3d textured shaders ──────────────────────
+/*
+  Levels / Curves / Posterize / Exposure / Lumetri (everything `isLutEffect`
+  admits) on a TEXTURED 3D surface: a 3D quad in a depth group, an extrusion's
+  cap or gradient plate, an imported model's base colour. Untextured surfaces
+  never reach here — their colour is uniform, so the adapter grades it through
+  the same table on the CPU.
+
+  Derived from the three bases by substitution so they cannot drift from them:
+  every line of a variant is its base's line except the one LUT stage, and the
+  bases are untouched, so a draw without a LUT compiles exactly the shader —
+  and produces exactly the pixels — it did before these existed.
+
+  The stage is the 2D `lut-textured` lookup, moved to where a lit shader needs
+  it — after the affine grade, BEFORE the light:
+    encode   the tables are display-referred sRGB, so the clamped working
+             colour is encoded exactly as `lut-textured` encodes it;
+    lookup   per channel, U = value, V = 0.5, through the layer's own sampler
+             — the same strip, the same taps;
+    decode   ALWAYS back to working space. The 2D shader decodes only under
+             linear storage because its lookup IS the stored colour; here the
+             result is an albedo the light stage works on in working space,
+             and the base's own tail (`lit * c.a`, sRGB-encoded when storage is
+             not linear) does the write. Unlit, shade3d hands the albedo back
+             unchanged, so the pixel is the 2D path's.
+
+  Before the light, because a LUT is part of the LAYER's grade — the surface's
+  colour — exactly as the CPU side grades a flat wall before the shader lights
+  it (`gradeFillByEffects`). Grading the lit result instead would re-tone every
+  highlight and shadow the light put there, and a lit extrusion's cap would
+  stop matching its walls.
+
+  All three taps sit at top level, never in a branch: WGSL's uniformity rule
+  (wgslUniformControlFlow.test.ts).
+*/
+const WGSL_AFFINE_GRADE = 'let graded = vec3<f32>(dot(obj.cr0, v), dot(obj.cr1, v), dot(obj.cr2, v));';
+const GLSL_AFFINE_GRADE = 'vec3 graded = vec3(dot(cr0, v), dot(cr1, v), dot(cr2, v));';
+
+function withLutStage(base: ShaderSource, name: string): ShaderSource {
+  const where = `withLutStage(${base.name})`;
+  let wgsl = subOnce(
+    base.wgsl,
+    '@group(0) @binding(2) var smp : sampler;',
+    `@group(0) @binding(2) var smp : sampler;\n@group(0) @binding(${LUT3D_TEXTURE_BINDING}) var lutTex : texture_2d<f32>;`,
+    where,
+  );
+  wgsl = subOnce(wgsl, WGSL_AFFINE_GRADE, `let affine = vec3<f32>(dot(obj.cr0, v), dot(obj.cr1, v), dot(obj.cr2, v));
+  let lutIn = linearToSrgbRgb(clamp(affine, vec3<f32>(0.0), vec3<f32>(1.0)));
+  let lutR = textureSample(lutTex, smp, vec2<f32>(lutIn.r, 0.5)).r;
+  let lutG = textureSample(lutTex, smp, vec2<f32>(lutIn.g, 0.5)).g;
+  let lutB = textureSample(lutTex, smp, vec2<f32>(lutIn.b, 0.5)).b;
+  let graded = srgbToLinearRgb(vec3<f32>(lutR, lutG, lutB));`, where);
+  // Declared just above main(), i.e. AFTER the scene samplers the shade block
+  // declares — the fragment's declaration order then matches `glslSamplers`,
+  // which lists the strip last because QuadRenderer binds it last.
+  let fragment = subOnce(base.glsl.fragment, 'void main()', 'uniform sampler2D uLutTex;\nvoid main()', where);
+  fragment = subOnce(fragment, GLSL_AFFINE_GRADE, `vec3 affine = vec3(dot(cr0, v), dot(cr1, v), dot(cr2, v));
+  vec3 lutIn = linearToSrgbRgb(clamp(affine, 0.0, 1.0));
+  float lutR = texture(uLutTex, vec2(lutIn.r, 0.5)).r;
+  float lutG = texture(uLutTex, vec2(lutIn.g, 0.5)).g;
+  float lutB = texture(uLutTex, vec2(lutIn.b, 0.5)).b;
+  vec3 graded = srgbToLinearRgb(vec3(lutR, lutG, lutB));`, where);
+  return { name, wgsl, glsl: { vertex: base.glsl.vertex, fragment } };
+}
+
+const TEXTURED3D_LUT = withLutStage(TEXTURED3D, 'textured3d-lut');
+const MESH3D_TEXTURED_LUT = withLutStage(MESH3D_TEXTURED, 'mesh3d-textured-lut');
+const MESH3D_PBR_LUT = withLutStage(MESH3D_PBR, 'mesh3d-pbr-lut');
+
 const DEFORMED_MESH: ShaderSource = {
   name: 'deformed-mesh',
   wgsl: /* wgsl */ `
@@ -6423,7 +6546,11 @@ function unpremultiplyingSample(base: ShaderSource, src: 'srgb' | 'linear' = 'sr
       fragment = sub(fragment, 'graded = vec3(lr, lg, lb);', 'graded = srgbToLinearRgb(vec3(lr, lg, lb));', 'glsl lut decode');
     }
   } else if (!LINEAR_INTERMEDIATE_STORAGE) {
-    if (base.name === 'textured3d' || base.name === 'mesh3d-textured' || base.name === 'mesh3d-pbr') {
+    if (
+      base.name === 'textured3d' || base.name === 'mesh3d-textured' || base.name === 'mesh3d-pbr'
+      // The LUT variants end in the same `lit * c.a` tail as their bases.
+      || base.name === 'textured3d-lut' || base.name === 'mesh3d-textured-lut' || base.name === 'mesh3d-pbr-lut'
+    ) {
       wgsl = sub(wgsl, 'lit * c.a', 'linearToSrgbRgb(lit) * c.a', 'wgsl encode lit');
       fragment = sub(fragment, 'lit * c.a', 'linearToSrgbRgb(lit) * c.a', 'glsl encode lit');
     } else if (base.name === 'masked-textured3d') {
@@ -6671,6 +6798,13 @@ export const BUILTIN_SHADERS: readonly ShaderSource[] = [
   ...FX_ROUND_THIRTEEN_SHADERS,
   // Round fourteen: the histogram colour autos (fxRoundFourteen.ts).
   ...FX_ROUND_FOURTEEN_SHADERS,
+  // Effects round seven: distort / transition / keying / colour / stylize /
+  // generate / simulation (fxRoundFifteen.ts).
+  ...FX_ROUND_FIFTEEN_SHADERS,
+  // Deep Glow: the octave-pyramid glow's blur / accumulate / composite passes (fxDeepGlow.ts).
+  ...FX_DEEP_GLOW_SHADERS,
+  // Energy Beam: the Saber-class beam along a mask path / text outline / line (fxBeamPath.ts).
+  ...FX_BEAM_PATH_SHADERS,
   SOLID3D,
   // Shadow-map casters. No `-linear` twin and no premultiply handling: neither
   // samples a texture — they write a packed distance, not a colour.
@@ -6704,6 +6838,13 @@ export const BUILTIN_SHADERS: readonly ShaderSource[] = [
   // be a shader nothing can select, and its emissive decode would have to be
   // stripped by a substitution site that has no other reason to exist.
   unpremultiplyingSample(MESH3D_PBR),
+  // The colour-LUT variants of those three (see `withLutStage`), with the same
+  // twins as their bases — so the PBR one, again, has none.
+  unpremultiplyingSample(TEXTURED3D_LUT),
+  unpremultiplyingSample(TEXTURED3D_LUT, 'linear'),
+  unpremultiplyingSample(MESH3D_TEXTURED_LUT),
+  unpremultiplyingSample(MESH3D_TEXTURED_LUT, 'linear'),
+  unpremultiplyingSample(MESH3D_PBR_LUT),
   TEXTURED_SILHOUETTE,
   SCENE_BLIT,
   SCENE_BLIT_LUT,

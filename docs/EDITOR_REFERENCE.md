@@ -61,7 +61,7 @@ rediscovered in git history and believed a second time.
 
 | Registry | Count | Source of truth |
 |---|---|---|
-| Effects | 183 | `src/core/effects/effects.ts` → `EffectType` |
+| Effects | 204 | `src/core/effects/effects.ts` → `EffectType` |
 | Blend modes | 38 | `src/core/effects/blendMode.ts` → `LayerBlendMode` |
 | Layer styles | 10 | `layerStyles.ts` → `LAYER_STYLE_LABEL` + `BACKDROP_STYLES` |
 | Path operators | 9 | `src/core/scene/pathOps.ts` → `PathOpType` (less `none`) |
@@ -812,8 +812,8 @@ mapped light per run, and a point light uses the spot frustum along its aim.
 draws into a multisampled target, and neither backend can sample a
 multisampled depth — the route is a linear-depth prepass bound before the run
 draws (ambient-only AO cannot be a post-pass once ambient and direct are
-summed). **Height displacement is not started.** A shadow catcher already
-exists as Accepts Shadows ▸ Only.
+summed). Height displacement shipped 2026-09-09 (see the Particles v2
+section). A shadow catcher already exists as Accepts Shadows ▸ Only.
 
 **Linear working space — storage slice shipped (2026-08-14).** Float *precision*
 (`rgba16float` intermediates) already existed; grade / blend / blur maths run
@@ -837,8 +837,8 @@ output.
 
 ### Tier 2 — ceilings on visual density
 
-**Effect breadth: 183 effects vs AE's 400+.** The raw count misleads in both
-directions — nobody uses 400, and the 183 effects present are properly
+**Effect breadth: 204 effects vs AE's 400+.** The raw count misleads in both
+directions — nobody uses 400, and the 204 effects present are properly
 parameterised (Levels, Curves, Channel Mixer, Keylight with
 despill/choke/softness). What matters is the missing *classes*, not the delta:
 no 3D Stroke, no Form/Plexus, no Element 3D. The dense, expensive-looking AE
@@ -851,7 +851,7 @@ written against this document inherited. And the missing *classes* named "no
 volumetric light rays (Shine)" and "no optical-flare system worth the name":
 `light-rays`, `lens-flare`, `light-sweep` and `beam` all ship, each with a
 registry def, a Canvas2D reference, a Generate entry, and (as of 2026-08-14) a
-GPU shader. The count is now phrased as "183 effects" rather than as a bare
+GPU shader. The count is now phrased as "204 effects" rather than as a bare
 figure specifically so that `docPropagatedCounts.test.ts` can check it.
 
 **Variable-width mask feather LANDED** (2026-08-20). `MaskPoint` gained an
@@ -2057,7 +2057,7 @@ needing a 39-entry allow-list is one that gets silenced the first time it fires.
 The cost of the narrowness is that an oblique phrasing still escapes, and §4's
 did — "Effect breadth: 73 vs AE's 400+" puts no noun after the number. That was
 rewritten into the checkable form rather than the regex being widened to chase
-it. Prose stating a count should say "183 effects".
+it. Prose stating a count should say "204 effects".
 
 Ledger table ROWS in this section are exempt, structurally rather than by a list
 of phrases: quoting a superseded number is what a corrections ledger is for, and
@@ -2582,7 +2582,7 @@ already spent thirty lines explaining it no longer had.
 | "No local project browser in the OSS edition"; `LocalIndex` has no implementation and `better-sqlite3` "is absent from `package.json`" | **Shipped 2026-08-20.** The driver is in `optionalDependencies`, `src/core/localIndex/indexWriter.ts` is the writer that never existed, and the start screen is a card grid over it. What is genuinely owed is a real-device `electron-rebuild` pass — a narrower claim than the one that stood here |
 | "There is still no DOF pass in `packages/renderer`" | Retired 2026-09-01 in the row above, and still restated here. Two shaders ship. The honest gap is now the **cross-layer depth gather**, not the pass |
 | The 3D lighting entry's absence greps: "no normal maps… `envMap` / `roughness` / `metalness` / `hdri` / `pbr`: zero", and "`environmentLight` and `imageBased` are zero hits, so there is no image-based lighting" | **Superseded on imported geometry.** glTF normal / metallic-roughness / occlusion / emissive maps ship on a `mesh3d-pbr` material; IBL ships in both halves — SH irradiance and a prefiltered specular atlas with split-sum reflections. The claim survives only for ordinary 2D and extruded layers, whose normal is still a constant per renderable, and it is now stated that way |
-| Imported models: "still out of scope: HDRI **file** import, a reflection/specular map, PBR texture maps beyond base colour, and external-file `.gltf`" | **All four closed 2026-09-02**, along with real curved primitives. Shadow maps then shipped the same day (opt-in per light, PCF, byte-identical when off); SSAO is blocked by the multisampled scene targets (no sampleable depth on either backend) and height displacement is not started |
+| Imported models: "still out of scope: HDRI **file** import, a reflection/specular map, PBR texture maps beyond base colour, and external-file `.gltf`" | **All four closed 2026-09-02**, along with real curved primitives. Shadow maps then shipped the same day (opt-in per light, PCF, byte-identical when off); SSAO followed (linear-depth prepass) and height displacement shipped 2026-09-09 |
 | §3 Compositing: "36 layer blend modes" | **38**, and the same document's own Tier-2 entry already said "all 38 of AE's 38". The phrase escaped `docPropagatedCounts.test.ts` because the word between the digit and the noun ("36 **layer** blend modes") breaks its adjacency rule — the guard is narrow on purpose, and this is the cost. Rewritten into the checkable form |
 | §3 Import/export: "Nine export formats", against §1's **18** | The list was of RENDERED formats only; `exportFormats` unions `VideoFormat` with `ExportFormat` and includes the HDR delivery variants, EXR, WAV and the interchange writers. Rewritten to state 18 and enumerate what the other nine are, so the two halves of this document stop disagreeing |
 | `README.md`: the assistant has "62 tools" | **65**, and it is the SAME retired claim the §5 table at the top of this section already carries as `"62 AI tools" → 65`. It survived in the most-read file in the repo for the same reason "36 layer blend modes" did — it is not written as `N AI tools`, so nothing checked it. Corrected, and rewritten into the guarded form. `AE_COMPARISON.md` held a third number (61, with a `craft 17` breakdown that is now 21) |
@@ -2596,3 +2596,153 @@ features and are not this.
 **Particle density is still the ceiling it was.** Bake-to-layers shipped, which
 makes a simulation art-directable, but turbulence, particle–particle collisions,
 sub-emitters, trails, 3D particles and layer-as-particle remain absent.
+
+### Built 2026-09-09 — Particles v2
+
+The particle system (`src/core/particles/`) grew the Particular-class
+controls while staying a pure function of (config, time) — scrubbing and
+export are byte-identical, and every pre-v2 config renders exactly as it did.
+**Sphere** emitter (a uniform ball, born with depth) joins point/box/disc;
+a 3D particle layer under a scene camera takes the camera's focal length as
+its perspective automatically, so depth parallax follows the comp lens (the
+field is still one card in 3D — particles do not sort against other 3D
+layers or take the camera's DOF per particle). **Sprite** shape draws any
+image asset, with horizontal sprite sheets indexed by age or at a fixed rate.
+**Drag** is the exact solution of `v′ = a − k·v` (`flightAt`), shared by the
+main flight, the trails and both kinds of children. **Mid-point ramps** for
+size, opacity and colour at Mid Age. **Continuous** sub-emission sheds
+children along a living parent's path at Sub Rate (death and bounce bursts
+existed). **Motion Blur** stamps each sprite along its own closed-form
+velocity over the comp shutter, only when the layer's motion-blur switch is
+on. Golden `particles-v2` (GPU oracle); tests in `particleV2.test.ts`.
+
+**Height displacement** (Material Options ▸ Displacement,
+`core/scene/heightDisplacement.ts`): AE 26.2's displacement for 3D
+materials. Any image asset's luma pushes a mesh along its normals by the
+keyframeable Displacement amount (50 % grey = flat), after 0–3 rounds of
+midpoint subdivision, with normals recomputed so the lighting follows the
+relief. It is a CPU pass on the interleaved mesh at snapshot time — the seam
+skinning and morphs already use — so extrusions, parametric primitives and
+imported glTF meshes all take it, and no shader changed. Vertices that
+share a position AND a normal (a UV sphere's seam column and pole fans) take
+one height (their mean) and pool their recomputed normals, so a closed mesh
+stays closed; a hard edge (same place, different normals — an extrusion's
+rim) is left crisp. Golden `primitive-displaced-sphere`.
+
+**Second shadow-mapped light.** A 3D run's second light with Shadow Map on
+now gets its own map (bindings 13/14 on every lit-3d material, its own
+NEAREST sampler on both backends) and its own block at the end of the shade
+tail; the receiving shader's shadow body is one parameterised `shadowTerm`
+called per map, and each term darkens only its own lamp, so two geometric
+shadows compose as light does. A third mapped light still takes the projected
+copy. Golden `shadow-map-two-lights`; contracts in `shadowMaps.test.ts`.
+
+**Cryptomatte** (`core/media/cryptomatte.ts`): an imported EXR's ID mattes.
+The header's manifest and the `<layer>00.R/G/B/A…` rank channels are read at
+import beside the float planes; Track Matte ▸ Matte Source then lists
+"ID matte: <object>" for that layer, and picking one bakes the object's
+coverage (summed over ranks on the ids' bit patterns, so shared edges split)
+to a grey matte layer above the EXR, wired as its luma matte. A file with a
+stripped manifest lists its ids by hex.
+
+**Plexus** (`plexus`, Generate; `EffectType` 203 → **204 effects**): the
+point/line network. A deterministic point cloud drifting on value noise with
+Evolution — or a mask path's vertices, so a tracked mask carries the network
+— with every pair inside Max Distance linked by a distance-faded line,
+optional triangles, and points on top; Canvas2D-only like Lightning, so both
+engines bake the same pass (golden `effect-plexus`). The same network is a
+Particle-section option (Plexus Distance) over a system's live particles,
+drawn under the sprites at their projected positions.
+
+### Built 2026-09-08 — Deep Glow (`deep-glow`) and Energy Beam (`beam-path`)
+
+Two effects, `EffectType` 201 → 203 (Plexus on 09-09 makes it **204 effects**): the physically based glow and the Saber-class beam from
+`docs/ENGINE_STRENGTH_PLAN.md` A1 and A2.
+
+**Energy Beam** (`beam-path`, Generate) draws a lit core stroke with an
+inverse-power glow along a mask path (a tracked mask makes it follow the
+object), the layer's own text outline, or a Start→End line. Start/End reveal
+it by arc length (exact per segment, not faded), Start/End Size taper it,
+Distortion bends it with the Curl Noise field, Flicker breathes it; Evolution
+and Flicker Phase are keyframed phases (an expression such as `time * 10`
+animates them), never the wall clock. The spine is resampled to ≤64 points and
+rides in the uniform block, so this is the ONE path effect that stays on the
+GPU (`effectFollowsPath` exempts it); `src/core/effects/beamPath.ts` is the CPU
+twin and `fxBeamPath.ts` the shader, gated by `effect-beam-path` (line, window,
+taper, distortion) and `effect-beam-path-mask` (ellipse mask). Twenty presets
+(Lightsaber, Neon, Electric Arc, Plasma, Fire Trail, Tracer, Halo Ring…) sit
+beside the forty existing ones. `lightning` gained the same `pathMaskId`: the
+bolt forks around the mask path instead of the Start→End segment.
+
+**Deep Glow.** An octave pyramid — Gaussians whose sigmas
+double up to Radius, each level blurred from the previous one, summed with
+equal weights — gives the inverse-square falloff a single Gaussian cannot
+(the built-in `glow` is unchanged). Linear light, premultiplied. GPU: three
+passes in `packages/renderer/src/shaders/fxDeepGlow.ts` run from
+`CompositionPass` (blur → additive accumulate in `BLUR_TARGET3` → composite);
+CPU: `src/core/effects/deepGlow.ts`, the same ladder and taps from
+`deepGlowKernel.ts`, gated by the `effect-deep-glow` golden. Controls: Radius,
+Exposure (EV), Threshold, Aspect Ratio, Chromatic Aberration, Tint, Tint
+Amount, Glow Only, Dither (±1 code where the tail crosses the 8-bit floor),
+Quality (4/6/8 octaves).
+
+### Built 2026-09-07 — effects round seven, and a miscount inside the counter
+
+Eighteen effects, taking `EffectType` from 183 to 201 (Deep Glow and Energy Beam, 2026-09-08, make it **203**; Plexus, 2026-09-09, **204 effects**). Fifteen ship
+as a GPU shader in both dialects plus a retained Canvas2D kernel, which is the
+shape every port since round six has held; three ship as per-channel transfer
+tables and no shader at all.
+
+| Family | Effects |
+|---|---|
+| Simulation | CC Particle Systems II, CC Bubbles |
+| Generate / Perspective | Fractal, 3D Glasses |
+| Stylize | CC Block Load, CC Kernel, CC Threshold RGB |
+| Keying | Color Difference Key, CC Simple Wire Removal |
+| Colour | Broadcast Colors, Noise HLS, CC Color Offset, Cineon Converter |
+| Distort / Transition | CC Tiler, CC Ripple Pulse, CC Radial ScaleWipe, CC Glass Wipe, CC Image Wipe |
+
+**Three went to `LUT_BUILDERS`, not to a shader.** Color Offset, Threshold RGB
+and Cineon Converter each map an input value to an output value one channel at
+a time, with no reference to the other two channels and none to the
+neighbours — which is exactly the shape rule at the top of `colorLut.ts`. The
+placement is worth more than it looks: a table renders on both backends and
+forces no CPU bake, and for a Cineon linearise, which is switched on for a
+whole log-footage comp and left on, that is the difference between usable and
+not. `colourRoundTwo.test.ts` covers each with a fixture that must move the
+table off identity.
+
+**Particle Systems is the third member of `TIME_DEPENDENT`, and the only one
+this round earned.** The set is a deliberate speed bump — membership opts a
+layer out of raster caching — and the rule is to reach for a keyframed
+parameter first. Bubbles did exactly that and rides an `evolution` slider like
+Snowfall, because a wrapping field needs no absolute origin. An emitter does:
+its alive set is indexed by absolute time, so a keyframed phase would leave it
+static by default, which is the one case that clears the bump.
+
+**Both simulations are closed form, and that is a decision rather than a
+shortcut.** No frame refers to any other: a particle's whole trajectory is a
+function of its index, the seed and its age. A stateful integrator would scrub
+differently from how it plays and could not start an export at frame 400, which
+is the failure the seek architecture in §5 exists to prevent. The cost is that
+particles cannot collide or read a force field. The alive window is computed in
+`snapshotToFrameScene` and handed to the shader in a param slot, so the
+per-fragment loop is bounded by a compile-time 512 with a runtime break —
+an unbounded per-fragment loop is not a slow frame but a hung device.
+
+**A semicolon in a comment had been silently truncating the effect count.**
+`featureCounts.cjs` finds a union's terminating `;` with a non-greedy match and
+stripped comments only afterwards, so a semicolon inside a `//` line between two
+members ended the match there and every member below it vanished. Eighteen
+effects were added and the script kept reporting 183 — no error, no warning,
+and `docFeatureCounts.test.ts` would then have held every doc in the repo to
+the stale figure. The strip now happens before the union is located, which also
+subsumes the apostrophe bug the same function already carried a note about, and
+`docFeatureCounts.test.ts` pins the semicolon case directly.
+
+**Not done, and owed:** no render-test goldens for the fifteen shaders. The
+CPU kernels are covered by 38 assertions in `aeRoundSeven.test.ts` and the
+GPU/CPU wiring by `portedEffectContract.test.ts`, but nothing yet compares the
+two backends' PIXELS for this round — which is the check that would catch a
+shader that is wired correctly and computes the wrong thing. That needs a pass
+of the GPU harness in `packages/render-tests` to bless references.

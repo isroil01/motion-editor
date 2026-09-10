@@ -45,6 +45,7 @@ export {
 export { ShaderRegistry } from './shaders/ShaderRegistry';
 export { ShaderCache } from './shaders/ShaderCache';
 export { BUILTIN_SHADERS, type ShaderSource } from './shaders/builtin';
+export { DEEP_GLOW_TAPS, deepGlowOctaves, deepGlowStep, deepGlowInv } from './shaders/deepGlowKernel';
 export {
   LINEAR_WORKING_SPACE,
   LINEAR_INTERMEDIATE_STORAGE,

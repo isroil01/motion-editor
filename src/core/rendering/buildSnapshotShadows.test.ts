@@ -106,6 +106,23 @@ describe('projected cast shadows', () => {
     expect(shadowOf(scene(0), { draft3d: true })).toBeUndefined();
   });
 
+  it('a 3D SOLID casts a projected shadow like any other 3D plane', () => {
+    // It already cast into the shadow map; the projected path excluded it, so
+    // the same card shadowed or not depending on which mode the light was in.
+    // Built whole: re-adding a node copied out of `getNode` drops components,
+    // which is how this test first passed a caster that was not a solid.
+    const g = new SceneGraph();
+    g.addNode(node('light', 'light', { x: 400, y: 100, z: -600, intensity: 100, radius: 2000, castShadows: true }));
+    g.addNode(node('wall', 'shape', { x: 400, y: 300, z: 500, width: 900, height: 900, rotationX: 0, rotationY: 0 }));
+    const solid = node('caster', 'shape', { x: 400, y: 300, z: 0, rotationX: 0, rotationY: 0 });
+    g.addNode({
+      ...solid,
+      components: [...solid.components, { id: 'caster_fx', type: 'fx', props: { solid: true } }],
+    } as SceneNode);
+    expect(g.getNode('caster')!.components.some((c) => c.type === 'fx')).toBe(true);
+    expect(shadowOf(g)).toBeDefined();
+  });
+
   /**
    * The shadow is REAL GEOMETRY on the receiver's plane.
    *

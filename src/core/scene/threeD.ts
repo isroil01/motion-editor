@@ -248,6 +248,19 @@ export function set3DEnabled(nodeId: string, on: boolean): void {
     }
   }
 
+  // A layer switched to 3D from HERE answers lights. `acceptsLights` defaults
+  // false so every saved scene keeps rendering byte-identically (material.ts),
+  // but that default made the out-of-box lighting story a no-op: add a light,
+  // turn on Cast Shadows and a shadow map, and the map is computed, sampled,
+  // and multiplied into nothing — shadow reception rides the shade block, and
+  // no surface had one. Writing the prop explicitly at enable time is the same
+  // pattern as insertLight's castShadows: only layers flipped from here are
+  // affected, scenes saved with bare 3D props keep their look, and a STORED
+  // value — true or false — is the user's choice and is never overwritten.
+  if (on && t.props.acceptsLights === undefined) {
+    defaultSceneGraph.writeProp(nodeId, t.id, 'acceptsLights', true);
+  }
+
   // The plain-view components are rebuilt on read, so props must be persisted
   // through the graph's writeProp, not mutated in place.
   for (const p of THREE_D_PROPS) {

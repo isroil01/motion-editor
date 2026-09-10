@@ -15,7 +15,29 @@ import { getNodeAdjustment, setNodeAdjustment } from '@core/effects/adjustment';
 import { getNodeMotionBlur, setNodeMotionBlur } from '@core/effects/motionBlur';
 import { enableLayerMotionBlurWithFeedback, disableLayerMotionBlur, setAdjustmentWithFeedback } from '@core/effects/layerSwitchFeedback';
 import { getNodeLayerTime, updateNodeLayerTime, FRAME_BLENDS } from '@core/scene/layerTime';
+import { createIdMatteLayer, cryptomatteForNode } from '@core/media/cryptomatteCommands';
 import styles from './CompositingSection.module.css';
+
+/** "ID matte: <object>" entries for a layer whose EXR carries a Cryptomatte set; empty otherwise. */
+function idMatteItems(nodeId: string): DropdownItem[] {
+  const found = cryptomatteForNode(nodeId);
+  if (!found) return [];
+  const items: DropdownItem[] = [{ type: 'separator' }];
+  let shown = 0;
+  for (const layer of found.set.layers) {
+    for (const obj of layer.objects) {
+      if (shown >= 40) break;
+      shown += 1;
+      items.push({
+        type: 'item',
+        id: `crypto:${layer.name}:${obj.name}`,
+        label: `ID matte: ${obj.name}${found.set.layers.length > 1 ? ` (${layer.name})` : ''}`,
+        onSelect: () => { void createIdMatteLayer(nodeId, layer.name, [obj.name]); },
+      });
+    }
+  }
+  return items.length > 1 ? items : [];
+}
 
 export function CompositingSection({ nodeId }: { nodeId: string }): JSX.Element {
   useSceneRevision((s) => s.rev);
@@ -88,6 +110,10 @@ export function CompositingSection({ nodeId }: { nodeId: string }): JSX.Element 
       icon: (s.id === currentSourceId ? 'check' : undefined) as 'check' | undefined,
       onSelect: () => setNodeMatte(nodeId, setMatteSource(matte, s.id)),
     })),
+    // Cryptomatte (plan C2): an EXR that carries ID mattes offers each object
+    // here. Picking one bakes its coverage to a grey PNG layer above this one
+    // and sets it as the luma matte — a matte layer like any other after that.
+    ...idMatteItems(nodeId),
   ];
 
   // 3. Switches

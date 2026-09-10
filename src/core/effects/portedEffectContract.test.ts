@@ -175,6 +175,27 @@ const PORTED: ReadonlyArray<{ type: string; params: Record<string, unknown> }> =
   { type: 'cross-blur', params: { radiusX: 15, radiusY: 15, repeatEdges: true } },
   { type: 'scale-wipe', params: { completion: 50, stretch: 10, direction: 0, centerX: 0, centerY: 0 } },
   { type: 'plastic', params: { surfaceBump: 25, softness: 5, lightAngle: 45, lightIntensity: 100, specular: 50 } },
+  /*
+    Effects round seven. Every params object below is deliberately NON-neutral.
+    Each of these fifteen skips its GPU push at the neutral setting — the same
+    condition its Canvas2D handler returns early on — so a fixture left at the
+    defaults would satisfy property 3 vacuously and prove nothing at all.
+  */
+  { type: 'cc-tiler', params: { scale: 50, centerX: 0, centerY: 0, blendWithOriginal: 0 } },
+  { type: 'ripple-pulse', params: { centerX: 0, centerY: 0, pulseRadius: 60, amplitude: 30, width: 40, renderBump: true } },
+  { type: 'radial-scale-wipe', params: { completion: 40, centerX: 0, centerY: 0, reverse: false } },
+  { type: 'glass-wipe', params: { completion: 50, displacement: 40, softness: 30 } },
+  { type: 'image-wipe', params: { completion: 50, borderSoftness: 20, gradientChannel: 0, invertGradient: false } },
+  { type: 'color-difference-key', params: { keyColor: '#00ff00', matteInBlack: 10, matteInWhite: 240, matteGamma: 1, viewMode: 0 } },
+  { type: 'wire-removal', params: { pointAX: -100, pointAY: 0, pointBX: 100, pointBY: 0, thickness: 4, slope: 50 } },
+  { type: 'broadcast-colors', params: { standard: 0, howToMakeColorSafe: 0, maxSignalAmplitude: 110 } },
+  { type: 'noise-hls', params: { noiseType: 0, hue: 20, lightness: 10, saturation: 5, grainSize: 2, noisePhase: 3 } },
+  { type: 'block-load', params: { completion: 40, scans: 4, blockSize: 64 } },
+  { type: 'kernel', params: { k00: 0, k01: -1, k02: 0, k10: -1, k11: 5, k12: -1, k20: 0, k21: -1, k22: 0, divisor: 1, offset: 0 } },
+  { type: '3d-glasses', params: { convergenceOffset: 8, view: 0, balance: 50, swapLeftRight: false } },
+  { type: 'fractal', params: { setType: 0, centerX: -0.5, centerY: 0, magnification: 1, iterations: 64, juliaX: -0.7, juliaY: 0.27, colorPhase: 0, colorCycles: 2, insideColor: '#000000' } },
+  { type: 'particle-systems', params: { birthRate: 20, longevity: 1.5, producerX: 0, producerY: 0, producerRadiusX: 0, producerRadiusY: 0, animation: 0, direction: 0, spread: 60, velocity: 300, velocityVariation: 30, gravity: 200, resistance: 0, birthSize: 8, deathSize: 2, sizeVariation: 25, birthColor: '#ffe27a', deathColor: '#ff3b00', opacity: 100, blend: 0, seed: 1, time: 1 } },
+  { type: 'cc-bubbles', params: { bubbleAmount: 100, bubbleSpeed: 300, wobbleAmplitude: 10, wobbleFrequency: 2, bubbleSize: 12, sizeVariation: 40, shading: 0, color: '#ffffff', opacity: 80, evolution: 100, seed: 1 } },
   { type: 'glass', params: { bumpSoftness: 4, height: 30, displacement: 12, lightAngle: 135, lightIntensity: 60, shininess: 40 } },
   { type: 'texturize', params: { pattern: 1, contrast: 80, scale: 100, lightAngle: 135 } },
   { type: 'threads', params: { thickness: 10, spacing: 2, depth: 45 } },
@@ -209,6 +230,8 @@ const PORTED: ReadonlyArray<{ type: string; params: Record<string, unknown> }> =
   { type: 'cell-pattern', params: { size: 30, evolution: 0, contrast: 100, membrane: false, invert: false } },
   { type: 'radio-waves', params: { centerX: 0, centerY: 0, waveCount: 5, maxRadius: 0, phase: 0, thickness: 2, color: '#7dd3fc', opacity: 100, fadeOut: 50, composite: 0 } },
   { type: 'light-burst', params: { centerX: 0, centerY: 0, intensity: 100, rayLength: 50 } },
+  { type: 'deep-glow', params: { radius: 60, exposure: 0, threshold: 0, aspect: 0, chromatic: 0, tint: '#ffffff', tintAmount: 0, glowOnly: false, dither: false, quality: 1 } },
+  { type: 'beam-path', params: { source: 1, startX: -80, startY: 0, endX: 80, endY: 0, coreWidth: 6, glowSpread: 30, glowIntensity: 100 } },
   { type: 'write-on', params: { startX: -40, startY: 0, endX: 40, endY: 0, completion: 60, brushSize: 8, brushColor: '#ffffff', wobble: 20, taper: 30 } },
   { type: 'star-burst', params: { phase: 0, amount: 50, size: 3, starColor: '#ffffff', blend: 50, seed: 1 } },
   { type: 'snowfall', params: { amount: 50, size: 3, evolution: 0, wind: 0, opacity: 100, flakeColor: '#ffffff', seed: 1 } },

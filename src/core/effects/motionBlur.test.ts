@@ -1,4 +1,4 @@
-import { motionBlurSampleTimes, adaptiveMotionBlurSamples, readNodeMotionBlur } from './motionBlur';
+import { motionBlurSampleTimes, adaptiveMotionBlurSamples, readNodeMotionBlur, motionBlurTravelPx, affineTravelPx } from './motionBlur';
 import type { SceneNode } from '@core/types';
 
 function nodeWithFx(props?: Record<string, unknown>): SceneNode {
@@ -88,5 +88,36 @@ describe('readNodeMotionBlur', () => {
     expect(readNodeMotionBlur(nodeWithFx())).toBe(false);
     expect(readNodeMotionBlur(nodeWithFx({ motionBlur: true }))).toBe(true);
     expect(readNodeMotionBlur(nodeWithFx({ motionBlur: 'yes' as unknown as boolean }))).toBe(false);
+  });
+});
+
+describe('motionBlurTravelPx / affineTravelPx (B3: silhouette travel, not anchor travel)', () => {
+  it('a spin about the anchor travels by Δθ · half-diagonal, not zero', () => {
+    const a = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
+    const b = { ...a, rotation: 90 };
+    expect(motionBlurTravelPx(a, b, 100)).toBeCloseTo((Math.PI / 2) * 100, 6);
+    // With no box there is nothing but the anchor to measure.
+    expect(motionBlurTravelPx(a, b, 0)).toBe(0);
+  });
+
+  it('adds anchor travel, rotation and the larger scale change', () => {
+    const a = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
+    const b = { x: 3, y: 4, rotation: 0, scaleX: 1.5, scaleY: 1.2 };
+    expect(motionBlurTravelPx(a, b, 10)).toBeCloseTo(5 + 0.5 * 10, 6);
+  });
+
+  it('a 3D flip about the centre moves its corners but not its centre', () => {
+    const flat: [number, number, number, number, number, number] = [1, 0, 0, 1, 100, 100];
+    const flipped: [number, number, number, number, number, number] = [0.2, 0, 0, 1, 100, 100];
+    expect(affineTravelPx(flat, flipped, 200, 100)).toBeCloseTo(80, 6);
+    expect(affineTravelPx(flat, flat, 200, 100)).toBe(0);
+  });
+
+  it('feeds the adaptive count: a fast spin no longer sits at the floor', () => {
+    const a = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
+    const b = { ...a, rotation: 45 };
+    const travel = motionBlurTravelPx(a, b, 300);
+    expect(adaptiveMotionBlurSamples(4, travel, 32)).toBe(32);
+    expect(adaptiveMotionBlurSamples(4, 0, 32)).toBe(4);
   });
 });
