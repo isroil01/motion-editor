@@ -49,7 +49,6 @@ import { splitKind } from '@core/plugins/layerKindSchema';
 
 import { AppearanceSection } from './AppearanceSection';
 import { AudioControls } from './AudioControls';
-import { EffectsSection } from './EffectsSection';
 import { PinnedSection } from './PinnedSection';
 import { hasPinnedSection } from '@core/inspector/pinnedProps';
 import { AudioDriverSection, hasAudioDriverSection } from './AudioDriverSection';
@@ -424,20 +423,6 @@ export const INSPECTOR_SECTIONS: readonly InspectorSectionDef[] = [
       + 'parent link pick whip layer time remap stretch speed reverse freeze frame blend',
     appliesTo: (id) => !isAbstract(id) || kindOf(id) === 'camera' || kindOf(id) === 'light',
     Component: CompositingSection,
-  },
-
-  // ── 4. The effect stack ────────────────────────────────────────
-  // Every layer that renders can carry effects; cameras and lights cannot, and
-  // audio has its own effect list inside Audio Settings.
-  {
-    id: 'effects',
-    title: 'Effects',
-    icon: 'sparkles',
-    category: 'effects',
-    defaultOpen: true,
-    keywords: 'effect fx stack blur glow filter plugin preset',
-    appliesTo: (id) => !isAbstract(id),
-    Component: EffectsSection,
   },
 
   // ── 5. Layer Styles ────────────────────────────────────────────

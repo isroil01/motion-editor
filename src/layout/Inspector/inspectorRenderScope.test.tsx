@@ -36,7 +36,6 @@ import { applyAbsolute } from '@core/inspector/multiSelection';
 import { MultiPropertyRow } from './MultiPropertyRow';
 import { TransformSection } from './TransformSection';
 import { AppearanceSection } from './AppearanceSection';
-import { EffectsSection } from './EffectsSection';
 import { SelectionHeader } from './SelectionHeader';
 import type { SceneNode } from '@core/types';
 
@@ -194,7 +193,6 @@ describe('the rows and sections are memoized', () => {
     ['MultiPropertyRow', MultiPropertyRow],
     ['TransformSection', TransformSection],
     ['AppearanceSection', AppearanceSection],
-    ['EffectsSection', EffectsSection],
     ['SelectionHeader', SelectionHeader],
   ])('%s', (_name, component) => {
     expect((component as unknown as { $$typeof?: symbol }).$$typeof).toBe(MEMO);
