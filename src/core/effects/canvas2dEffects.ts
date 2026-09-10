@@ -443,6 +443,18 @@ export function __setBevelMaxWorkForTests(px: number): () => void {
   return () => { BEVEL_MAX_WORK = prev; };
 }
 
+let LAST_BEVEL_WORK = { w: 0, h: 0 };
+
+/**
+ * The working-buffer size the last bevel shaded at. TESTS ONLY — the cap's
+ * claim is about that buffer, and a wall clock on a shared runner cannot
+ * resolve it: the source read-down and the band blit-back run at full size
+ * either way, so at test sizes the two paths can time within a millisecond.
+ */
+export function __lastBevelWorkForTests(): { w: number; h: number } {
+  return { ...LAST_BEVEL_WORK };
+}
+
 export function applyCanvas2dEffect(
   oc: CanvasRenderingContext2D,
   w: number,
@@ -2028,6 +2040,7 @@ function applyBevel(oc: CanvasRenderingContext2D, w: number, h: number, e: Effec
   const wh = Math.max(1, Math.round(h * scaleCap));
   // The achieved scale, not the requested one — rounding to whole pixels moves it.
   const s = ww / w;
+  LAST_BEVEL_WORK = { w: ww, h: wh };
 
   const silhouette = scratch('bevel-silhouette', ww, wh);
   const ramp = scratch('bevel-ramp', ww, wh);
