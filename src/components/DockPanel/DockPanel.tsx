@@ -33,7 +33,7 @@
  * Reordering is still drag-and-drop along the rail.
  */
 
-import { useMemo, type ReactNode, type DragEvent } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode, type DragEvent } from 'react';
 import { useLayoutStore } from '@stores/layoutStore';
 import type { RegionId } from '@stores/layoutStore';
 import type { IconName } from '@components/Icon';
@@ -44,6 +44,17 @@ import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { cn } from '@utils/cn';
 import { panelDef, availablePanelDefs } from '@layout/EditorLayout/panelDefs';
 import styles from './DockPanel.module.css';
+
+export interface DockPanelHeaderContextValue {
+  target: HTMLDivElement | null;
+  setCustomMenuItems?: (items: DropdownItem[]) => void;
+}
+
+export const DockPanelHeaderContext = createContext<DockPanelHeaderContextValue | null>(null);
+
+export function useDockPanelHeader(): DockPanelHeaderContextValue | null {
+  return useContext(DockPanelHeaderContext);
+}
 
 export interface DockPanelProps {
   region: RegionId;
@@ -124,6 +135,21 @@ export function DockPanel({
   const effectiveActiveId = allItems.some((i) => i.id === activeTabId) ? activeTabId : allItems[0]?.id;
   const activeItem = allItems.find((i) => i.id === effectiveActiveId);
 
+  const [headerActionsEl, setHeaderActionsEl] = useState<HTMLDivElement | null>(null);
+  const [customMenuItems, setCustomMenuItems] = useState<DropdownItem[]>([]);
+
+  useEffect(() => {
+    setCustomMenuItems([]);
+  }, [effectiveActiveId]);
+
+  const headerContextValue = useMemo(
+    () => ({
+      target: headerActionsEl,
+      setCustomMenuItems,
+    }),
+    [headerActionsEl],
+  );
+
   const otherSide: RegionId = isLeft ? 'rightInspector' : 'leftSidebar';
   const otherSideLabel = isLeft ? 'Move to Right Inspector' : 'Move to Left Sidebar';
   const paneDest: RegionId = isTop
@@ -152,6 +178,9 @@ export function DockPanel({
     const items: DropdownItem[] = [];
     if (activeItem) {
       items.push({ type: 'label', label: activeItem.label });
+      if (customMenuItems.length > 0) {
+        items.push(...customMenuItems, { type: 'separator' });
+      }
       for (const v of panelVerbs(activeItem)) {
         items.push({ type: 'item', id: v.id, label: v.label, icon: v.icon, onSelect: v.onSelect });
       }
@@ -192,7 +221,7 @@ export function DockPanel({
     return items;
     // `panelVerbs` is a closure over the same inputs listed here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allItems, activeItem, onToggleSplit, isSplit, isTop, isLeft, side, regionKey, paneDest, paneLabel, otherSide, otherSideLabel]);
+  }, [allItems, activeItem, onToggleSplit, isSplit, isTop, isLeft, side, regionKey, paneDest, paneLabel, otherSide, otherSideLabel, customMenuItems]);
 
   // All hooks must run before this guard — bail out only once they have.
   if (allItems.length === 0) return null;
@@ -358,6 +387,7 @@ export function DockPanel({
           <div className={styles.header}>
             <span className={styles.title} title={activeItem?.label}>{activeItem?.label ?? ''}</span>
             <div className={styles.headerActions}>
+              <div ref={setHeaderActionsEl} className={styles.customActions} />
               {headerExtras}
               <Dropdown
                 placement={side === 'right' ? 'bottom-end' : 'bottom-start'}
@@ -383,7 +413,9 @@ export function DockPanel({
               )}
             </div>
           </div>
-          <div className={styles.content}>{activeRenderer ? activeRenderer() : null}</div>
+          <DockPanelHeaderContext.Provider value={headerContextValue}>
+            <div className={styles.content}>{activeRenderer ? activeRenderer() : null}</div>
+          </DockPanelHeaderContext.Provider>
         </div>
       )}
       {rail}

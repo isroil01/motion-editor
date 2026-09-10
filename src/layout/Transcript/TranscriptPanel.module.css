@@ -41,6 +41,15 @@
   flex: none;
 }
 
+.toolbarRowWrap {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-1);
+  --strip-bg: var(--color-surface-1);
+}
+
 .toolbarRow {
   display: flex;
   align-items: center;
@@ -48,9 +57,16 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--color-surface-1);
-  border-bottom: 1px solid var(--color-border-subtle);
-  flex: none;
+  flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.toolbarRow::-webkit-scrollbar {
+  display: none;
 }
 
 .toolbarGroup {

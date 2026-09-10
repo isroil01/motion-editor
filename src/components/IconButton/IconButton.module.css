@@ -35,7 +35,7 @@
 
 .root:active:not(:disabled) {
   background: var(--ib-bg-active);
-  transform: scale(0.95);
+  transform: translateY(0.5px);
 }
 
 .root:disabled {
@@ -49,17 +49,19 @@
   box-shadow: var(--shadow-focus-ring);
 }
 
-/* Toggled/active state — icon color changes to primary, no heavy fill/border. */
+/* Toggled/active state — recessed tool latch */
 .root[data-active] {
-  background: transparent;
+  background: var(--color-surface-0);
   color: var(--color-primary);
-  border-color: transparent;
+  border-color: rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-well);
 }
 
 .root[data-active]:hover:not(:disabled) {
-  background: var(--ib-bg-hover);
-  color: var(--color-primary);
-  border-color: transparent;
+  background: var(--color-surface-0);
+  color: var(--color-primary-hover);
+  border-color: rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-well);
 }
 
 .root[data-variant="primary"] {

@@ -1,8 +1,29 @@
 .root {
   position: relative;
   width: 100%;
+  height: 100%;
   overflow: auto;
   contain: strict;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+.root::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.root::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: var(--radius-sm);
+}
+
+.root::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+.root::-webkit-scrollbar-track {
+  background: var(--color-scrollbar-track);
 }
 
 .header,

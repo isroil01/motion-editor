@@ -73,7 +73,6 @@ import { openCompositionSettings } from '@layout/Composition/CompositionSettings
 import { openCustomizeDialog } from '@layout/Settings/CustomizeDialog';
 import { buildWorkspaceItems } from '@layout/Workspace/workspaceMenuItems';
 import { ProjectStatus } from '@layout/ProjectStatus/ProjectStatus';
-import { AccountButton } from '@layout/Auth/AccountButton';
 
 /**
  * A toolbar tool. NO `shortcut` field, deliberately.
@@ -866,7 +865,6 @@ export function TopNav(): JSX.Element {
                     <Icon name="export" size="md" weight="bold" />
                     <span>Export</span>
                   </button>
-                  <AccountButton />
                 </div>
               </>
             )}

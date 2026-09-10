@@ -90,21 +90,23 @@
   color: var(--color-text-primary);
   margin-bottom: -1px;
   z-index: 1;
-  border-top: 2px solid var(--color-primary);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: var(--shadow-bevel);
 }
 
 /* ── Pill Variant ────────────────────────────────────────────── */
 .pill .tab {
-  border-radius: 0;
+  border-radius: var(--radius-control);
   color: var(--color-text-secondary);
 }
 
 .pill .tab::after { display: none; }
 
 .pill .selected {
-  background: var(--color-surface-3);
+  background: var(--color-surface-2);
   color: var(--color-text-primary);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-bevel);
 }
 
 .pill.sm .selected {

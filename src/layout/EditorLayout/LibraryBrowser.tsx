@@ -15,6 +15,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '@components/Icon';
 import { Input } from '@components/Input';
+import { ScrollableStrip } from '@components/ScrollableStrip';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import styles from './panels.module.css';
 
@@ -149,7 +150,12 @@ export function LibraryBrowser<T extends BrowsableItem>({
         </button>
       </div>
 
-      <div className={styles.libCategoryStrip} role="tablist" aria-label={`${noun} categories`}>
+      <ScrollableStrip
+        role="tablist"
+        ariaLabel={`${noun} categories`}
+        className={styles.libCategoryStripWrap}
+        scrollClassName={styles.libCategoryStrip}
+      >
         {['all', ...categories].map((c) => (
           <button
             key={c}
@@ -162,7 +168,7 @@ export function LibraryBrowser<T extends BrowsableItem>({
             {c === 'all' ? 'All' : (categoryLabel?.(c) ?? titleCase(c))}
           </button>
         ))}
-      </div>
+      </ScrollableStrip>
 
       <div className={styles.libBody}>
         {toolbar}

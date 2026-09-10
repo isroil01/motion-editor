@@ -59,7 +59,7 @@
 }
 
 .title {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -75,7 +75,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  flex: none;
+  flex: 1 0 auto;
+  justify-content: flex-end;
+}
+
+.customActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .actionBtn {

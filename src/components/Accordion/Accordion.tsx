@@ -15,6 +15,8 @@ export interface AccordionItem {
   icon?: import('@components/Icon').IconName;
   /** Optional badge content on the right. */
   badge?: ReactNode;
+  /** Optional actions on the right of the header row (e.g. presets menu). */
+  actions?: ReactNode;
   content: ReactNode;
   defaultOpen?: boolean;
   /**
@@ -107,27 +109,37 @@ export function Accordion({
         const btnId = `${baseId}-b-${item.id}`;
         return (
           <div key={item.id} className={cn(styles.item, item.disabled && styles.disabled)}>
-            <h3 className={styles.header}>
-              <button
-                id={btnId}
-                type="button"
-                className={styles.trigger}
-                onClick={() => toggle(item)}
-                aria-expanded={isOpen}
-                aria-controls={panelId}
-                aria-disabled={item.disabled}
-                disabled={item.disabled}
-              >
-                <Icon
-                  name={isOpen ? 'chevron-down' : 'chevron-right'}
-                  size="sm"
-                  className={styles.chevron}
-                />
-                {item.icon ? <Icon name={item.icon} size="md" className={styles.icon} /> : null}
-                <span className={styles.title}>{item.title}</span>
-                {item.badge ? <span className={styles.badge}>{item.badge}</span> : null}
-              </button>
-            </h3>
+            <div className={styles.headerRow}>
+              <h3 className={styles.header}>
+                <button
+                  id={btnId}
+                  type="button"
+                  className={styles.trigger}
+                  onClick={() => toggle(item)}
+                  aria-expanded={isOpen}
+                  aria-controls={panelId}
+                  aria-disabled={item.disabled}
+                  disabled={item.disabled}
+                >
+                  <Icon
+                    name={isOpen ? 'chevron-down' : 'chevron-right'}
+                    size="sm"
+                    className={styles.chevron}
+                  />
+                  {item.icon ? <Icon name={item.icon} size="md" className={styles.icon} /> : null}
+                  <span className={styles.title}>{item.title}</span>
+                  {item.badge ? <span className={styles.badge}>{item.badge}</span> : null}
+                </button>
+              </h3>
+              {item.actions ? (
+                <div
+                  className={styles.actions}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {item.actions}
+                </div>
+              ) : null}
+            </div>
             <div
               id={panelId}
               role="region"

@@ -19,7 +19,7 @@ import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Icon } from '@components/Icon';
 import { AngleDial } from '@components/AngleDial';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
-import { is3DEnabled } from '@core/scene/threeD';
+import { is3DEnabled, canBe3D } from '@core/scene/threeD';
 import { setAnchor, estimateNodeBounds } from '@core/scene/anchor';
 import { readNodeKind } from '@core/scene/sceneDerive';
 import { defaultAnimation } from '@motion/animation';
@@ -32,6 +32,7 @@ import { usePreferenceStore } from '@stores/preferenceStore';
 import { batchHistory } from '@stores/historyStore';
 import { MultiPropertyRow } from './MultiPropertyRow';
 import { SectionPresetMenu } from './SectionPresetMenu';
+import { ThreeDControl } from './ThreeDControl';
 import { useInspectorSelection } from './inspectorSelection';
 
 import styles from './TransformSection.module.css';
@@ -104,27 +105,47 @@ function accessFor(prop: string): PropertyAccess {
   return a;
 }
 
+export function TransformPresetAction({
+  nodeId,
+  nodeIds,
+}: {
+  nodeId: string;
+  nodeIds?: ReadonlyArray<string>;
+}): JSX.Element {
+  const time = useCurrentTime();
+  const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
+  const targetIds = useInspectorSelection(nodeId);
+  const effectiveNodeIds = nodeIds && nodeIds.length > 0 ? nodeIds : targetIds;
+
+  const capturePreset = useCallback(() => captureTransformPreset(nodeId, time), [nodeId, time]);
+  const applyPreset = useCallback(
+    (values: Readonly<Record<string, number | string | boolean>>) =>
+      applyTransformPreset(effectiveNodeIds, values, { compTime: time, autoKeyframe }),
+    [effectiveNodeIds, time, autoKeyframe],
+  );
+
+  return (
+    <SectionPresetMenu
+      sectionId="transform"
+      label="Transform presets"
+      capture={capturePreset}
+      apply={applyPreset}
+    />
+  );
+}
+
 function TransformSectionInner({ nodeId }: { nodeId: string }): JSX.Element | null {
   useNodeRevision(nodeId);
   const nodeIds = useInspectorSelection(nodeId);
   const time = useCurrentTime();
-  const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
   const node = defaultSceneGraph.getNode(nodeId);
   const [linkedScale, setLinkedScale] = useState(true);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // NO early return before the hooks below — the hook count must not depend
   // on whether the node exists (deleting a selected layer with this panel open
   // used to throw "Rendered fewer hooks than expected").
   const tComp = useMemo(() => node?.components.find((c) => c.type === 'Transform'), [node]);
   const sComp = useMemo(() => node?.components.find((c) => c.type === 'Style' || c.type === 'Text'), [node]);
-
-  const capturePreset = useCallback(() => captureTransformPreset(nodeId, time), [nodeId, time]);
-  const applyPreset = useCallback(
-    (values: Readonly<Record<string, number | string | boolean>>) =>
-      applyTransformPreset(nodeIds, values, { compTime: time, autoKeyframe }),
-    [nodeIds, time, autoKeyframe],
-  );
 
   const rotationDial = useCallback(
     (label: string) => ({ value, setValue }: { value: number; setValue: (v: number) => void }): ReactNode => (
@@ -172,9 +193,10 @@ function TransformSectionInner({ nodeId }: { nodeId: string }): JSX.Element | nu
     );
   };
 
+  const kind = readNodeKind(node);
   const is3D = is3DEnabled(node);
-  const isCamera = readNodeKind(node) === 'camera';
-  const isLight = readNodeKind(node) === 'light';
+  const isCamera = kind === 'camera';
+  const isLight = kind === 'light';
   const hasDepth = isCamera || isLight || is3D;
 
   const anyAnimated = (props: string[]): boolean => props.some((p) => defaultAnimation.isAnimated(nodeId, p));
@@ -222,28 +244,30 @@ function TransformSectionInner({ nodeId }: { nodeId: string }): JSX.Element | nu
 
   return (
     <div className={styles.section}>
-      <div className={styles.presetRow}>
-        <SectionPresetMenu sectionId="transform" label="Transform presets" capture={capturePreset} apply={applyPreset} />
-      </div>
       <div className={styles.inlineRows}>
         {!isCamera && (
           <>
-            {subhead(
-              'Anchor',
-              anyAnimated(['anchorX', 'anchorY']),
-              groupStopwatch('Anchor', ['anchorX', 'anchorY']),
-              <div className={styles.anchorOriginBox} title="Quick Snap Anchor Origin (3x3 Matrix)">
+            {subhead('Anchor', anyAnimated(['anchorX', 'anchorY']), groupStopwatch('Anchor', ['anchorX', 'anchorY']))}
+            <div className={styles.anchorMatrixRow}>
+              <div
+                className={styles.anchorOriginBox}
+                title="Quick Snap Anchor Origin (3x3 Matrix)"
+                role="group"
+                aria-label="Anchor Origin Matrix"
+              >
                 {ANCHOR_PRESETS.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     className={`${styles.anchorDot} ${isPresetActive(p) ? styles.anchorDotActive : ''}`}
                     title={p.label}
+                    aria-label={`Snap anchor to ${p.label}`}
+                    aria-pressed={isPresetActive(p)}
                     onClick={() => applyAnchorPreset(p)}
                   />
                 ))}
-              </div>,
-            )}
+              </div>
+            </div>
             {row('anchorX')}
             {row('anchorY')}
           </>
@@ -284,60 +308,32 @@ function TransformSectionInner({ nodeId }: { nodeId: string }): JSX.Element | nu
         {subhead('Rotation', anyAnimated(rotationProps), groupStopwatch('Rotation', rotationProps))}
         {row('rotation')}
 
+        {subhead('Skew', anyAnimated(['skew', 'skewAxis']), groupStopwatch('Skew', ['skew']))}
+        {row('skew')}
+        {row('skewAxis')}
+
         {sComp && (
           <>
             {subhead('Opacity', anyAnimated(['opacity']), groupStopwatch('Opacity', ['opacity']))}
             {row('opacity')}
+            {row('fillOpacity')}
           </>
         )}
 
-        {/* Advanced Transform & 3D Section */}
-        <div className={styles.advancedSection}>
-          <button
-            type="button"
-            className={styles.advancedToggle}
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            aria-expanded={showAdvanced}
-          >
-            <div className={styles.advancedToggleLeft}>
-              <Icon
-                name={showAdvanced ? 'chevron-down' : 'chevron-right'}
-                size="sm"
-                className={styles.advancedChevron}
-              />
-              <Icon name="cube" size="sm" className={styles.advancedIcon} />
-              <span className={styles.advancedTitle}>Advanced Transform & 3D</span>
-            </div>
-            {is3D && <span className={styles.advancedBadge}>3D</span>}
-          </button>
-
-          {showAdvanced && (
-            <div className={styles.advancedGroup}>
-              {subhead('Skew', anyAnimated(['skew', 'skewAxis']), groupStopwatch('Skew', ['skew']))}
-              {row('skew')}
-              {row('skewAxis')}
-
-              {is3D && (
-                <>
-                  {subhead('3D Rotation & Orientation', false, null)}
-                  {row('rotationX')}
-                  {row('rotationY')}
-                  {row('orientationX')}
-                  {row('orientationY')}
-                  {row('orientationZ')}
-                  {row('anchorZ')}
-                </>
-              )}
-
-              {sComp && (
-                <>
-                  {subhead('Fill Opacity', false, null)}
-                  {row('fillOpacity')}
-                </>
-              )}
-            </div>
-          )}
-        </div>
+        {kind !== 'group' && kind !== 'null' && canBe3D(node) && (
+          <ThreeDControl nodeId={nodeId}>
+            {is3D && (
+              <>
+                {row('rotationX')}
+                {row('rotationY')}
+                {row('orientationX')}
+                {row('orientationY')}
+                {row('orientationZ')}
+                {row('anchorZ')}
+              </>
+            )}
+          </ThreeDControl>
+        )}
       </div>
     </div>
   );

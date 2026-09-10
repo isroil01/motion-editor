@@ -3,6 +3,23 @@
 Newest first. Each entry is what a person opening the app after an update
 would want to know; the engine-level detail is in `ROADMAP.md`.
 
+## 0.8.1 — 2026-09-10
+
+0.8.0 was never published, so this is the first release carrying everything
+below it, plus a refreshed interface:
+
+- **Refreshed controls**: new styling for buttons, inputs, sliders, switches,
+  tabs, segmented controls and accordions, on updated theme tokens (radius,
+  shadows, spacing).
+- **Properties panel**: search the selected layer's properties, an options
+  menu and layer actions in the selection header, a 3×3 anchor-snap grid and
+  a presets menu on Transform and Appearance, and the 3D switch as its own
+  control. Effects now live in the Effect Controls panel, one click away.
+- **Assets panel toolbar**: New Folder, add the selection to the composition
+  or at the playhead, Interpret Footage, and New Composition from Footage.
+- **Toolbars scroll** sideways when a panel is too narrow to show them all.
+- Library, Transcript and title-bar polish.
+
 ## 0.8.0 — 2026-09-10
 
 - **3D lighting that behaves**: adding a light no longer shows a phantom

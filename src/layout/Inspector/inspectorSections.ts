@@ -47,7 +47,7 @@ import { nodeMorphTargetCount } from '@core/scene/modelMorph';
 import { findLayerKind } from '@core/plugins/layerKindRegistry';
 import { splitKind } from '@core/plugins/layerKindSchema';
 
-import { AppearanceSection } from './AppearanceSection';
+import { AppearanceSection, AppearancePresetAction } from './AppearanceSection';
 import { AudioControls } from './AudioControls';
 import { PinnedSection } from './PinnedSection';
 import { hasPinnedSection } from '@core/inspector/pinnedProps';
@@ -57,7 +57,7 @@ import { CompositingSection } from './CompositingSection';
 import { CustomLayerSection } from './CustomLayerSection';
 import { Ik3DSection, isIk3DTip } from './Ik3DSection';
 import { LightSection } from './LightSection';
-import { MaterialSection, hasMaterialSection } from './MaterialSection';
+import { MaterialSection, MaterialPresetAction, hasMaterialSection } from './MaterialSection';
 import { MediaSection } from './MediaSection';
 import { ModelSection } from './ModelSection';
 import { ModifierStackSection, hasModifierStackSection } from './ModifierStackSection';
@@ -68,6 +68,7 @@ import { ShapeEffects } from './ShapeEffects';
 import { SvgSection } from './SvgSection';
 import { TextAnimatorControls } from './TextAnimatorControls';
 import { VersionHistorySection, versionHistoryAvailable } from './VersionHistorySection';
+import { TransformPresetAction } from './TransformSection';
 import {
   LayerStylesWithPresetsSection,
   NullInfoSection,
@@ -97,18 +98,14 @@ type PerNode<T> = T | ((nodeId: string) => T);
  *   • `pinned` — the layer's own shortlist (`__pinnedProps`, plus what is
  *     promoted as an Essential Property). Its one section applies only while
  *     the list is non-empty, so the tab is absent until something is pinned.
- *   • `effects` — the applied-effect stack, which AE keeps in a separate
- *     Effect Controls panel for no reason better than history. The dock panel
- *     of that name still exists for anyone who wants a second, pinned surface.
  */
-export type InspectorCategory = 'pinned' | 'transform' | 'style' | 'layer' | 'effects' | 'animation';
+export type InspectorCategory = 'pinned' | 'transform' | 'style' | 'layer' | 'animation';
 
 export const INSPECTOR_CATEGORIES: ReadonlyArray<{ id: InspectorCategory; label: string }> = [
   { id: 'pinned', label: 'Pinned' },
   { id: 'transform', label: 'Transform' },
   { id: 'style', label: 'Style' },
   { id: 'layer', label: 'Layer' },
-  { id: 'effects', label: 'Effects' },
   { id: 'animation', label: 'Animation' },
 ];
 
@@ -129,6 +126,8 @@ export interface InspectorSectionDef {
   /** Whether this section belongs on the given layer at all. */
   appliesTo: (nodeId: string) => boolean;
   Component: ComponentType<{ nodeId: string }>;
+  /** Optional actions component rendered on the right side of the section header row. */
+  actions?: ComponentType<{ nodeId: string; nodeIds?: ReadonlyArray<string> }>;
   /**
    * Extra words the inspector's search box matches on, so searching "color"
    * reaches Appearance and "shadow" reaches Layer Styles. Folded in from what
@@ -196,6 +195,7 @@ export const INSPECTOR_SECTIONS: readonly InspectorSectionDef[] = [
     keywords: 'position scale rotation opacity anchor size 3d',
     appliesTo: (id) => kindOf(id) !== 'audio',
     Component: TransformWithThreeDSection,
+    actions: TransformPresetAction,
   },
   // ── 1b. What it is made of ─────────────────────────────────────
   // Its own section rather than a fourth nesting level inside the 3D switch:
@@ -214,6 +214,7 @@ export const INSPECTOR_SECTIONS: readonly InspectorSectionDef[] = [
       return kind !== 'group' && kind !== 'null' && hasMaterialSection(id);
     },
     Component: MaterialSection,
+    actions: MaterialPresetAction,
   },
   // ── 1c. What SHAPE it is (parametric primitive) ────────────────
   // Only for layers whose geometry is generated from numbers — a sphere,
@@ -350,6 +351,7 @@ export const INSPECTOR_SECTIONS: readonly InspectorSectionDef[] = [
     keywords: 'fill stroke color gradient border outline',
     appliesTo: isDrawable,
     Component: AppearanceSection,
+    actions: AppearancePresetAction,
   },
   {
     id: 'pathOps',

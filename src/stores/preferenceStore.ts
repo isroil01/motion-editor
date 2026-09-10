@@ -164,7 +164,7 @@ export interface Preferences {
    * from the layout tree. Falls back to the first tab the layer HAS when the
    * remembered one is empty for it.
    */
-  inspectorTab: 'pinned' | 'transform' | 'style' | 'layer' | 'effects' | 'animation';
+  inspectorTab: 'pinned' | 'transform' | 'style' | 'layer' | 'animation';
   /**
    * Draw a mini keyframe lane under every animated inspector row — the
    * Blender/Cavalry strip that shows WHERE a property's keyframes are without

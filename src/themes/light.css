@@ -86,6 +86,7 @@
   --color-primary-hover:     var(--color-azure-500);
   --color-primary-active:    var(--color-azure-700);
   --color-primary-subtle:    rgba(59, 118, 224, 0.12);
+  --color-primary-glow:      rgba(59, 118, 224, 0.35);
   --color-primary-foreground: var(--color-slate-0);
 
   /* ── Accent === primary (single accent identity) ───────────── */

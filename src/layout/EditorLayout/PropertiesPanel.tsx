@@ -44,10 +44,12 @@
  */
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Panel } from '@components/Panel';
 import { SearchField } from '@components/SearchField';
 import { Icon } from '@components/Icon';
 import { Dropdown, type DropdownItem } from '@components/Dropdown';
+import { useDockPanelHeader } from '@components/DockPanel';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useTemplateStore } from '@stores/templateStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
@@ -133,11 +135,11 @@ function registerInspectorCommands(): void {
     });
     reg.register({
       id: asCommandId('inspector.showEffects'),
-      label: 'Properties: Effects Tab',
-      description: 'Show the selected layer’s effect stack inside the Properties panel',
+      label: 'Open Effect Controls Panel',
+      description: 'Show the selected layer’s effect stack in the Effect Controls panel',
       icon: 'sparkles',
       enabled: () => true,
-      execute: () => showInspectorTab('effects'),
+      execute: () => useLayoutStore.getState().openPanel('effectControls'),
     });
   } catch {
     /* no registry yet (a pre-boot route) */
@@ -190,29 +192,47 @@ export function PropertiesPanel(): JSX.Element {
     },
   ];
 
-  const headerActions = (
+  const dockHeader = useDockPanelHeader();
+  const setCustomMenuItems = dockHeader?.setCustomMenuItems;
+
+  useEffect(() => {
+    if (!setCustomMenuItems) return;
+    setCustomMenuItems(menuItems);
+    return () => setCustomMenuItems([]);
+  }, [setCustomMenuItems, menuItems]);
+
+  const searchButton = (
+    <button
+      type="button"
+      className={cn(styles.layerHeadBtn, searchOpen && styles.layerHeadBtnActive)}
+      aria-label={searchOpen ? 'Close property search' : 'Search properties'}
+      aria-pressed={searchOpen}
+      title="Search properties"
+      onClick={() => setSearchOpen((v) => !v)}
+    >
+      <Icon name="search" size="sm" />
+    </button>
+  );
+
+  const fallbackActions = (
     <>
-      <button
-        type="button"
-        className={cn(styles.layerHeadBtn, searchOpen && styles.layerHeadBtnActive)}
-        aria-label={searchOpen ? 'Close property search' : 'Search properties'}
-        aria-pressed={searchOpen}
-        title="Search properties"
-        onClick={() => setSearchOpen((v) => !v)}
-      >
-        <Icon name="search" size="sm" />
-      </button>
-      <Dropdown
-        items={menuItems}
-        placement="bottom-end"
-        trigger={
-          <button type="button" className={styles.layerHeadBtn} aria-label="Properties panel options" title="Options">
-            <Icon name="more-horizontal" size="sm" />
-          </button>
-        }
-      />
+      {searchButton}
+      {!dockHeader?.target && (
+        <Dropdown
+          items={menuItems}
+          placement="bottom-end"
+          trigger={
+            <button type="button" className={styles.layerHeadBtn} aria-label="Properties panel options" title="Options">
+              <Icon name="more-horizontal" size="sm" />
+            </button>
+          }
+        />
+      )}
     </>
   );
+
+  const headerActions = dockHeader?.target ? searchButton : fallbackActions;
+  const headerContent = <SelectionHeader nodeIds={selected} actions={headerActions} />;
 
   return (
     <Panel
@@ -224,10 +244,13 @@ export function PropertiesPanel(): JSX.Element {
       onClose={() => getEventBus().emit('PanelClosed', { panelId: 'properties' })}
     >
       <div className={styles.inspectorShell}>
-        {/* The sticky selection strip: kind, name (double-click to rename),
-            label swatch and the layer switches — `SelectionHeader` replaced the
-            plain `.layerHead` strip that only named the layer. */}
-        {primary && node && <SelectionHeader nodeIds={selected} actions={headerActions} />}
+        {/* Layer switch buttons moved to the Properties sidebar title at the top.
+            If rendered without a DockPanel (e.g. standalone test), falls back to layerHead. */}
+        {primary && node && (
+          dockHeader?.target
+            ? createPortal(headerContent, dockHeader.target)
+            : <div className={styles.layerHead}>{headerContent}</div>
+        )}
         {primary && node && searchOpen && (
           <div className={styles.searchRow}>
             <SearchField

@@ -7,7 +7,7 @@
   padding: 0 4px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 0;
+  border-radius: var(--radius-control);
   color: var(--color-primary);
   cursor: ew-resize;
   user-select: none;
@@ -16,17 +16,17 @@
 }
 
 .field:hover:not(.disabled):not(.editing) {
-  border-color: transparent;
-  background: transparent;
+  border-color: rgba(45, 140, 240, 0.25);
+  background: rgba(45, 140, 240, 0.12);
   color: var(--color-primary-hover);
-  text-decoration: underline;
-  text-decoration-style: dashed;
+  text-decoration: none;
 }
 
 /* Keyboard focus on the resting spinbutton */
 .field:focus-visible {
   border-color: var(--color-primary);
-  background: var(--color-surface-2);
+  background: rgba(45, 140, 240, 0.15);
+  box-shadow: 0 0 0 1px var(--color-primary);
 }
 
 /* Value + input use IBM Plex Mono w/ tabular-nums so scrubbing never jitters. */
@@ -80,18 +80,19 @@
 .editing {
   cursor: text;
   border-color: var(--color-primary);
-  background: var(--color-surface-2);
+  background: var(--color-surface-0);
+  box-shadow: var(--shadow-well), 0 0 0 1px var(--color-primary);
   color: var(--color-text-primary);
   padding: 0 var(--space-2);
   border-radius: var(--radius-control);
 }
 
 .dragging {
-  border-color: transparent;
-  background: transparent;
+  border-color: var(--color-primary);
+  background: rgba(45, 140, 240, 0.22);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
   color: var(--color-primary-hover);
-  text-decoration: underline;
-  text-decoration-style: solid;
+  text-decoration: none;
 }
 
 .invalid {
