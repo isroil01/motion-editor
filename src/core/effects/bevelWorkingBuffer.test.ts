@@ -18,7 +18,7 @@
  * documented in __testHelpers__/canvasFidelity.ts.
  */
 
-import { applyCanvas2dEffect, __setBevelMaxWorkForTests } from './canvas2dEffects';
+import { applyCanvas2dEffect, __setBevelMaxWorkForTests, __lastBevelWorkForTests } from './canvas2dEffects';
 import type { Effect } from './effects';
 import { hasCanvas, hasFaithfulFilter } from './__testHelpers__/canvasFidelity';
 
@@ -115,34 +115,38 @@ maybe('bevel working-buffer cap', () => {
     expect(full.outside).toBe(0);
   });
 
-  it('is materially cheaper than the full-resolution path', () => {
+  it('shades on a capped working buffer, and capping never makes it clearly slower', () => {
     /*
-      ★ Best-of-N per cap, not the single `beforeAll` sample.
+      The WORK is asserted, not the wall clock.
 
-      This compared two individual timings and duly inverted on a shared CI
-      runner — capped 317ms against full 247ms — reporting that the cap made
-      things slower. It does not: a single timing is an UPPER BOUND, because
-      the noise is one-sided (a descheduled thread or a GC pause can only make
-      a run longer). Comparing two upper bounds is a coin toss whenever the
-      scheduler interferes with the wrong one, and here the loser of that toss
-      reads as a performance regression.
+      A single timing inverted on a shared CI runner (capped 317 ms, full
+      247 ms). Best-of-5 then flaked the same way on 2026-09-10: capped
+      147.2 ms against full 146.5 ms. At this size the timed call is dominated
+      by what the cap does not touch — the source read-down and the two bands
+      blitted back up run at full resolution either way — so the two paths can
+      tie to within a millisecond, and "strictly faster" is a coin toss.
 
-      The MINIMUM over several runs is the right statistic — the fastest run is
-      the one that was interrupted least — which is the same conclusion
-      `proxyBindingCost.test.ts` and `svgHybridImport.test.ts` already reached.
-
-      The `beforeAll` pair above is left alone: every other assertion in this
-      file reads `profile`/`outside`, which are PIXELS and deterministic. Only
-      the clock needed re-sampling, and it doubles as the warm-up.
+      The claim the cap makes is that the per-pixel shading runs on a buffer
+      capped at 640 on the long side, and that is deterministic: read it off
+      the buffer the bevel allocated. The clock keeps a guard with headroom a
+      scheduler tie cannot trip, which still catches a cap that ADDS cost.
     */
+    profileAtCap(Infinity);
+    const fullWork = __lastBevelWorkForTests();
+    profileAtCap(640);
+    const cappedWork = __lastBevelWorkForTests();
+    expect(fullWork).toEqual({ w: SIZE, h: SIZE });
+    expect(cappedWork).toEqual({ w: 640, h: 640 });
+    // (640 / 1200)² ≈ 0.28 of the shading pixels.
+    expect((cappedWork.w * cappedWork.h) / (fullWork.w * fullWork.h)).toBeLessThan(0.3);
+
+    // Best-of-N: timing noise is one-sided, so the fastest run is the least
+    // interrupted one (the same conclusion proxyBindingCost.test.ts reached).
     const bestMs = (cap: number): number => {
       let best = Infinity;
       for (let i = 0; i < 5; i += 1) best = Math.min(best, profileAtCap(cap).ms);
       return best;
     };
-
-    const fullMs = bestMs(Infinity);
-    const cappedMs = bestMs(640);
-    expect(cappedMs).toBeLessThan(fullMs);
+    expect(bestMs(640)).toBeLessThan(bestMs(Infinity) * 1.25);
   });
 });
