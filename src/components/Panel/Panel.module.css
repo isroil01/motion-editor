@@ -7,6 +7,7 @@
   min-height: 0;
   background: var(--color-panel);
   color: var(--color-text-primary);
+  overflow: hidden;
 }
 
 .header {
@@ -74,7 +75,9 @@
 }
 
 .noScroll {
-  overflow: visible;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .footer {

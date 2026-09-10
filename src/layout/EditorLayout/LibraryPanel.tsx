@@ -20,6 +20,7 @@
 
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { Panel } from '@components/Panel';
+import { ScrollableStrip } from '@components/ScrollableStrip';
 import { Button } from '@components/Button';
 import { Input } from '@components/Input';
 import { EmptyState } from '@components/EmptyState';
@@ -664,7 +665,12 @@ export function LibraryPanel(): JSX.Element {
           drew a SECOND hairline under the stylesheet's, and carried a
           `var(--color-border, rgba(255,255,255,0.08))` fallback for a token
           that has always been defined — a white-ish line hardcoded for dark. */}
-      <div className={styles.libTabs} role="tablist">
+      <ScrollableStrip
+        role="tablist"
+        ariaLabel="Library sections"
+        className={styles.libTabsWrap}
+        scrollClassName={styles.libTabs}
+      >
         {LIBRARY_SECTIONS.map((s) => (
           <button key={s.id} type="button"
             role="tab"
@@ -678,7 +684,7 @@ export function LibraryPanel(): JSX.Element {
             <span>{s.label}</span>
           </button>
         ))}
-      </div>
+      </ScrollableStrip>
       {section === 'mograph' && <MotionGFXContent />}
       {section === 'transitions' && <TransitionsContent />}
       {section === 'sfx' && <SoundFXContent />}

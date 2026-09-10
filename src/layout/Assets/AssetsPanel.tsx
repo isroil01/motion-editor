@@ -67,7 +67,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Panel } from '@components/Panel';
 import { Button } from '@components/Button';
-import { IconButton } from '@components/IconButton';
 import { SearchField } from '@components/SearchField';
 import { Icon } from '@components/Icon';
 import { Chip } from '@components/Chip';
@@ -76,7 +75,7 @@ import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { VirtualList } from '@components/VirtualList';
 import { customConfirm, customPrompt } from '@components/Modal';
 import { isLibraryAsset, useAssetStore, type AssetFolder, type ImportedAsset } from '@stores/assetStore';
-import { useAssetsViewStore, type AssetSortKey, type AssetTypeFilter } from '@stores/assetsViewStore';
+import { useAssetsViewStore, type AssetSortKey } from '@stores/assetsViewStore';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { getAssetVisualInfo, FOLDER_COLOR } from '@layout/Assets/assetVisuals';
@@ -96,6 +95,7 @@ import { openFootagePreview } from '@layout/Assets/FootagePreviewDialog';
 import { openInterpretFootage } from '@layout/Assets/InterpretFootageModal';
 import { runNewCompFromClips, runAssembleFromFootage } from '@layout/Assets/footageAssembly';
 import { setCanvasDrag } from '@core/dnd/canvasDrag';
+import { ScrollableStrip } from '@components/ScrollableStrip';
 import { AssetThumb } from './AssetThumb';
 import { AssetDrawer } from './AssetDrawer';
 import { MediaBrowser, canBrowseMedia } from './MediaBrowser';
@@ -107,7 +107,6 @@ import {
   isFilterActive,
   parseTags,
   sortAssets,
-  tagCounts,
   usageByAsset,
 } from './assetListLogic';
 import styles from '@layout/EditorLayout/panels.module.css';
@@ -181,13 +180,10 @@ export function AssetsPanel(): JSX.Element {
   const sortBy = useAssetsViewStore((s) => s.sortBy);
   const setSort = useAssetsViewStore((s) => s.setSort);
   const unusedOnly = useAssetsViewStore((s) => s.unusedOnly);
-  const setUnusedOnly = useAssetsViewStore((s) => s.setUnusedOnly);
   const typeFilter = useAssetsViewStore((s) => s.typeFilter);
-  const setTypeFilter = useAssetsViewStore((s) => s.setTypeFilter);
   const tagFilter = useAssetsViewStore((s) => s.tagFilter);
   const setTagFilter = useAssetsViewStore((s) => s.setTagFilter);
   const labelFilter = useAssetsViewStore((s) => s.labelFilter);
-  const setLabelFilter = useAssetsViewStore((s) => s.setLabelFilter);
   const clearFilters = useAssetsViewStore((s) => s.clearFilters);
   const tab = useAssetsViewStore((s) => s.tab);
   const setTab = useAssetsViewStore((s) => s.setTab);
@@ -892,7 +888,6 @@ export function AssetsPanel(): JSX.Element {
     setSelectionAnchor(id);
   };
 
-  const tags = useMemo(() => tagCounts(shelfAssets), [shelfAssets]);
   const usedBy = singleSelectedAsset
     ? (usage.get(singleSelectedAsset.id) ?? []).map((id) => ({ id, name: defaultSceneGraph.getNode(id)?.name ?? id }))
     : [];
@@ -915,12 +910,6 @@ export function AssetsPanel(): JSX.Element {
       onSelect: () => setSort(sortKey, sortDir === 'asc' ? 'desc' : 'asc'),
     },
   ];
-
-  const typeChip = (type: Exclude<AssetTypeFilter, 'all'>, label: string): JSX.Element => (
-    <Chip size="sm" selected={typeFilter === type} onSelect={() => setTypeFilter(typeFilter === type ? 'all' : type)}>
-      {label}
-    </Chip>
-  );
 
   const headBtn = (key: AssetSortKey, label: string, className: string | undefined): JSX.Element => (
     <button
@@ -1094,13 +1083,19 @@ export function AssetsPanel(): JSX.Element {
       icon="media"
       hideHeader
       noScroll
+      className={styles.assetPanelRoot}
       onClose={() => getEventBus().emit('PanelClosed', { panelId: 'assets' })}
     >
       {/* Project / Media Browser. The Media Browser needs the desktop shell;
           the web build never renders the strip at all rather than showing one
           tab. Ids stay `bin` / `browse` — the stores and the tour key on them. */}
       {browseAvailable && (
-        <div className={styles.libTabs} role="tablist" aria-label="Assets views">
+        <ScrollableStrip
+          role="tablist"
+          ariaLabel="Assets views"
+          className={styles.libTabsWrap}
+          scrollClassName={styles.libTabs}
+        >
           <button
             type="button"
             role="tab"
@@ -1123,13 +1118,13 @@ export function AssetsPanel(): JSX.Element {
             <Icon name="folder" size="sm" />
             <span>Media Browser</span>
           </button>
-        </div>
+        </ScrollableStrip>
       )}
 
       {browseAvailable && tab === 'browse' ? (
         <MediaBrowser />
       ) : (
-        <>
+        <div className={styles.assetShell}>
           <div className={styles.assetSearchRow}>
             <SearchField
               placeholder="Search assets…"
@@ -1144,28 +1139,27 @@ export function AssetsPanel(): JSX.Element {
           <div className={styles.assetToolbarRow}>
             <div className={styles.assetToolbarGroup}>
               <span className={styles.assetImportSplit} role="group" aria-label="Import">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  icon={<Icon name="upload" size="sm" />}
+                <button
+                  type="button"
                   className={styles.assetImportMain}
                   title="Import files into the project (they are not added to the composition)"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  Import
-                </Button>
+                  <Icon name="upload" size="sm" />
+                  <span>Import</span>
+                </button>
+                <div className={styles.assetImportDivider} />
                 <Dropdown
                   placement="bottom-start"
                   trigger={
-                    <IconButton
-                      size="sm"
-                      variant="secondary"
+                    <button
+                      type="button"
                       className={styles.assetImportMore}
                       aria-label="More import options"
                       title="More import options"
                     >
                       <Icon name="chevron-down" size="sm" />
-                    </IconButton>
+                    </button>
                   }
                   items={[
                     { type: 'item', id: 'files', label: 'Import Files…', icon: 'upload', onSelect: () => fileInputRef.current?.click() },
@@ -1208,56 +1202,6 @@ export function AssetsPanel(): JSX.Element {
                 ]}
               />
             </div>
-          </div>
-
-          <div className={styles.assetFilterRow} aria-label="Filters">
-            <Chip size="sm" icon="eye-off" selected={unusedOnly} onSelect={() => setUnusedOnly(!unusedOnly)}>Unused</Chip>
-            {typeChip('video', 'Video')}
-            {typeChip('image', 'Image')}
-            {typeChip('audio', 'Audio')}
-            {tags.map(({ tag, count }) => (
-              <Chip key={tag} size="sm" selected={tagFilter === tag} onSelect={() => setTagFilter(tagFilter === tag ? null : tag)}>
-                {tag} <span className={styles.assetRowUsed}>{count}</span>
-              </Chip>
-            ))}
-            <Dropdown
-              placement="bottom-start"
-              trigger={
-                <button
-                  type="button"
-                  className={styles.assetFilterLabelBtn}
-                  title="Filter by label"
-                  aria-label="Filter by label"
-                  aria-pressed={labelFilter !== null}
-                >
-                  {labelFilter ? (
-                    <span className={styles.sceneFilterLabelDot} style={{ background: LABEL_COLORS.find((c) => c.id === labelFilter)?.color }} aria-hidden />
-                  ) : (
-                    <Icon name="palette" size="sm" />
-                  )}
-                  <span>Label</span>
-                </button>
-              }
-              items={[
-                { type: 'item', id: 'any', label: 'Any label', icon: labelFilter === null ? 'check' : undefined, onSelect: () => setLabelFilter(null) },
-                { type: 'separator' },
-                ...LABEL_COLORS.map((c): DropdownItem => ({
-                  type: 'item',
-                  id: c.id,
-                  label: (
-                    <>
-                      <span className={styles.labelSwatch} style={{ background: c.color }} aria-hidden />
-                      {c.label}
-                    </>
-                  ),
-                  icon: labelFilter === c.id ? 'check' : undefined,
-                  onSelect: () => setLabelFilter(labelFilter === c.id ? null : c.id),
-                })),
-              ]}
-            />
-            {filtering && (
-              <Chip size="sm" icon="close" onSelect={clearFilters}>Clear</Chip>
-            )}
           </div>
           {filterNote && (
             <div className={styles.assetNote} role="status">{filterNote}</div>
@@ -1435,140 +1379,142 @@ export function AssetsPanel(): JSX.Element {
             )}
           </div>
 
-          <AssetDrawer
-            asset={singleSelectedAsset}
-            selectionCount={selectedAssetIds.size}
-            open={drawerOpen}
-            onToggle={() => setDrawerOpen(!drawerOpen)}
-            usedBy={usedBy}
-            onSelectLayer={(id) => useSelectionStore.getState().set([id])}
-            onSetTags={setTags}
-          />
+          <div className={styles.assetBottomSection}>
+            <AssetDrawer
+              asset={singleSelectedAsset}
+              selectionCount={selectedAssetIds.size}
+              open={drawerOpen}
+              onToggle={() => setDrawerOpen(!drawerOpen)}
+              usedBy={usedBy}
+              onSelectLayer={(id) => useSelectionStore.getState().set([id])}
+              onSetTags={setTags}
+            />
 
-          {/* AE Project Bottom Action Dock */}
-          <div className={styles.assetBottomDock}>
-            <button
-              type="button"
-              className={`${styles.dockBtn}${dockCompDropActive ? ` ${styles.dockBtnDropActive}` : ''}`}
-              disabled={!singleSelectedAsset || singleSelectedAsset.type === 'audio'}
-              title="Create New Composition from Footage (or drag & drop footage here)"
-              onClick={() => {
-                if (singleSelectedAsset) void createCompositionFromFootage(singleSelectedAsset);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDockCompDropActive(true);
-              }}
-              onDragLeave={() => setDockCompDropActive(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDockCompDropActive(false);
-                const assetId = e.dataTransfer.getData('text/asset-id');
-                const dropped = assets.find((a) => a.id === assetId);
-                if (dropped && dropped.type !== 'audio') {
-                  void createCompositionFromFootage(dropped);
-                }
-              }}
-            >
-              <Icon name="component" size="sm" className={singleSelectedAsset && singleSelectedAsset.type !== 'audio' ? styles.assetGlyphComp : undefined} />
-            </button>
-
-            <button
-              type="button"
-              className={styles.dockBtn}
-              title="New Folder"
-              aria-label="New Folder"
-              onClick={handleNewFolder}
-            >
-              <Icon name="folder-plus" size="sm" style={{ color: FOLDER_COLOR }} />
-            </button>
-
-            {/* The two verbs that put a clip in the edit, as buttons. They
-                existed only in the right-click menu and the footage dialog,
-                and "I imported it but can't add it" was the result: a bin
-                with no visible way from the list to the comp. */}
-            <button
-              type="button"
-              className={styles.dockBtn}
-              disabled={selectedAssetIds.size === 0}
-              title={selectedAssetIds.size > 1 ? `Add ${selectedAssetIds.size} selected to composition` : 'Add selected asset to composition'}
-              aria-label="Add to composition"
-              onClick={() => {
-                const picked = assets.filter((a) => selectedAssetIds.has(a.id));
-                void (async () => {
-                  for (const a of picked) await insertMedia(a);
-                })();
-              }}
-            >
-              <Icon name="plus" size="sm" />
-            </button>
-            <button
-              type="button"
-              className={styles.dockBtn}
-              disabled={selectedAssetIds.size === 0}
-              title={selectedAssetIds.size > 1 ? `Add ${selectedAssetIds.size} selected at playhead` : 'Add selected asset at the playhead'}
-              aria-label="Add at playhead"
-              onClick={() => {
-                const picked = assets.filter((a) => selectedAssetIds.has(a.id));
-                for (const a of picked) void insertMediaAtPlayhead(a);
-              }}
-            >
-              <Icon name="stopwatch" size="sm" />
-            </button>
-
-            {/* No import buttons here: the header's Import is the one door. */}
-
-            {derivedCount > 0 && (
+            {/* AE Project Bottom Action Dock */}
+            <div className={styles.assetBottomDock}>
               <button
                 type="button"
-                className={`${styles.dockBtn}${showDerived ? ` ${styles.dockBtnDropActive}` : ''}`}
-                onClick={() => setShowDerived((v) => !v)}
-                title={
-                  showDerived
-                    ? 'Hide generated images (duplicates and rasterized copies)'
-                    : `Show ${derivedCount} generated image${derivedCount === 1 ? '' : 's'} — duplicates and rasterized copies made by effects and plugins`
-                }
+                className={`${styles.dockBtn}${dockCompDropActive ? ` ${styles.dockBtnDropActive}` : ''}`}
+                disabled={!singleSelectedAsset || singleSelectedAsset.type === 'audio'}
+                title="Create New Composition from Footage (or drag & drop footage here)"
+                onClick={() => {
+                  if (singleSelectedAsset) void createCompositionFromFootage(singleSelectedAsset);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDockCompDropActive(true);
+                }}
+                onDragLeave={() => setDockCompDropActive(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDockCompDropActive(false);
+                  const assetId = e.dataTransfer.getData('text/asset-id');
+                  const dropped = assets.find((a) => a.id === assetId);
+                  if (dropped && dropped.type !== 'audio') {
+                    void createCompositionFromFootage(dropped);
+                  }
+                }}
               >
-                <Icon name="sparkles" size="sm" />
+                <Icon name="component" size="sm" className={singleSelectedAsset && singleSelectedAsset.type !== 'audio' ? styles.assetGlyphComp : undefined} />
               </button>
-            )}
 
-            <button
-              type="button"
-              className={styles.dockBtn}
-              disabled={!singleSelectedAsset}
-              title="Interpret Footage… (Ctrl+Alt+G)"
-              onClick={() => {
-                if (singleSelectedAsset) openInterpretFootage(singleSelectedAsset);
-              }}
-            >
-              <Icon name="sliders-h" size="sm" />
-            </button>
+              <button
+                type="button"
+                className={styles.dockBtn}
+                title="New Folder"
+                aria-label="New Folder"
+                onClick={handleNewFolder}
+              >
+                <Icon name="folder-plus" size="sm" style={{ color: FOLDER_COLOR }} />
+              </button>
 
-            <button
-              type="button"
-              className={styles.dockBtn}
-              disabled={selectedAssetIds.size === 0 && !currentFolderId}
-              title={
-                selectedAssetIds.size === 0
-                  ? currentFolderId
-                    ? 'Delete selected folder (Del)'
-                    : 'Delete selected asset(s) (Del)'
-                  : `Delete Selected Asset${selectedAssetIds.size > 1 ? 's' : ''} (Del)`
-              }
-              onClick={() => {
-                if (selectedAssetIds.size > 0) {
-                  void deleteSelectedAssets();
-                } else if (currentFolderId) {
-                  const f = folders.find((x) => x.id === currentFolderId);
-                  if (f) void deleteFolder(f);
+              {/* The two verbs that put a clip in the edit, as buttons. They
+                  existed only in the right-click menu and the footage dialog,
+                  and "I imported it but can't add it" was the result: a bin
+                  with no visible way from the list to the comp. */}
+              <button
+                type="button"
+                className={styles.dockBtn}
+                disabled={selectedAssetIds.size === 0}
+                title={selectedAssetIds.size > 1 ? `Add ${selectedAssetIds.size} selected to composition` : 'Add selected asset to composition'}
+                aria-label="Add to composition"
+                onClick={() => {
+                  const picked = assets.filter((a) => selectedAssetIds.has(a.id));
+                  void (async () => {
+                    for (const a of picked) await insertMedia(a);
+                  })();
+                }}
+              >
+                <Icon name="plus" size="sm" />
+              </button>
+              <button
+                type="button"
+                className={styles.dockBtn}
+                disabled={selectedAssetIds.size === 0}
+                title={selectedAssetIds.size > 1 ? `Add ${selectedAssetIds.size} selected at playhead` : 'Add selected asset at the playhead'}
+                aria-label="Add at playhead"
+                onClick={() => {
+                  const picked = assets.filter((a) => selectedAssetIds.has(a.id));
+                  for (const a of picked) void insertMediaAtPlayhead(a);
+                }}
+              >
+                <Icon name="stopwatch" size="sm" />
+              </button>
+
+              {/* No import buttons here: the header's Import is the one door. */}
+
+              {derivedCount > 0 && (
+                <button
+                  type="button"
+                  className={`${styles.dockBtn}${showDerived ? ` ${styles.dockBtnDropActive}` : ''}`}
+                  onClick={() => setShowDerived((v) => !v)}
+                  title={
+                    showDerived
+                      ? 'Hide generated images (duplicates and rasterized copies)'
+                      : `Show ${derivedCount} generated image${derivedCount === 1 ? '' : 's'} — duplicates and rasterized copies made by effects and plugins`
+                  }
+                >
+                  <Icon name="sparkles" size="sm" />
+                </button>
+              )}
+
+              <button
+                type="button"
+                className={styles.dockBtn}
+                disabled={!singleSelectedAsset}
+                title="Interpret Footage… (Ctrl+Alt+G)"
+                onClick={() => {
+                  if (singleSelectedAsset) openInterpretFootage(singleSelectedAsset);
+                }}
+              >
+                <Icon name="sliders-h" size="sm" />
+              </button>
+
+              <button
+                type="button"
+                className={`${styles.dockBtn} ${styles.dockBtnEnd}`}
+                disabled={selectedAssetIds.size === 0 && !currentFolderId}
+                title={
+                  selectedAssetIds.size === 0
+                    ? currentFolderId
+                      ? 'Delete selected folder (Del)'
+                      : 'Delete selected asset(s) (Del)'
+                    : `Delete Selected Asset${selectedAssetIds.size > 1 ? 's' : ''} (Del)`
                 }
-              }}
-            >
-              <Icon name="trash" size="sm" />
-            </button>
+                onClick={() => {
+                  if (selectedAssetIds.size > 0) {
+                    void deleteSelectedAssets();
+                  } else if (currentFolderId) {
+                    const f = folders.find((x) => x.id === currentFolderId);
+                    if (f) void deleteFolder(f);
+                  }
+                }}
+              >
+                <Icon name="trash" size="sm" />
+              </button>
+            </div>
           </div>
-        </>
+        </div>
       )}
     </Panel>
   );

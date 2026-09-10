@@ -26,36 +26,92 @@
   width: 100%;
 }
 
-/* The Assets header's one NAMED action: Import, as a split button — the
-   label half opens the file picker, the ▾ half the menu with the other two
-   pickers. `flex: none` so it keeps its label at any panel width and the
-   search box absorbs the rest — a button that shrinks until only its glyph is
-   left is the icon-only dock button again. */
+/* The Assets header's primary action: Import, as a sleek split button */
 .assetImportSplit {
   display: inline-flex;
   align-items: stretch;
   height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: filter var(--motion-duration-fast) var(--motion-ease-standard),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+  box-sizing: border-box;
+}
+
+.assetImportSplit:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25);
+}
+
+.assetImportMain {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.assetImportMain:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.assetImportMain:active {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.assetImportMain:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+.assetImportDivider {
+  width: 1px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.25);
   flex: none;
 }
 
-/* Both halves are system buttons; these join inner corners and unify height. */
-.assetImportMain {
-  height: 24px !important;
-  font-size: var(--font-size-xs) !important;
-  padding: 0 var(--space-3) 0 var(--space-2) !important;
-  border-top-right-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-  white-space: nowrap;
+.assetImportMore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
-.assetImportMore {
-  height: 24px !important;
-  width: 20px !important;
-  min-width: 20px !important;
-  padding: 0 !important;
-  margin-left: -1px;
-  border-top-left-radius: 0 !important;
-  border-bottom-left-radius: 0 !important;
+.assetImportMore:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.assetImportMore:active {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.assetImportMore:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
 }
 
 /* "Filters cleared to show the import" — one line under the filter row. */
@@ -718,6 +774,15 @@
  * sidebar is wide enough, which is the behaviour someone dragging the splitter
  * expects to see.
  */
+.libTabsWrap {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--color-panel-header);
+  --strip-bg: var(--color-panel-header);
+}
+
 .libTabs {
   display: flex;
   flex-wrap: nowrap;
@@ -729,9 +794,9 @@
   gap: 2px;
   height: 34px;
   padding: 0 var(--space-2);
-  border-bottom: 1px solid var(--color-divider);
   background: var(--color-panel-header);
-  flex: none;
+  flex: 1;
+  min-width: 0;
 }
 .libTabs::-webkit-scrollbar {
   display: none;
@@ -777,6 +842,15 @@
 
 /* ── Library Category Strip & Filter Chips ────────────────────────── */
 
+.libCategoryStripWrap {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-1);
+  --strip-bg: var(--color-surface-1);
+}
+
 .libCategoryStrip {
   display: flex;
   align-items: center;
@@ -786,9 +860,9 @@
   overflow-y: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  flex: none;
+  flex: 1;
+  min-width: 0;
   background: var(--color-surface-1);
-  border-bottom: 1px solid var(--color-border-subtle);
 }
 .libCategoryStrip::-webkit-scrollbar {
   display: none;
@@ -1788,37 +1862,106 @@
   text-overflow: ellipsis;
 }
 
-/* ── Assets: AE Bottom Action Dock ────────────────────────────────── */
+/* ── Assets: Outer Panel Root Container ────────────────────────────── */
+.assetPanelRoot {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.assetPanelRoot > div {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Assets: Container Shell ───────────────────────────────────────── */
+.assetShell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Assets: Bottom Section (Details + Action Dock fixed at bottom) ── */
+.assetBottomSection {
+  flex: 0 0 auto;
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-1);
+  z-index: 2;
+  position: relative;
+  max-height: 48%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.assetBottomSection .assetDrawer {
+  border-top: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.assetBottomSection .assetDrawerBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+/* ── Assets: Bottom Action Dock ────────────────────────────────── */
 .assetBottomDock {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
-  padding: 4px 8px;
-  border-top: 1px solid var(--color-border);
+  gap: 2px;
+  padding: 0 var(--space-2);
+  height: 32px;
+  border-top: 1px solid var(--color-border-subtle);
   background: var(--color-surface-1);
   flex: 0 0 auto;
+  box-sizing: border-box;
 }
 
 .dockBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard),
+              color var(--motion-duration-fast) var(--motion-ease-standard),
+              border-color var(--motion-duration-fast) var(--motion-ease-standard),
+              transform 100ms ease;
+  flex: 0 0 auto;
 }
 
 .dockBtn:hover:not(:disabled) {
   background: var(--color-hover);
   color: var(--color-text-primary);
-  border-color: var(--color-border);
+  border-color: var(--color-border-subtle);
+}
+
+.dockBtn:active:not(:disabled) {
+  transform: scale(0.94);
 }
 
 .dockBtn:disabled {
@@ -1832,8 +1975,11 @@
   color: var(--color-primary);
 }
 
+.dockBtnEnd {
+  margin-left: auto;
+}
 
-/* ── Assets: bin / browse tabs, search bar, toolbar, filter strip ───── */
+/* ── Assets: bin / browse tabs, search bar, toolbar ───── */
 .assetSearchRow {
   display: flex;
   align-items: center;
@@ -1848,17 +1994,19 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--color-border-subtle);
   background: var(--color-surface-1);
   flex: 0 0 auto;
   min-width: 0;
+  height: 36px;
+  box-sizing: border-box;
 }
 
 .assetToolbarGroup {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex: 0 0 auto;
 }
 
@@ -1869,18 +2017,18 @@
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--color-surface-2);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
   box-sizing: border-box;
   flex: 0 0 auto;
 }
 
 .assetToolbarBtn:hover:not(:disabled) {
-  background: var(--color-hover);
+  background: var(--color-surface-3);
   color: var(--color-text-primary);
   border-color: var(--color-border);
 }
@@ -2188,6 +2336,7 @@
   min-width: 0;
   position: relative;
   outline: none;
+  overflow: hidden;
 }
 
 .assetListHost:focus-visible {

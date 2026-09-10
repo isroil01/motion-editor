@@ -1,2 +1,2 @@
-export { DockPanel } from './DockPanel';
-export type { DockPanelProps } from './DockPanel';
+export { DockPanel, DockPanelHeaderContext, useDockPanelHeader } from './DockPanel';
+export type { DockPanelProps, DockPanelHeaderContextValue } from './DockPanel';

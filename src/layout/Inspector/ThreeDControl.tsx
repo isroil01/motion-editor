@@ -15,6 +15,7 @@
  * a third panel entirely.
  */
 
+import { type ReactNode } from 'react';
 import { Switch } from '@components/Switch';
 import { ValueField } from '@components/ValueField';
 import { useSceneRevision } from '@stores/sceneStore';
@@ -35,7 +36,6 @@ import type { BevelStyle } from '@core/scene/extrusion';
 import { hasTextComponent } from '@core/text/textAnimators';
 import { notifyCameraTipIfMissing } from '@core/workspace/cameraNav';
 import { useUIStore } from '@stores/uiStore';
-import parentStyles from './ParentControl.module.css';
 import s from './ThreeDControl.module.css';
 
 /** Menu labels for the bevel profiles — the union stays the source of truth. */
@@ -45,7 +45,12 @@ const BEVEL_STYLE_LABELS: Record<BevelStyle, string> = {
   convex: 'Convex',
 };
 
-export function ThreeDControl({ nodeId }: { nodeId: string }): JSX.Element | null {
+export interface ThreeDControlProps {
+  nodeId: string;
+  children?: ReactNode;
+}
+
+export function ThreeDControl({ nodeId, children }: ThreeDControlProps): JSX.Element | null {
   useSceneRevision((s) => s.rev);
   const node = defaultSceneGraph.getNode(nodeId);
   if (!node || nodeId === 'comp_root') return null;
@@ -62,8 +67,8 @@ export function ThreeDControl({ nodeId }: { nodeId: string }): JSX.Element | nul
 
   return (
     <div className={s.stack}>
-      <div className={parentStyles.row}>
-        <span className={parentStyles.label}>3D Layer</span>
+      <div className={s.switchRow}>
+        <span className={s.switchLabel}>3D Layer</span>
         <Switch
           checked={on}
           onChange={(e) => {
@@ -80,8 +85,8 @@ export function ThreeDControl({ nodeId }: { nodeId: string }): JSX.Element | nul
       </div>
 
       {on && (
-        <div className={s.subPanel}>
-          <span className={s.groupHeader}>Geometry Options</span>
+        <div className={s.items}>
+          {children}
           {isTextLayer && (
             <div className={s.row}>
               <span className={s.label}>Per-character 3D</span>

@@ -12,7 +12,6 @@ import { usePresentationStore } from '@stores/presentationStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { openExportDialog } from '@layout/Export/ExportDialog';
 import { ProjectStatus } from '@layout/ProjectStatus/ProjectStatus';
-import { AccountButton } from '@layout/Auth/AccountButton';
 import { useNativeMenuSync } from '@layout/Menu/useNativeMenuSync';
 import { UpdateButton } from './UpdateButton';
 import styles from './TitleBar.module.css';
@@ -159,10 +158,6 @@ export function TitleBar(): JSX.Element | null {
               <Icon name="export" size="sm" weight="bold" />
               <span>Export</span>
             </button>
-            {/* Account, up from the status bar: beside Preview and Export is
-                where "who am I signed in as" belongs. Renders nothing in the
-                local edition. */}
-            <AccountButton />
           </div>
         )}
         <div className={styles.windowActions}>

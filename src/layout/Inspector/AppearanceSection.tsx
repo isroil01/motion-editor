@@ -18,7 +18,7 @@
  * as they always did.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useCallback } from 'react';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useAnimationRevision } from '@hooks/useAnimationRevision';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
@@ -34,11 +34,40 @@ import { CornerRows } from './appearance/CornerRows';
 import styles from './TransformSection.module.css';
 import effStyles from '../Effects/EffectsPanel.module.css';
 
+export function AppearancePresetAction({
+  nodeId,
+  nodeIds,
+}: {
+  nodeId: string;
+  nodeIds?: ReadonlyArray<string>;
+}): JSX.Element {
+  const node = defaultSceneGraph.getNode(nodeId);
+  const isText = node ? node.components.some((c) => c.type === 'Text') : false;
+  const label = isText ? 'Stroke presets' : 'Fill & Stroke presets';
+  const targetIds = useInspectorSelection(nodeId);
+  const effectiveNodeIds = nodeIds && nodeIds.length > 0 ? nodeIds : targetIds;
+
+  const capturePreset = useCallback(() => captureAppearancePreset(nodeId), [nodeId]);
+  const applyPreset = useCallback(
+    (values: Readonly<Record<string, number | string | boolean>>) =>
+      applyAppearancePreset(effectiveNodeIds, values),
+    [effectiveNodeIds],
+  );
+
+  return (
+    <SectionPresetMenu
+      sectionId="appearance"
+      label={label}
+      capture={capturePreset}
+      apply={applyPreset}
+    />
+  );
+}
+
 function AppearanceSectionInner({ nodeId }: { nodeId: string }): JSX.Element | null {
   useSceneRevision((s) => s.rev);
   useAnimationRevision();
   const node = defaultSceneGraph.getNode(nodeId);
-  const nodeIds = useInspectorSelection(nodeId);
 
   // No early return above this line: every hook below has to run on every
   // render, including the ones for a node that has just been deleted. Returning
@@ -83,16 +112,6 @@ function AppearanceSectionInner({ nodeId }: { nodeId: string }): JSX.Element | n
             <span>Detach Parts (Ungroup)</span>
           </button>
         )}
-      </div>
-
-      {/* Fill-and-stroke presets: capture the primary, apply to the selection. */}
-      <div className={styles.presetRow}>
-        <SectionPresetMenu
-          sectionId="appearance"
-          label="Fill & Stroke presets"
-          capture={() => captureAppearancePreset(nodeId)}
-          apply={(values) => applyAppearancePreset(nodeIds, values)}
-        />
       </div>
 
       {/* A six-button "Quick Style Presets" grid lived here — a second preset

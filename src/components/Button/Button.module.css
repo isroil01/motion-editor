@@ -1,9 +1,10 @@
 .root {
-  --btn-bg:          var(--color-surface-2);
-  --btn-bg-hover:    var(--color-surface-3);
-  --btn-bg-active:   var(--color-active);
+  --btn-bg:          linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%), var(--color-surface-2);
+  --btn-bg-hover:    linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%), var(--color-surface-3);
+  --btn-bg-active:   var(--color-surface-1);
   --btn-fg:          var(--color-text-primary);
-  --btn-border:      var(--color-border-strong);
+  --btn-border:      rgba(0, 0, 0, 0.45);
+  --btn-shadow:      var(--shadow-bevel), 0 1px 2px rgba(0, 0, 0, 0.2);
 
   display: inline-flex;
   align-items: center;
@@ -15,29 +16,33 @@
   background: var(--btn-bg);
   color: var(--btn-fg);
   border: 1px solid var(--btn-border);
+  box-shadow: var(--btn-shadow);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
+  letter-spacing: -0.01em;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: var(--motion-hover-transition), transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  transition: var(--motion-hover-transition), transform 80ms ease-out;
   position: relative;
   user-select: none;
 }
 
 .root:hover:not(:disabled) {
   background: var(--btn-bg-hover);
-  border-color: var(--color-border-strong);
+  border-color: rgba(0, 0, 0, 0.6);
 }
 
 .root:active:not(:disabled) {
   background: var(--btn-bg-active);
-  transform: scale(0.97);
+  transform: translateY(0.5px);
+  box-shadow: var(--shadow-well);
 }
 
 .root:disabled {
   opacity: var(--opacity-disabled);
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .root:focus-visible {
@@ -46,15 +51,16 @@
 }
 
 .root[data-variant="primary"] {
-  --btn-bg:        var(--color-primary);
-  --btn-bg-hover:  var(--color-primary-hover);
+  --btn-bg:        linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(0, 0, 0, 0.08) 100%), var(--color-primary);
+  --btn-bg-hover:  linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(0, 0, 0, 0.04) 100%), var(--color-primary-hover);
   --btn-bg-active: var(--color-primary-active);
   --btn-fg:        var(--color-primary-foreground);
-  --btn-border:    rgba(0, 0, 0, 0.3);
+  --btn-border:    rgba(0, 0, 0, 0.45);
+  --btn-shadow:    inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .root[data-variant="primary"]:hover:not(:disabled) {
-  filter: brightness(1.05);
+  filter: brightness(1.06);
 }
 
 .root[data-variant="secondary"] {
@@ -66,36 +72,42 @@
   --btn-bg-hover:  var(--color-hover);
   --btn-bg-active: var(--color-active);
   --btn-border:    transparent;
+  --btn-shadow:    none;
 }
 
 .root[data-variant="tertiary"] {
   --btn-bg:        var(--color-surface-1);
   --btn-bg-hover:  var(--color-surface-2);
   --btn-bg-active: var(--color-active);
+  --btn-border:    var(--color-border-subtle);
+  --btn-shadow:    none;
 }
 
 .root[data-variant="danger"] {
-  --btn-bg:        linear-gradient(180deg, color-mix(in srgb, var(--color-danger) 90%, white) 0%, var(--color-danger) 100%);
-  --btn-bg-hover:  linear-gradient(180deg, color-mix(in srgb, var(--color-danger) 95%, white) 0%, color-mix(in srgb, var(--color-danger) 90%, white) 100%);
-  --btn-bg-active: color-mix(in srgb, var(--color-danger) 76%, black);
+  --btn-bg:        linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(0, 0, 0, 0.15) 100%), #a6262e;
+  --btn-bg-hover:  linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%), #b82e37;
+  --btn-bg-active: #821c23;
   --btn-fg:        var(--color-slate-0);
-  --btn-border:    rgba(0, 0, 0, 0.25);
+  --btn-border:    rgba(0, 0, 0, 0.45);
+  --btn-shadow:    inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .root[data-variant="success"] {
-  --btn-bg:        linear-gradient(180deg, color-mix(in srgb, var(--color-success) 90%, white) 0%, var(--color-success) 100%);
-  --btn-bg-hover:  linear-gradient(180deg, color-mix(in srgb, var(--color-success) 95%, white) 0%, color-mix(in srgb, var(--color-success) 90%, white) 100%);
-  --btn-bg-active: color-mix(in srgb, var(--color-success) 76%, black);
+  --btn-bg:        linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(0, 0, 0, 0.15) 100%), #1d7c50;
+  --btn-bg-hover:  linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%), #239460;
+  --btn-bg-active: #155c3a;
   --btn-fg:        var(--color-slate-0);
-  --btn-border:    rgba(0, 0, 0, 0.2);
+  --btn-border:    rgba(0, 0, 0, 0.45);
+  --btn-shadow:    inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .root[data-variant="warning"] {
-  --btn-bg:        linear-gradient(180deg, color-mix(in srgb, var(--color-warning) 90%, white) 0%, var(--color-warning) 100%);
-  --btn-bg-hover:  linear-gradient(180deg, color-mix(in srgb, var(--color-warning) 95%, white) 0%, color-mix(in srgb, var(--color-warning) 90%, white) 100%);
-  --btn-bg-active: color-mix(in srgb, var(--color-warning) 76%, black);
-  --btn-fg:        var(--color-slate-1000);
-  --btn-border:    rgba(0, 0, 0, 0.15);
+  --btn-bg:        linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(0, 0, 0, 0.12) 100%), #b8730b;
+  --btn-bg-hover:  linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(0, 0, 0, 0.06) 100%), #cc8312;
+  --btn-bg-active: #945c07;
+  --btn-fg:        #ffffff;
+  --btn-border:    rgba(0, 0, 0, 0.45);
+  --btn-shadow:    inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .root[data-size="xs"] { height: var(--control-height-2xs); padding: 0 var(--space-3); font-size: var(--font-size-xs); }

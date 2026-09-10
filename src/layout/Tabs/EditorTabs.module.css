@@ -81,9 +81,10 @@
 .tabActive {
   background: var(--color-surface-2) !important;
   color: var(--color-text-primary) !important;
-  font-weight: 600;
-  border-color: transparent !important;
-  box-shadow: none !important;
+  font-weight: 500;
+  border: 1px solid rgba(0, 0, 0, 0.45) !important;
+  border-bottom: 1px solid transparent !important;
+  box-shadow: var(--shadow-bevel), 0 1px 2px rgba(0, 0, 0, 0.2) !important;
 }
 
 /* Visible keyboard focus, everywhere. */

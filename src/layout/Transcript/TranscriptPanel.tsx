@@ -54,6 +54,7 @@ import { Icon } from '@components/Icon';
 import { Dropdown } from '@components/Dropdown';
 import { SearchField } from '@components/SearchField';
 import { EmptyState } from '@components/EmptyState';
+import { ScrollableStrip } from '@components/ScrollableStrip';
 import { cn } from '@utils/cn';
 import { activeCompRootId } from '@core/scene/activeComp';
 import { getTimelineController } from '@core/timeline/TimelineController';
@@ -401,7 +402,10 @@ export function TranscriptPanel(): JSX.Element {
         />
       </div>
 
-      <div className={styles.toolbarRow}>
+      <ScrollableStrip
+        className={styles.toolbarRowWrap}
+        scrollClassName={styles.toolbarRow}
+      >
         <div className={styles.toolbarGroup}>
           <Button
             size="xs"
@@ -507,7 +511,7 @@ export function TranscriptPanel(): JSX.Element {
             ]}
           />
         </div>
-      </div>
+      </ScrollableStrip>
 
       {showFillers && (
         <div className={styles.fillerEditorCard}>

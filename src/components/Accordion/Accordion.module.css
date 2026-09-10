@@ -21,9 +21,30 @@
   opacity: 0.5;
 }
 
+.headerRow {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+}
+
 .header {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font: inherit;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  padding-right: var(--space-5);
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.headerRow:has(.actions) .trigger {
+  padding-right: var(--space-2);
 }
 
 .trigger {

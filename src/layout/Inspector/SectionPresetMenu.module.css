@@ -8,21 +8,24 @@
 .trigger {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  height: var(--control-height-2xs);
-  padding: 0 var(--space-2);
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--color-text-tertiary);
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
+  transition: all var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .trigger:hover {
   color: var(--color-text-primary);
-  background: var(--color-surface-2);
+  background: var(--color-surface-3);
+  border-color: var(--color-border);
 }
 
 .triggerText {
@@ -36,32 +39,34 @@
 }
 
 .nameInput {
-  width: 110px;
-  height: var(--control-height-2xs);
+  width: 120px;
+  height: var(--control-height-md);
   padding: 0 var(--space-2);
   border: 1px solid var(--color-field-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: var(--color-surface-2);
   color: var(--color-text-primary);
   font-family: inherit;
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-xs);
 }
 
 .nameBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--control-height-2xs);
-  height: var(--control-height-2xs);
+  width: var(--control-height-md);
+  height: var(--control-height-md);
   padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
   cursor: pointer;
+  transition: all var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .nameBtn:hover {
   color: var(--color-text-primary);
-  background: var(--color-surface-2);
+  background: var(--color-surface-3);
+  border-color: var(--color-border);
 }

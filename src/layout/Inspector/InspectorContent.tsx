@@ -90,7 +90,7 @@ function toAccordionItem(
   searching: boolean,
   nodeIds: ReadonlyArray<string>,
 ): AccordionItem {
-  const { Component } = def;
+  const { Component, actions: ActionsComponent } = def;
   const coverage = nodeIds.length > 1 ? sectionCoverage(def, nodeIds) : nodeIds.length;
   const partial = nodeIds.length > 1 && coverage < nodeIds.length ? `${coverage} of ${nodeIds.length}` : null;
   const badge = searching
@@ -101,6 +101,7 @@ function toAccordionItem(
     title: resolve(def.title, nodeId),
     defaultOpen: def.defaultOpen === undefined ? undefined : resolve(def.defaultOpen, nodeId),
     mountOnOpen: def.mountOnOpen,
+    actions: ActionsComponent ? <ActionsComponent nodeId={nodeId} nodeIds={nodeIds} /> : undefined,
     // `forceOpen`, not `defaultOpen`: a remembered "closed" for this section
     // outranks defaultOpen, and would otherwise hide the hit you searched for.
     ...(searching ? { forceOpen: true } : {}),

@@ -21,10 +21,8 @@ import { useFocusStore } from '@stores/focusStore';
 import { PrecompControl } from './PrecompControl';
 import { RevertSvgRow } from './SvgSection';
 import { TransformSection } from './TransformSection';
-import { ThreeDControl } from './ThreeDControl';
 import { LayerStylesControls } from '@layout/Effects/LayerStylesControls';
 import { StylePresetsSection } from './StylePresetsSection';
-import { readNodeKind } from '@core/scene/sceneDerive';
 import styles from '@layout/EditorLayout/panels.module.css';
 
 /**
@@ -34,14 +32,7 @@ import styles from '@layout/EditorLayout/panels.module.css';
  * still have a position.
  */
 export function TransformWithThreeDSection({ nodeId }: { nodeId: string }): JSX.Element {
-  const node = defaultSceneGraph.getNode(nodeId);
-  const kind = node ? readNodeKind(node) : null;
-  return (
-    <>
-      <TransformSection nodeId={nodeId} />
-      {kind !== 'group' && kind !== 'null' && <ThreeDControl nodeId={nodeId} />}
-    </>
-  );
+  return <TransformSection nodeId={nodeId} />;
 }
 
 /**

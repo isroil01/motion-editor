@@ -9,7 +9,7 @@
  * and a click applies to all of them — as one undo entry.
  */
 
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Icon, type IconName } from '@components/Icon';
 import { Dropdown, type DropdownItem } from '@components/Dropdown';
 import { cn } from '@utils/cn';
@@ -17,37 +17,13 @@ import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { bumpScene } from '@stores/sceneStore';
 import { batchHistory } from '@stores/historyStore';
 import { readNodeKind } from '@core/scene/sceneDerive';
-import { splitKind } from '@core/plugins/layerKindSchema';
-import { renameLayer } from '@core/scene/renameLayer';
 import { LABEL_COLORS, getNodeLabelColor, setNodeLabelColor } from '@core/scene/labelColor';
-import { KIND_COLOR } from '@core/scene/sceneDerive';
 import { canBe3D, is3DEnabled, set3DEnabled } from '@core/scene/threeD';
 import { getNodeMotionBlur, setNodeMotionBlur } from '@core/effects/motionBlur';
 import { getNodeAdjustment, setNodeAdjustment } from '@core/effects/adjustment';
 import { enableLayerMotionBlurWithFeedback, disableLayerMotionBlur, setAdjustmentWithFeedback } from '@core/effects/layerSwitchFeedback';
 import { useNodesRevision } from '@core/inspector/nodeRevision';
-import { selectionKinds } from '@core/inspector/multiSelection';
 import styles from './SelectionHeader.module.css';
-
-const LAYER_KIND_LABEL: Record<string, string> = {
-  shape: 'Shape', text: 'Text', image: 'Image', video: 'Video', group: 'Group', null: 'Null',
-  camera: 'Camera', light: 'Light', audio: 'Audio', svg: 'SVG', particle: 'Particle',
-};
-
-const LAYER_KIND_ICON: Record<string, IconName> = {
-  shape: 'shape', text: 'type', image: 'image', video: 'video', group: 'folder', null: 'info',
-  camera: 'camera', light: 'light', audio: 'audio', svg: 'shape', particle: 'sparkles',
-};
-
-export function layerKindLabel(kind: string): string {
-  const custom = splitKind(kind);
-  if (custom) return custom.kindId;
-  return LAYER_KIND_LABEL[kind] ?? kind;
-}
-
-function plural(label: string, n: number): string {
-  return n === 1 ? label : `${label}s`;
-}
 
 type Tri = 'all' | 'none' | 'mixed';
 
@@ -121,30 +97,10 @@ function SelectionHeaderInner({ nodeIds = [], actions }: SelectionHeaderProps): 
   useNodesRevision(nodeIds);
   const primary = nodeIds[0] ?? null;
   const node = primary ? defaultSceneGraph.getNode(primary) : null;
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState('');
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (renaming) inputRef.current?.select();
-  }, [renaming]);
 
   if (!primary || !node) return null;
 
-  const kind = readNodeKind(node);
-  const kindIcon = LAYER_KIND_ICON[kind] ?? 'layers';
-  const multi = nodeIds.length > 1;
-  const name = node.name?.trim() || primary;
-  const kinds = selectionKinds(nodeIds);
-  const breakdown = kinds.map((k) => `${k.count} ${plural(layerKindLabel(k.kind).toLowerCase(), k.count)}`).join(', ');
-  const labelColor = getNodeLabelColor(primary) ?? KIND_COLOR[kind] ?? undefined;
-
-  const commitRename = (): void => {
-    setRenaming(false);
-    const next = draft.trim();
-    if (!next || next === name) return;
-    renameLayer(primary, next);
-  };
+  const labelColor = getNodeLabelColor(primary) ?? undefined;
 
   const colorItems: DropdownItem[] = [
     {
@@ -178,42 +134,7 @@ function SelectionHeaderInner({ nodeIds = [], actions }: SelectionHeaderProps): 
   };
 
   return (
-    <div className={styles.head} data-selection-header>
-      <span className={styles.glyph} title={multi ? breakdown : layerKindLabel(kind)}>
-        <Icon name={multi ? 'layers' : kindIcon} size="sm" />
-      </span>
-
-      {renaming && !multi ? (
-        <input
-          ref={inputRef}
-          className={styles.nameInput}
-          value={draft}
-          aria-label="Layer name"
-          autoFocus
-          onChange={(e) => setDraft(e.currentTarget.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commitRename();
-            if (e.key === 'Escape') setRenaming(false);
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          className={styles.name}
-          title={multi ? breakdown : `${name} — double-click to rename`}
-          onDoubleClick={() => {
-            if (multi) return;
-            setDraft(name);
-            setRenaming(true);
-          }}
-        >
-          {multi ? `${nodeIds.length} layers` : name}
-        </button>
-      )}
-
-      <span className={styles.kind}>{multi ? breakdown : layerKindLabel(kind)}</span>
-
+    <div className={styles.headerButtons} data-selection-header>
       <Dropdown
         items={colorItems}
         placement="bottom-end"

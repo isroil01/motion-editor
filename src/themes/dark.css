@@ -125,14 +125,15 @@
   --color-hud-text:          rgba(200, 210, 255, 0.92);
 
   /* ── Primary === selection. Blue fill, white text. ─────────────── */
-  --color-primary:           #2988ff;
-  --color-primary-hover:     #4097ff;
-  --color-primary-active:    #1d75e0;
-  --color-primary-subtle:    rgba(41, 136, 255, 0.15);  /* selection tint */
+  --color-primary:           #1d78e3;
+  --color-primary-hover:     #328bf2;
+  --color-primary-active:    #1562bf;
+  --color-primary-subtle:    rgba(29, 120, 227, 0.15);  /* selection tint */
+  --color-primary-glow:      rgba(29, 120, 227, 0.35);
   --color-primary-foreground: var(--color-slate-0);      /* white on blue */
 
-  --color-accent:            #2988ff;
-  --color-accent-subtle:     rgba(41, 136, 255, 0.15);
+  --color-accent:            #1d78e3;
+  --color-accent-subtle:     rgba(29, 120, 227, 0.15);
 
   /* ── Modified / unsaved (the ONLY chrome amber) ───────────────── */
   --color-modified:          var(--color-amber-500);

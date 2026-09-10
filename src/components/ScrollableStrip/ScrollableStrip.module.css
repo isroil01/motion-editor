@@ -1,0 +1,99 @@
+/**
+ * ScrollableStrip — horizontal scroll container with gradient edge masks
+ * and micro-interactive swipe buttons when content overflows.
+ */
+
+.wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  --strip-bg: var(--color-panel-header, #18181b);
+}
+
+.scrollArea {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  width: 100%;
+  min-width: 0;
+  scroll-behavior: smooth;
+}
+
+.scrollArea::-webkit-scrollbar {
+  display: none;
+}
+
+.swipeOverlayLeft,
+.swipeOverlayRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast, 120ms) var(--motion-ease-standard, cubic-bezier(0.2, 0, 0, 1));
+}
+
+.swipeOverlayLeft {
+  left: 0;
+  padding-left: 3px;
+  padding-right: 18px;
+  background: linear-gradient(to right, var(--strip-bg) 55%, transparent);
+}
+
+.swipeOverlayRight {
+  right: 0;
+  padding-right: 3px;
+  padding-left: 18px;
+  background: linear-gradient(to left, var(--strip-bg) 55%, transparent);
+}
+
+.swipeOverlayVisible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.swipeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-xs, 20px);
+  height: var(--control-height-xs, 20px);
+  padding: 0;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface-2, #27272a);
+  color: var(--color-text-secondary, #a1a1aa);
+  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.08));
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition:
+    background-color var(--motion-duration-fast, 120ms),
+    color var(--motion-duration-fast, 120ms),
+    border-color var(--motion-duration-fast, 120ms),
+    transform var(--motion-duration-fast, 120ms);
+  flex: none;
+  outline: none;
+}
+
+.swipeBtn:hover {
+  background: var(--color-surface-3, #3f3f46);
+  color: var(--color-text-primary, #f4f4f5);
+  border-color: var(--color-border, rgba(255, 255, 255, 0.16));
+  transform: scale(1.08);
+}
+
+.swipeBtn:active {
+  transform: scale(0.92);
+}
+
+.swipeBtn:focus-visible {
+  outline: 1px solid var(--color-focus-ring, #3b82f6);
+  outline-offset: 1px;
+}

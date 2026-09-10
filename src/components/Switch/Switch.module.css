@@ -19,16 +19,17 @@
   display: inline-block;
   width: 24px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: var(--radius-control);
   background: var(--color-surface-0);
   border: 1px solid var(--color-field-border);
+  box-shadow: var(--shadow-well);
   flex: none;
   transition: var(--motion-hover-transition);
 }
 
 .root:hover:not(.disabled) .track {
-  border-color: var(--color-primary-subtle);
-  background: var(--color-surface-2);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--color-surface-0);
 }
 
 .root:has(.input:focus-visible) .track {
@@ -54,17 +55,20 @@
   height: 8px;
   border-radius: 1px;
   background: var(--color-text-secondary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   transition: var(--motion-hover-transition);
 }
 
 .root[data-state="on"] .track {
   background: var(--color-primary);
-  border-color: var(--color-primary);
+  border-color: rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .root[data-state="on"] .thumb {
   left: 13px;
-  background: var(--color-primary-foreground);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 .root[data-state="on"]:hover:not(.disabled) .track {

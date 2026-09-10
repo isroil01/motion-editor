@@ -38,8 +38,9 @@
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--color-surface-2);
-  border-radius: 0;
+  background: var(--color-surface-0);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.4);
+  border-radius: 1px;
 }
 
 .root[data-size="sm"] .track::before { height: 1px; }
@@ -50,7 +51,7 @@
   left: 0;
   height: 2px;
   background: var(--color-primary);
-  border-radius: 0;
+  border-radius: 1px;
   pointer-events: none;
   transition: width var(--motion-duration-fast) var(--motion-ease-standard);
 }
@@ -75,39 +76,41 @@
   -webkit-appearance: none;
   width: 6px;
   height: 12px;
-  border-radius: 0;
-  background: var(--color-primary);
-  border: none;
+  border-radius: 1px;
+  background: var(--color-neutral-100);
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: grab;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .input::-webkit-slider-thumb:hover {
-  background: var(--color-primary-hover);
+  background: #ffffff;
 }
 
 .input::-webkit-slider-thumb:active {
   cursor: grabbing;
-  background: var(--color-primary-active);
+  background: var(--color-primary);
 }
 
 .input::-moz-range-thumb {
   width: 6px;
   height: 12px;
-  border-radius: 0;
-  background: var(--color-primary);
-  border: none;
+  border-radius: 1px;
+  background: var(--color-neutral-100);
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: grab;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .input::-moz-range-thumb:hover {
-  background: var(--color-primary-hover);
+  background: #ffffff;
 }
 
 .input::-moz-range-thumb:active {
   cursor: grabbing;
-  background: var(--color-primary-active);
+  background: var(--color-primary);
 }
 
 .input:focus-visible::-webkit-slider-thumb {
