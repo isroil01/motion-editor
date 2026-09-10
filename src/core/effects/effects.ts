@@ -239,6 +239,7 @@ export type EffectType =
   | 'write-on'
   | 'light-burst'
   | 'beam-path'
+  | 'plexus'
   // Stylize — surface shading and per-cell resamples.
   | 'deep-glow'
   | 'glass'
@@ -3346,6 +3347,42 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'flickerPhase', label: 'Flicker Phase', type: 'number', unit: 's', min: -86400, max: 86400, precision: 3, default: 0 },
       { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
       { key: 'composite', label: 'Composite', type: 'enum', default: 0, options: [{ value: 0, label: 'Add over layer' }, { value: 1, label: 'Beam only' }] },
+    ],
+    css: () => '',
+  },
+  {
+    /*
+      Plexus — the point/line network (the Rowbyte class). A deterministic
+      point cloud drifting on value noise as Evolution advances — or, with a
+      mask path assigned, the path's vertices (a tracked mask makes the
+      network follow the object) — with every pair closer than Max Distance
+      linked by a line whose opacity falls with distance, and optional
+      triangles between mutually-close triples. Canvas2D-only like Lightning:
+      it DRAWS, with no per-pixel form. The particle system has the same
+      network over its live particles (Plexus Distance in the Particle
+      section). See plexus.ts.
+    */
+    type: 'plexus',
+    label: 'Plexus',
+    params: [
+      { key: 'pathMaskId', label: 'Points From Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
+      { key: 'pathStep', label: 'Path Step', type: 'number', min: 1, max: 32, precision: 0, default: 4 },
+      { key: 'pointCount', label: 'Points', type: 'number', min: 0, max: 700, precision: 0, default: 80 },
+      { key: 'spread', label: 'Spread', type: 'number', unit: '%', min: 0, max: 100, default: 90 },
+      { key: 'drift', label: 'Drift', type: 'number', unit: 'px', min: 0, max: 1000, default: 40 },
+      { key: 'evolution', label: 'Evolution', type: 'number', min: -100000, max: 100000, default: 0 },
+      { key: 'maxDistance', label: 'Max Distance', type: 'number', unit: 'px', min: 0, max: 2000, default: 140 },
+      { key: 'lineWidth', label: 'Line Width', type: 'number', unit: 'px', min: 0, max: 20, precision: 1, default: 1 },
+      { key: 'lineOpacity', label: 'Line Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 60 },
+      { key: 'lineColor', label: 'Line Color', type: 'color', default: '#9fd0ff' },
+      { key: 'triangles', label: 'Triangles', type: 'checkbox', default: false },
+      { key: 'triangleOpacity', label: 'Triangle Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 15 },
+      { key: 'pointSize', label: 'Point Size', type: 'number', unit: 'px', min: 0, max: 60, default: 3 },
+      { key: 'pointColor', label: 'Point Color', type: 'color', default: '#ffffff' },
+      { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
+      { key: 'seed', label: 'Seed', type: 'number', min: 0, max: 100000, precision: 0, default: 1 },
+      { key: 'composite', label: 'Composite', type: 'number', min: 0, max: 4, precision: 0, default: 0 },
     ],
     css: () => '',
   },

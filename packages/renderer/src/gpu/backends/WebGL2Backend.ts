@@ -35,7 +35,7 @@ import type {
   VertexBufferLayout,
   IndexFormat,
 } from '../types';
-import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING } from '../types';
+import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING } from '../types';
 import { sourcePassesThrough } from '../types';
 import { nextId } from '../../utils/ids';
 
@@ -802,6 +802,9 @@ class WebGL2PassEncoder implements RenderPassEncoder {
     // solid in the comp; carrying the AO sampler explicitly is what stops it.
     let aoSampler: WebGLSampler | null = null;
     let aoUnit = -1;
+    // The second shadow map (13/14, plan B2): NEAREST for the same packed-depth reason.
+    let shadow2Sampler: WebGLSampler | null = null;
+    let shadow2Unit = -1;
     const depthUnits: number[] = [];
     for (const e of (group.native as { entries: BindGroupResource[] }).entries) {
       if ('buffer' in e) {
@@ -819,6 +822,7 @@ class WebGL2PassEncoder implements RenderPassEncoder {
         if (e.binding === ENV_TEXTURE_BINDING) envUnit = texIndex;
         if (e.binding === SHADOW_TEXTURE_BINDING) shadowUnit = texIndex;
         if (e.binding === AO_TEXTURE_BINDING) aoUnit = texIndex;
+        if (e.binding === SHADOW2_TEXTURE_BINDING) shadow2Unit = texIndex;
         if (this.pipeline?.depthTexBindings.has(e.binding)) depthUnits.push(texIndex);
         texIndex += 1;
       } else if (e.binding === ENV_SAMPLER_BINDING) {
@@ -827,6 +831,8 @@ class WebGL2PassEncoder implements RenderPassEncoder {
         shadowSampler = e.sampler.native as WebGLSampler;
       } else if (e.binding === AO_SAMPLER_BINDING) {
         aoSampler = e.sampler.native as WebGLSampler;
+      } else if (e.binding === SHADOW2_SAMPLER_BINDING) {
+        shadow2Sampler = e.sampler.native as WebGLSampler;
       } else {
         sampler = e.sampler.native as WebGLSampler;
       }
@@ -853,6 +859,7 @@ class WebGL2PassEncoder implements RenderPassEncoder {
     if (envSampler && envUnit >= 0) gl.bindSampler(envUnit, envSampler);
     if (shadowSampler && shadowUnit >= 0) gl.bindSampler(shadowUnit, shadowSampler);
     if (aoSampler && aoUnit >= 0) gl.bindSampler(aoUnit, aoSampler);
+    if (shadow2Sampler && shadow2Unit >= 0) gl.bindSampler(shadow2Unit, shadow2Sampler);
     for (const u of depthUnits) gl.bindSampler(u, null);
   }
   setVertexBuffer(_slot: number, buffer: BufferHandle): void {

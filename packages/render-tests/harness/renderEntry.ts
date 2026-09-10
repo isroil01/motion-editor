@@ -267,6 +267,38 @@ async function renderScene(scene: Scene, backend: BackendChoice): Promise<void> 
       } catch {
         console.log('[harness] webgl2 EXT_color_buffer_float: probe failed');
       }
+      // WHICH adapter. The WebGPU run uses the machine's real GPU (see
+      // main.cjs), and a laptop with two of them can hand the harness a
+      // different one from run to run — every "known divergence" ceiling is
+      // measured against ONE of those. A run that says which it used turns
+      // "checkerboard drifted 1.5% since yesterday" into "yesterday was the
+      // Radeon, today the GeForce" without a second thought.
+      // The window's device pixel ratio feeds every raster scale (particle
+      // fields, vector tiers), so a harness window that inherits the desktop's
+      // display scaling renders DIFFERENT bytes on a 125% monitor than on a
+      // 100% one — main.cjs pins it to 1; this line is the receipt.
+      console.log(`[harness] devicePixelRatio: ${window.devicePixelRatio}`);
+      try {
+        const probe = document.createElement('canvas');
+        const gl = probe.getContext('webgl2');
+        const dbg = gl?.getExtension('WEBGL_debug_renderer_info') as { UNMASKED_RENDERER_WEBGL: number } | null;
+        console.log(`[harness] webgl2 renderer: ${gl && dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : 'unknown'}`);
+      } catch {
+        console.log('[harness] webgl2 renderer: probe failed');
+      }
+      if (backend === 'webgpu') {
+        try {
+          const adapter = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
+          type AdapterInfo = { vendor?: string; architecture?: string; device?: string; description?: string };
+          const info = adapter
+            ? ((adapter as { info?: AdapterInfo }).info
+              ?? (await (adapter as { requestAdapterInfo?: () => Promise<AdapterInfo> }).requestAdapterInfo?.()))
+            : undefined;
+          console.log(`[harness] webgpu adapter: ${info ? [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(' / ') : 'unknown'}`);
+        } catch {
+          console.log('[harness] webgpu adapter: probe failed');
+        }
+      }
     }
   }
 

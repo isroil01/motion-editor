@@ -52,7 +52,7 @@ import { scaleEffectLengths, type Effect } from '@core/effects/effects';
 import { deinterlaceData, deinterlaceInto, type FieldOrder } from './deinterlace';
 import { videoDiag } from './videoPlaybackDiag';
 import { paintMaskMatte, type LayerMask } from '@core/effects/mask';
-import { drawParticleField, particleFieldSignature } from '@core/particles/particleRender';
+import { drawParticleField, particleFieldSignature, type ParticleSpriteImage } from '@core/particles/particleRender';
 import type { ParticleConfig } from '@core/particles/particleSim';
 import type { CubeLut } from '@core/effects/cubeLut';
 import {
@@ -1118,17 +1118,21 @@ export class AppTextureProvider implements TextureProvider {
    * threw a pinned texture away each time — for an image that differs from the
    * cached one only by a rotation the GPU was going to apply anyway.
    *
-   * Non-spot types keep the bare-colour key deliberately: their wash genuinely
-   * depends on nothing else, so ambient/point/parallel of the same colour SHARE
-   * one texture, as they always have. That is not a collision — it is the same
-   * image.
+   * Point/parallel keep the bare-colour key deliberately: their wash genuinely
+   * depends on nothing else, so two of the same colour SHARE one texture, as
+   * they always have. That is not a collision — it is the same image. Ambient
+   * split off when its wash became a flat plate (no falloff): sharing the
+   * radial texture with point lights of the same colour would draw one or the
+   * other wrong.
    */
   setLight(key: string, light: LightWash): void {
     const signature = light.pool
       ? `${light.color}|pool|${light.coneFeather ?? 'd'}`
       : light.type === 'spot'
         ? `${light.color}|spot|${light.cone ?? 0}|${light.coneFeather ?? 'd'}`
-        : light.color;
+        : light.type === 'ambient'
+          ? `${light.color}|ambient`
+          : light.color;
     const existing = this.lightEntries.get(key);
     if (existing && existing.signature === signature) return;
     if (existing) {
@@ -1892,6 +1896,31 @@ export class AppTextureProvider implements TextureProvider {
     this.frameEntries.delete(key);
   }
 
+  /** Decoded sprite images for `shape: 'sprite'` particle systems, by source; `null` = decode in flight. */
+  private readonly spriteBitmaps = new Map<string, ImageBitmap | null>();
+
+  /**
+   * The sprite image for a particle field, or null until it has decoded —
+   * the first request starts the decode through the same loader image
+   * layers use, and `onChange` re-renders when it lands (the field's
+   * signature carries readiness, so that frame is redrawn, not skipped).
+   */
+  private spriteFor(src: string | undefined, frames: number): ParticleSpriteImage | null {
+    if (!src) return null;
+    const have = this.spriteBitmaps.get(src);
+    if (have) return { image: have, width: have.width, height: have.height, frames: Math.max(1, Math.floor(frames)) };
+    if (have === undefined) {
+      this.spriteBitmaps.set(src, null);
+      this.loader(src).then((bitmap) => {
+        this.spriteBitmaps.set(src, bitmap);
+        this.onChange?.();
+      }).catch(() => {
+        this.spriteBitmaps.delete(src);
+      });
+    }
+    return null;
+  }
+
   /**
    * Register/refresh a particle emitter's rasterized field for this frame.
    * The simulation is a pure function of (config, time) — see particleSim —
@@ -1916,7 +1945,10 @@ export class AppTextureProvider implements TextureProvider {
     const requestedScale = dpr * Math.max(1, transformScale) * (this.rasterScale || 1);
     const scale = Math.max(0.5, Math.min(requestedScale, PARTICLE_TEX_MAX / Math.max(w, h)));
     const time = Math.max(0, timeSec);
-    const signature = `${particleFieldSignature(cfg, time, w, h, scale)}|fps:${fps}`;
+    // The sprite image's readiness is part of the signature: the frame drawn
+    // before it decoded (circles standing in) must be redrawn once it lands.
+    const sprite = cfg.shape === 'sprite' ? this.spriteFor(cfg.spriteSrc, cfg.spriteFrames ?? 1) : null;
+    const signature = `${particleFieldSignature(cfg, time, w, h, scale)}|fps:${fps}|sprite:${sprite ? 'ready' : 'none'}`;
     let entry = this.particleEntries.get(key);
     if (!entry) {
       entry = { kind: 'particles', signature: '', canvas: document.createElement('canvas'), texture: null, w: 0, h: 0 };
@@ -1930,9 +1962,15 @@ export class AppTextureProvider implements TextureProvider {
       entry.canvas.width = pxW;
       entry.canvas.height = pxH;
     }
-    const ctx = entry.canvas.getContext('2d');
+    // CPU raster on purpose (the same call the vector bakes make): a hardware
+    // 2D canvas draws thousands of additive, translucent discs with the GPU's
+    // own antialiasing and blend rounding, so the field read differently on
+    // the Radeon than on the GeForce, and on both than in the software run the
+    // goldens come from. Five thousand `arc()` fills are milliseconds on Skia's
+    // CPU path; a field that renders the same everywhere is worth them.
+    const ctx = entry.canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
-    drawParticleField(ctx, cfg, time, w, h, scale, { fps, cacheKey: key });
+    drawParticleField(ctx, cfg, time, w, h, scale, { fps, cacheKey: key, sprite });
 
     if (entry.texture === null || entry.w !== pxW || entry.h !== pxH) {
       entry.texture = this.resources.texture(
@@ -2674,6 +2712,18 @@ function rasterizeLight(light: LightWash): HTMLCanvasElement {
   // glow whose shape cannot be reconciled with them is not an improvement; a
   // wash rewrite should come with its own re-blessed references and a reason,
   // not ride along with a lighting fix.
+  // Ambient lifts every pixel equally — it has no position, so a radial
+  // falloff is a defect, not a look: it painted a 2·radius blob pinned to the
+  // comp centre that read as a second light sitting in the scene (see the
+  // known-divergent note on the `light-ambient` golden, which recorded this
+  // exact question). A flat plate, sized to the frame by `buildSnapshot`,
+  // is the honest 2D reading of "lights everything from nowhere".
+  if (light.type === 'ambient') {
+    ctx.fillStyle = light.color;
+    ctx.fillRect(0, 0, s, s);
+    return canvas;
+  }
+
   const g = ctx.createRadialGradient(c, c, 0, c, c, c);
   g.addColorStop(0, light.color);
   g.addColorStop(1, 'rgba(0,0,0,0)');

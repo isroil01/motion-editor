@@ -16,6 +16,7 @@ import { defaultAnimation } from '@motion/animation';
 import { runAnimEdit } from '@core/animation/animationCommands';
 import { compToKeyframeTime } from '@core/timeline/TimelineController';
 import { useActiveWorkspace } from '@stores/projectStore';
+import { useAssetStore } from '@stores/assetStore';
 import { useAnimationRevision } from '@hooks/useAnimationRevision';
 import { ColorKfRow } from './ColorKfRow';
 import { writeTransformProps } from '@core/scene/transformWrite';
@@ -30,6 +31,8 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
   useAnimationRevision();
   const time = useActiveWorkspace()?.time ?? 0;
   const [bakeOpen, setBakeOpen] = useState(false);
+  // Image assets for the sprite picker — a hook, so it sits above the early return.
+  const imageAssets = useAssetStore((s) => s.assets).filter((a) => a.type === 'image');
   const node = defaultSceneGraph.getNode(nodeId);
   if (!node) return null;
   const cfg = readNodeParticle(node) ?? DEFAULT_PARTICLE_CONFIG;
@@ -107,12 +110,12 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
     </div>
   );
 
-  const Color = (key: 'colorStart' | 'colorEnd', label: string): JSX.Element => (
+  const Color = (key: 'colorStart' | 'colorEnd' | 'colorMid', label: string): JSX.Element => (
     <ColorKfRow
       nodeId={nodeId}
       propPrefix={particlePropPath(key)}
       label={label}
-      value={cfg[key]}
+      value={cfg[key] ?? cfg.colorStart}
       setValue={(hex) => set(key, hex)}
     />
   );
@@ -126,11 +129,12 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
             <option value="point">Point</option>
             <option value="box">Box</option>
             <option value="circle">Circle</option>
+            <option value="sphere">Sphere</option>
           </select>
         </div>
         {cfg.emitterType !== 'point' && (
           <>
-            {Num('emitterWidth', cfg.emitterType === 'circle' ? 'Diameter' : 'Width', 'px', 0)}
+            {Num('emitterWidth', cfg.emitterType === 'circle' || cfg.emitterType === 'sphere' ? 'Diameter' : 'Width', 'px', 0)}
             {cfg.emitterType === 'box' && Num('emitterHeight', 'Height', 'px', 0)}
           </>
         )}
@@ -150,6 +154,12 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
             and zero out, and gravity is the thing you set once. */}
         {Num('windX', 'Wind X', 'px/s²')}
         {Num('windY', 'Wind Y', 'px/s²')}
+        {/* Linear drag, folded into the closed form exactly — scrubs free. */}
+        {Num('drag', 'Drag', '/s', 0)}
+        {/* Velocity streaks: a fraction of the comp shutter, applied only when
+            this layer's motion-blur switch is on (buildSnapshot hands the
+            shutter to the field). */}
+        {Num('motionBlur', 'Motion Blur', '', 0, 1)}
         {/* One amplitude, two characters: ballistic mode wanders (closed-form,
             scrub-free), stateful mode swirls (real curl-noise force). Scale is
             stateful-only — the wander has no spatial field to scale. */}
@@ -181,22 +191,27 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
             className={styles.select}
             style={{ width: 110 }}
             value={cfg.subEmit ?? 'off'}
-            onChange={(e) => set('subEmit', e.target.value as 'off' | 'death' | 'bounce')}
+            onChange={(e) => set('subEmit', e.target.value as ParticleConfig['subEmit'])}
             aria-label="Sub-emitter trigger"
           >
             <option value="off">Off</option>
             <option value="death">On Death</option>
-            {/* A bounce is history — the closed-form emitter has none. */}
+            {/* A bounce is history — the closed-form emitter has none;
+                continuous shedding is a closed form and so ballistic-only. */}
             {cfg.simMode === 'stateful' && <option value="bounce">On Bounce</option>}
+            {cfg.simMode !== 'stateful' && <option value="continuous">Continuous</option>}
           </select>
         </div>
+        {cfg.subEmit === 'continuous' && Num('subRate', 'Sub Rate', '/s', 0)}
         {(cfg.subEmit ?? 'off') !== 'off' && (
           <>
-            <div className={styles.popoverRow}>
-              <div style={{ width: 13 }} />
-              <span className={styles.popoverLabel}>Burst</span>
-              <ValueField value={cfg.subCount ?? 8} min={0} max={16} precision={0} onChange={(v) => set('subCount', Number(v))} aria-label="Children per burst" />
-            </div>
+            {cfg.subEmit !== 'continuous' && (
+              <div className={styles.popoverRow}>
+                <div style={{ width: 13 }} />
+                <span className={styles.popoverLabel}>Burst</span>
+                <ValueField value={cfg.subCount ?? 8} min={0} max={16} precision={0} onChange={(v) => set('subCount', Number(v))} aria-label="Children per burst" />
+              </div>
+            )}
             <div className={styles.popoverRow}>
               <div style={{ width: 13 }} />
               <span className={styles.popoverLabel}>Burst Speed</span>
@@ -242,6 +257,35 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
         {cfg.simMode === 'stateful' && Num('turbulenceScale', 'Turb. Scale', 'px')}
         {Num('turbulenceSpeed', 'Turb. Speed', '×')}
         {Num('spin', 'Spin', '°/s')}
+        {/* Plexus over the live particles: 0 distance = off. */}
+        {Num('plexusDistance', 'Plexus Dist.', 'px', 0)}
+        {(cfg.plexusDistance ?? 0) > 0 && (
+          <>
+            {Num('plexusWidth', 'Plexus Width', 'px', 0)}
+            {Num('plexusOpacity', 'Plexus Opacity', '', 0, 1)}
+            <div className={styles.popoverRow}>
+              <div style={{ width: 13 }} />
+              <span className={styles.popoverLabel}>Plexus Color</span>
+              <input
+                type="color"
+                value={cfg.plexusColor ?? DEFAULT_PARTICLE_CONFIG.plexusColor}
+                onChange={(e) => set('plexusColor', e.target.value)}
+                aria-label="Plexus line colour"
+              />
+            </div>
+            <div className={styles.popoverRow}>
+              <div style={{ width: 13 }} />
+              <span className={styles.popoverLabel}>Triangles</span>
+              <input
+                type="checkbox"
+                checked={cfg.plexusTriangles ?? false}
+                onChange={(e) => set('plexusTriangles', e.target.checked)}
+                aria-label="Plexus triangles"
+              />
+            </div>
+            {cfg.plexusTriangles && Num('plexusTriangleOpacity', 'Tri. Opacity', '', 0, 1)}
+          </>
+        )}
 
         <div className={styles.popoverRow}>
           <span className={styles.popoverLabel}>Shape</span>
@@ -250,13 +294,50 @@ export function ParticleSection({ nodeId }: { nodeId: string }): JSX.Element | n
             <option value="square">Square</option>
             <option value="line">Line</option>
             <option value="star">Star</option>
+            <option value="sprite">Sprite (image)</option>
           </select>
         </div>
+        {cfg.shape === 'sprite' && (
+          <>
+            <div className={styles.popoverRow}>
+              <div style={{ width: 13 }} />
+              <span className={styles.popoverLabel}>Image</span>
+              <select
+                className={styles.select}
+                style={{ width: 110 }}
+                value={cfg.spriteAssetId ?? ''}
+                onChange={(e) => set('spriteAssetId', e.target.value)}
+                aria-label="Sprite image asset"
+              >
+                <option value="">(none — circles)</option>
+                {imageAssets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <div className={styles.popoverRow}>
+              <div style={{ width: 13 }} />
+              <span className={styles.popoverLabel}>Sheet Frames</span>
+              <ValueField value={cfg.spriteFrames ?? 1} min={1} max={256} precision={0} onChange={(v) => set('spriteFrames', Number(v))} aria-label="Sprite sheet frames" />
+            </div>
+            {(cfg.spriteFrames ?? 1) > 1 && (
+              <div className={styles.popoverRow}>
+                <div style={{ width: 13 }} />
+                <span className={styles.popoverLabel}>Sheet FPS</span>
+                <ValueField value={cfg.spriteFps ?? 0} min={0} max={120} precision={0} unit="fps" onChange={(v) => set('spriteFps', Number(v))} aria-label="Sprite sheet frames per second (0 = by age)" />
+              </div>
+            )}
+          </>
+        )}
         {Num('sizeStart', 'Size Birth', 'px', 0)}
+        {/* The mid-point rows: unset until touched, so old systems keep their
+            straight two-point ramps byte for byte. */}
+        {Num('sizeMid', 'Size Mid', 'px', 0)}
         {Num('sizeEnd', 'Size Death', 'px', 0)}
+        {Num('midAge', 'Mid Age', '', 0.01, 0.99)}
         {Color('colorStart', 'Color Birth')}
+        {Color('colorMid', 'Color Mid')}
         {Color('colorEnd', 'Color Death')}
         {Num('opacityStart', 'Opacity Birth', '', 0, 1)}
+        {Num('opacityMid', 'Opacity Mid', '', 0, 1)}
         {Num('opacityEnd', 'Opacity Death', '', 0, 1)}
 
         <div className={styles.popoverRow}>

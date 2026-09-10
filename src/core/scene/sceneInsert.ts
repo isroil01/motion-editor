@@ -1663,7 +1663,7 @@ export function insertSvgDocument(
  * PAR-corrected via `sourceOf`, so an anamorphic or DV source fits by its
  * DISPLAY shape rather than its stored one.
  */
-export async function insertMedia(asset: ImportedAsset): Promise<void> {
+export async function insertMedia(asset: ImportedAsset): Promise<string | undefined> {
   const rootId = activeCompRootId();
   if (asset.type === 'audio') {
     insertAudio(asset);
@@ -1708,10 +1708,11 @@ export async function insertMedia(asset: ImportedAsset): Promise<void> {
     transform.props.assetId = asset.id;
   }
   placeInComp(node, { customW: width, customH: height, exactSize: true });
-  
+
   defaultSceneGraph.addChild(rootId, node);
   useSelectionStore.getState().set([node.id]);
   bumpScene();
+  return node.id;
 }
 
 /**

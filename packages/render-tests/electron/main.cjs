@@ -48,6 +48,13 @@ const fs = require('node:fs');
 const WANT_WEBGPU = (process.env.HARNESS_BACKENDS || '').includes('webgpu');
 app.commandLine.appendSwitch('enable-unsafe-swiftshader');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+// The window's device pixel ratio is an INPUT to the renderer: particle
+// fields and vector tiers scale their rasters by it. An offscreen window
+// inherits the primary display's scaling, so the same scenes rendered on a
+// laptop panel at 200% and on its docked 100% monitor (or on CI) are two
+// different sets of bytes — particles-v2 drifted 1.2% between two runs on one
+// machine for exactly this reason. Pin it; renderEntry logs the value.
+app.commandLine.appendSwitch('force-device-scale-factor', '1');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 // The FULL sandbox off, not just the GPU process's.
 //

@@ -109,6 +109,12 @@ export function collectSceneGizmos(opts: CollectGizmosOptions): SceneGizmo[] {
     if (kind === 'light') {
       const values = defaultAnimation.evaluateNode(node.id, getRemappedTime(node.id, time));
       const lt = readNodeLight(node);
+      // An ambient or environment light has no position — it lights everything
+      // from nowhere. A permanent world-space starburst at its (meaningless)
+      // stored point reads as a second light in the scene; the auto-inserted
+      // Ambient Fill made that literal: add one light, see two. The badge is
+      // selection feedback only.
+      if ((lt.type === 'ambient' || lt.type === 'environment') && !selected) continue;
       // Parent-aware, through the same resolver the renderer's wash, Lambert
       // shading and shadow light all use. This read the raw LOCAL props, so a
       // light on a null rig had its cone and falloff sphere drawn where the

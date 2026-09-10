@@ -9,7 +9,7 @@
 import type { CommandBuffer } from '../commands/DrawCommand';
 import type { RenderBackend, RenderPassEncoder } from '../gpu/RenderBackend';
 import type { ResourceManager } from '../gpu/ResourceManager';
-import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING, type TextureFormat } from '../gpu/types';
+import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING, type TextureFormat } from '../gpu/types';
 import { QUAD_VERTEX_COUNT, unitQuadBuffer } from '../resources/Geometry';
 import type { MaterialSystem } from '../shaders/Material';
 
@@ -97,6 +97,10 @@ export class QuadRenderer {
         // simply the next name in the material's declared sampler list.
         if (item.aoTexture) entries.push({ binding: AO_TEXTURE_BINDING, texture: item.aoTexture });
         if (item.aoSampler) entries.push({ binding: AO_SAMPLER_BINDING, sampler: item.aoSampler });
+        // Bindings 13/14: the run's SECOND shadow map (plan B2). Last, by the
+        // same rule as the three pairs above; `uShadow2Tex` is the next name.
+        if (item.shadow2Texture) entries.push({ binding: SHADOW2_TEXTURE_BINDING, texture: item.shadow2Texture });
+        if (item.shadow2Sampler) entries.push({ binding: SHADOW2_SAMPLER_BINDING, sampler: item.shadow2Sampler });
 
         const p = item.pbrTextures;
         const bg = this.resources.bindGroup(
@@ -118,6 +122,8 @@ export class QuadRenderer {
           // And for the AO buffer: the fallback white texel and a real buffer
           // are two different textures at the same binding.
           + `:${item.aoTexture?.id ?? 0}`
+          // And for the second shadow map, for the same reason as the first.
+          + `:${item.shadow2Texture?.id ?? 0}`
           + `:${idx}`,
           { pipeline, entries },
         );

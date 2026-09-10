@@ -75,6 +75,9 @@ export interface DrawItem {
    *  a 24-bit depth packed across rgb and a filtered blend of two of them is not
    *  a depth. That is why it cannot be the layer's sampler. */
   shadowSampler?: SamplerHandle;
+  /** The run's SECOND shadow map, at bindings 13/14 (plan B2) — the same contract as the first. */
+  shadow2Texture?: TextureHandle;
+  shadow2Sampler?: SamplerHandle;
   /**
    * The run's ambient-occlusion buffer, at bindings 11/12.
    *
@@ -134,6 +137,8 @@ export class CommandBuffer {
    * a binding its material does not declare.
    */
   shadow?: { texture: TextureHandle; sampler: SamplerHandle };
+  /** The run's second shadow map (plan B2), bound beside the first. */
+  shadow2?: { texture: TextureHandle; sampler: SamplerHandle };
 
   /**
    * The ambient-occlusion buffer every lit-3d draw in this buffer binds.

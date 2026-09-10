@@ -40,6 +40,7 @@ import {
 } from '@core/animation/animationPresets';
 import { downloadBlob } from '@core/export/exportManager';
 import { hasTextComponent } from '@core/text/textAnimators';
+import { readNodeKind } from '@core/scene/sceneDerive';
 import { ChoreographySection } from './ChoreographySection';
 import { api, isAuthenticated } from '@core/api/client';
 import { cloudProjectsEnabled } from '@core/config/edition';
@@ -78,6 +79,7 @@ const PRESET_FOLDER_ICON: Record<string, IconName> = {
   Exits: 'trim-out',
   'Emphases & Loops': 'loop',
   '3D Motions': '3d',
+  Camera: 'camera',
   Behaviors: 'ease',
   Transitions: 'wipe',
   Backgrounds: 'image',
@@ -113,6 +115,14 @@ export function MotionPresetsPanel(): JSX.Element {
     if (!id) return false;
     const node = defaultSceneGraph.getNode(id);
     return !!node && hasTextComponent(node);
+  }, [selectedIds, sceneRev]);
+
+  /** Same question for camera presets — a camera move needs a camera layer. */
+  const selectionIsCamera = useMemo(() => {
+    const id = selectedIds[0];
+    if (!id) return false;
+    const node = defaultSceneGraph.getNode(id);
+    return !!node && readNodeKind(node) === 'camera';
   }, [selectedIds, sceneRev]);
 
   const processedPresets = useMemo(() => {
@@ -160,6 +170,14 @@ export function MotionPresetsPanel(): JSX.Element {
       notify({
         level: 'warning',
         message: `"${preset.name}" animates characters — select a text layer`,
+        durationMs: 2600,
+      });
+      return;
+    }
+    if (preset.requires === 'camera' && !selectionIsCamera) {
+      notify({
+        level: 'warning',
+        message: `"${preset.name}" moves the camera — select a camera layer`,
         durationMs: 2600,
       });
       return;
@@ -465,7 +483,10 @@ export function MotionPresetsPanel(): JSX.Element {
                 forceOpen={searching}
               >
                 {items.map((preset) => {
-                  const unavailable = preset.requires === 'text' && !!selectedIds[0] && !selectionIsText;
+                  const unavailable =
+                    !!selectedIds[0] &&
+                    ((preset.requires === 'text' && !selectionIsText) ||
+                      (preset.requires === 'camera' && !selectionIsCamera));
                   return (
                     // The delete control is a SIBLING of the row, not a child:
                     // BrowserRow is a <button>, and a button inside a button is
@@ -492,7 +513,7 @@ export function MotionPresetsPanel(): JSX.Element {
                         }
                         title={
                           unavailable
-                            ? `${preset.name} — needs a text layer`
+                            ? `${preset.name} — needs a ${preset.requires === 'camera' ? 'camera' : 'text'} layer`
                             : `${preset.description ?? preset.name}\nClick to apply, or drag onto a layer.`
                         }
                         disabled={unavailable}

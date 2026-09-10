@@ -8,6 +8,7 @@
 
 import { decodeExr, type ExrImage } from './exr';
 import { exrToRgba8 } from './exrImport';
+import { extractCryptomatte, setCryptomatteForAsset } from './cryptomatte';
 
 export interface FloatRgbaImage {
   width: number;
@@ -67,6 +68,9 @@ export async function importExrWithFloat(
 ): Promise<File> {
   const img = await decodeExr(await file.arrayBuffer());
   setFloatExrForAsset(assetId, exrToFloatRgba(img, exposure));
+  // Cryptomatte layers ride the same decode: extracted once, cached by asset
+  // id, offered by the Track Matte picker (cryptomatte.ts).
+  setCryptomatteForAsset(assetId, extractCryptomatte(img));
   const rgba8 = exrToRgba8(img, exposure);
   const canvas = document.createElement('canvas');
   canvas.width = img.width;

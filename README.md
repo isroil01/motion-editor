@@ -128,14 +128,14 @@ registry, this section is expected to drift, so re-check before quoting it.
 - 2D and 3D layers in one space, with cameras and lights (parenting included)
 - Masks, track mattes, blend modes, layer styles
 - Shape layers, paths, trim paths, repeaters, path operations
-- **203 effects** ([`src/core/effects/effects.ts`](src/core/effects/effects.ts))
+- **204 effects** ([`src/core/effects/effects.ts`](src/core/effects/effects.ts))
 
 **Animation**
 - Keyframes with full easing control and one graph editor, shared by the timeline
   and the Motion panel — Animated/Selected modes, a frozen reference curve, rove,
   and a library of saved ease curves
-- **78 presets** — 15 animation, 18 text, 6 behaviour, 5 scenery, 34 film look —
-  plus your own, saved from any layer and exported as a shareable file
+- **84 presets** — 15 animation, 18 text, 6 behaviour, 6 camera, 5 scenery, 34 film
+  look — plus your own, saved from any layer and exported as a shareable file
 - Per-glyph text animators with a real selector stack
 - Expressions, with caret autocomplete
 - Modifier stacks — ordered offset / wiggle / spring / loop / delay / audio rows

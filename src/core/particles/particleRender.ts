@@ -14,6 +14,7 @@
 import { simulateParticles, type ParticleBlend, type ParticleConfig, type ParticleShape } from './particleSim';
 import { particlesFromSoA } from './statefulParticleSim';
 import { statefulParticleCache } from './statefulParticleCache';
+import { drawPlexusLinks } from '@core/effects/plexus';
 import type { Particle } from './particleSim';
 
 /** One particle placed in TEXTURE space (origin top-left, emitter at centre). */
@@ -29,6 +30,21 @@ export interface ParticleSprite {
   color: string;
   opacity: number;
   shape: ParticleShape;
+  /** Streak half-vector in field px (velocity · shutter · amount / 2), when streaks are on. */
+  sx?: number;
+  sy?: number;
+  /** Sheet frame for `shape: 'sprite'`. */
+  spriteFrame?: number;
+  /** The particle itself (not one of its trail ghosts) — what a plexus links. */
+  head?: boolean;
+}
+
+/** A decoded sprite image for `shape: 'sprite'`, with its sheet frame count. */
+export interface ParticleSpriteImage {
+  image: CanvasImageSource;
+  width: number;
+  height: number;
+  frames: number;
 }
 
 function toSprites(
@@ -36,6 +52,8 @@ function toSprites(
   fieldW: number,
   fieldH: number,
   perspective = 0,
+  /** Seconds of velocity each streak spans (motionBlur · shutter); 0 = none. */
+  streakSec = 0,
 ): ParticleSprite[] {
   const cx = fieldW / 2;
   const cy = fieldH / 2;
@@ -75,6 +93,9 @@ function toSprites(
       }
     }
     const sc = scaleAt(p.z);
+    const streak = streakSec > 0 && p.vx !== undefined && p.vy !== undefined
+      ? { sx: p.vx * streakSec * sc * 0.5, sy: p.vy * streakSec * sc * 0.5 }
+      : {};
     out.push({
       x: cx + p.x * sc,
       y: cy + p.y * sc,
@@ -83,9 +104,55 @@ function toSprites(
       color: p.color,
       opacity: p.opacity,
       shape: p.shape,
+      head: true,
+      ...streak,
+      ...(p.spriteFrame !== undefined ? { spriteFrame: p.spriteFrame } : {}),
     });
   }
   return out;
+}
+
+/**
+ * Paint one sprite's SHAPE centred on the origin of an already-positioned,
+ * already-rotated context. Shared by the plain draw and the streak, which
+ * stamps the same shape several times along the velocity.
+ */
+function paintShape(ctx: CanvasRenderingContext2D, s: ParticleSprite, sprite: ParticleSpriteImage | null): void {
+  const r = s.size / 2;
+  if (s.shape === 'sprite' && sprite) {
+    const frames = Math.max(1, sprite.frames);
+    const fw = sprite.width / frames;
+    const f = Math.min(frames - 1, Math.max(0, s.spriteFrame ?? 0));
+    // Fit the frame's LONGER side to the particle size, keeping its aspect.
+    const k = s.size / Math.max(1, Math.max(fw, sprite.height));
+    const dw = fw * k; const dh = sprite.height * k;
+    ctx.drawImage(sprite.image, f * fw, 0, fw, sprite.height, -dw / 2, -dh / 2, dw, dh);
+    return;
+  }
+  ctx.fillStyle = s.color;
+  if (s.shape === 'circle' || s.shape === 'sprite') {
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (s.shape === 'square') {
+    ctx.fillRect(-r, -r, s.size, s.size);
+  } else if (s.shape === 'line') {
+    // A streak through the centre — length 2·size, hairline-to-thin width.
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = Math.max(1, s.size / 6);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-s.size, 0);
+    ctx.lineTo(s.size, 0);
+    ctx.stroke();
+  } else {
+    const pts = starPoints(r, r * 0.45, 5);
+    ctx.beginPath();
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 /**
@@ -110,9 +177,14 @@ export function particleSprites(
     const cache = statefulParticleCache(key, cfg, fps);
     const frame = Math.max(0, Math.floor(time * fps + 1e-9));
     const state = cache.stateAt(frame);
-    return toSprites(particlesFromSoA(state, cfg, { frame, fps }), fieldW, fieldH, cfg.perspective ?? 0);
+    return toSprites(particlesFromSoA(state, cfg, { frame, fps }), fieldW, fieldH, cfg.perspective ?? 0, streakSecOf(cfg));
   }
-  return toSprites(simulateParticles(cfg, time), fieldW, fieldH, cfg.perspective ?? 0);
+  return toSprites(simulateParticles(cfg, time), fieldW, fieldH, cfg.perspective ?? 0, streakSecOf(cfg));
+}
+
+/** Seconds of velocity a streak spans: the comp shutter × the config's amount. */
+function streakSecOf(cfg: ParticleConfig): number {
+  return Math.max(0, cfg.motionBlur ?? 0) * Math.max(0, cfg.shutterSec ?? 0);
 }
 
 /** Canvas composite op for the intra-field transfer mode ('add' = glow). */
@@ -167,7 +239,7 @@ export function drawParticleField(
   fieldW: number,
   fieldH: number,
   scale = 1,
-  opts?: { fps?: number; cacheKey?: string },
+  opts?: { fps?: number; cacheKey?: string; sprite?: ParticleSpriteImage | null },
 ): void {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.save();
@@ -175,40 +247,57 @@ export function drawParticleField(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.globalCompositeOperation = particleCompositeOp(cfg.blend);
-  for (const s of particleSprites(cfg, time, fieldW, fieldH, opts)) {
+  const sprite = opts?.sprite ?? null;
+  const sprites = particleSprites(cfg, time, fieldW, fieldH, opts);
+  // Plexus UNDER the sprites: the network is the connective tissue, the
+  // particles are its nodes, so a node paints over the lines meeting at it.
+  const plexusDistance = Math.max(0, cfg.plexusDistance ?? 0);
+  if (plexusDistance > 0) {
+    drawPlexusLinks(ctx, sprites.filter((s) => s.head), {
+      maxDistance: plexusDistance,
+      lineWidth: Math.max(0, cfg.plexusWidth ?? 1),
+      lineOpacity: Math.max(0, Math.min(1, cfg.plexusOpacity ?? 0.6)),
+      color: cfg.plexusColor ?? '#9fd0ff',
+      triangles: cfg.plexusTriangles === true,
+      triangleOpacity: Math.max(0, Math.min(1, cfg.plexusTriangleOpacity ?? 0.15)),
+    });
+  }
+  for (const s of sprites) {
     if (s.size <= 0 || s.opacity <= 0) continue;
-    const r = s.size / 2;
-    if (s.shape === 'circle') {
+    const fast = s.shape === 'circle' && s.sx === undefined;
+    if (fast) {
       ctx.fillStyle = s.color;
       ctx.beginPath();
-      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, s.size / 2, 0, Math.PI * 2);
       ctx.fill();
       continue;
     }
     ctx.save();
     ctx.translate(s.x, s.y);
-    ctx.rotate((s.rotation * Math.PI) / 180);
-    if (s.shape === 'square') {
-      ctx.fillStyle = s.color;
-      ctx.fillRect(-r, -r, s.size, s.size);
-    } else if (s.shape === 'line') {
-      // A streak through the centre — length 2·size, hairline-to-thin width.
-      ctx.strokeStyle = s.color;
-      ctx.lineWidth = Math.max(1, s.size / 6);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(-s.size, 0);
-      ctx.lineTo(s.size, 0);
-      ctx.stroke();
+    const len = s.sx !== undefined && s.sy !== undefined ? Math.hypot(s.sx, s.sy) * 2 : 0;
+    if (len > 0.5) {
+      /*
+        Velocity streak: the shape stamped N times along ±half the velocity
+        vector at 1/N opacity — what a shutter integrates as the particle
+        crosses the frame. N grows with the streak so the stamps overlap
+        (≤ 12), and the image is drawn rotated to the velocity so a sprite
+        smears along its own motion rather than sideways.
+      */
+      const n = Math.min(12, Math.max(2, Math.ceil(len / Math.max(1, s.size * 0.5))));
+      const alpha = ctx.globalAlpha;
+      ctx.globalAlpha = alpha / n;
+      for (let k = 0; k < n; k++) {
+        const t = n === 1 ? 0 : (k / (n - 1)) * 2 - 1;
+        ctx.save();
+        ctx.translate(s.sx! * t, s.sy! * t);
+        ctx.rotate((s.rotation * Math.PI) / 180);
+        paintShape(ctx, s, sprite);
+        ctx.restore();
+      }
+      ctx.globalAlpha = alpha;
     } else {
-      // star
-      ctx.fillStyle = s.color;
-      const pts = starPoints(r, r * 0.45, 5);
-      ctx.beginPath();
-      ctx.moveTo(pts[0]!.x, pts[0]!.y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
-      ctx.closePath();
-      ctx.fill();
+      ctx.rotate((s.rotation * Math.PI) / 180);
+      paintShape(ctx, s, sprite);
     }
     ctx.restore();
   }

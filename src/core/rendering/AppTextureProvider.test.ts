@@ -434,14 +434,26 @@ describe('AppTextureProvider', () => {
       expect(provider.get('light:r')!.texture.id).toBe(base);
     });
 
-    it('ambient / point / parallel of one colour still share a texture', () => {
+    it('point / parallel of one colour still share a texture', () => {
       // Their washes ARE the same image, so this is reuse rather than a
       // collision — the cone params are keyed only where they change pixels.
       const { provider } = setup();
       provider.setLight('light:a', wash('#ffffff', { type: 'point' }));
       const id = provider.get('light:a')!.texture.id;
-      provider.setLight('light:a', wash('#ffffff', { type: 'ambient' }));
+      provider.setLight('light:a', wash('#ffffff', { type: 'parallel' }));
       expect(provider.get('light:a')!.texture.id).toBe(id);
+    });
+
+    it('ambient does NOT share the radial texture — its wash is a flat plate', () => {
+      // An ambient light has no position, so its wash has no falloff
+      // (rasterizeLight's ambient branch). Sharing the point light's radial
+      // gradient would draw one of the two wrong — this used to be the
+      // phantom "second light" blob at the comp centre.
+      const { provider } = setup();
+      provider.setLight('light:a', wash('#ffffff', { type: 'point' }));
+      const id = provider.get('light:a')!.texture.id;
+      provider.setLight('light:a', wash('#ffffff', { type: 'ambient' }));
+      expect(provider.get('light:a')!.texture.id).not.toBe(id);
     });
 
     it('retain() forgets light keys, falling back to the placeholder', () => {

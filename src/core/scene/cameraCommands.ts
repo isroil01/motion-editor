@@ -53,7 +53,7 @@ import {
   type CameraSample,
 } from '@core/scene/camera3d';
 import { nodeWorldWithParents3d, toWorldPointAt } from '@core/scene/liveWorld3d';
-import { is3DEnabled, readNode3D } from '@core/scene/threeD';
+import { canBe3D, is3DEnabled, readNode3D, set3DEnabled } from '@core/scene/threeD';
 import { readNodeAnchor } from '@core/scene/anchor';
 import { world2DAt } from '@core/scene/layerSpace';
 import { enclosingCompRootOf, reparentNode } from '@core/scene/parenting';
@@ -377,6 +377,74 @@ export function lookAt(nodes: ReadonlyArray<SceneNode>, time: number): CustomVie
   return view;
 }
 
+// ── Distribute in Z ─────────────────────────────────────────────────────────
+
+/**
+ * Spread layers apart in depth so a camera move has parallax to work against.
+ *
+ * This is the missing half of the camera workflow: a user adds a camera,
+ * clicks "Make all 3D", dollies — and gets a slide, not a camera move,
+ * because every layer still sits at z = 0 and the whole frame moves as one
+ * plane. The design-system's `emitDepth` has known this all along
+ * ("a camera technique cast onto a composition where everything sits at z=0
+ * produces a move with no parallax"); nothing in the app UI could do it.
+ *
+ * Depth follows the layer stack: the bottom layer goes deepest, the top layer
+ * stays on the comp plane, spread across ~a third of the comp's short side —
+ * the same ladder `emitDepth` uses, capped for the same reason (past roughly a
+ * frame of depth a normal lens distorts the 2D layout).
+ *
+ * Each unparented layer is then SIZE-COMPENSATED against the active camera's
+ * focal length — position scaled about the comp centre and scale multiplied by
+ * (focal + z) / focal — so the composition looks identical until the camera
+ * moves. Without this the command visibly shrinks everything it pushes back,
+ * which reads as damage, not as staging. Parented layers get depth only:
+ * their world position rides a rig this command should not second-guess.
+ */
+export function distributeLayersInZ(time: number): { count: number; span: number } | null {
+  const { width, height } = activeCompSize();
+  const rootId = activeCompRootId();
+  const selected = subjectLayers().filter(canBe3D);
+  const targets = selected.length >= 2 ? selected : frameableLayers().filter(canBe3D);
+  if (targets.length < 2) return null;
+
+  // Stacking order, not selection order: later in the flatten = higher in the
+  // stack = nearer the camera.
+  const order = new Map(flattenComposition(defaultSceneGraph, rootId).map((n, i) => [n.id, i]));
+  const sorted = [...targets].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+  const span = Math.round(Math.min(width, height) * 0.35);
+  const step = span / (sorted.length - 1);
+  const cam = commandCamera();
+  const focal = Math.max(
+    1,
+    cam ? resolveCommandCamera(cam, time).focalLength : Project3D.defaultCamera(width, height).focalLength,
+  );
+
+  const av = sampleAt(time);
+  const mergeKey = `distributeZ:${time}:${sorted.map((n) => n.id).join(',')}`;
+  for (let i = 0; i < sorted.length; i++) {
+    const node = sorted[i]!;
+    if (!is3DEnabled(node)) set3DEnabled(node.id, true);
+    const z = Math.round(span - i * step);
+    const values: Record<string, number> = { z };
+    if (node.parent === rootId) {
+      const factor = (focal + z) / focal;
+      const g = readGeometry(node);
+      const num = (p: string, fb: number): number => av(node.id, p) ?? fb;
+      const x = num('x', g?.x ?? width / 2);
+      const y = num('y', g?.y ?? height / 2);
+      values.x = width / 2 + (x - width / 2) * factor;
+      values.y = height / 2 + (y - height / 2) * factor;
+      values.scaleX = num('scaleX', g?.scaleX ?? 1) * factor;
+      values.scaleY = num('scaleY', g?.scaleY ?? 1) * factor;
+    }
+    applyNodePropsKeyframed(node.id, values, mergeKey);
+  }
+  bumpScene();
+  return { count: sorted.length, span };
+}
+
 // ── Commands ────────────────────────────────────────────────────────────────
 
 export function buildCameraCommands(): ReadonlyArray<Command> {
@@ -393,6 +461,24 @@ export function buildCameraCommands(): ReadonlyArray<Command> {
         if (!cam) return;
         const id = createOrbitNull(cam.id, playhead());
         notify(id ? `Created orbit null for ${cam.name} — rotate it to orbit the camera` : 'Could not create the orbit null', id ? 'success' : 'warning');
+      },
+    },
+    {
+      id: asCommandId('camera.distributeZ'),
+      label: 'Distribute Layers in Z',
+      description: 'Spread layers in depth for parallax — sizes compensated so the framing does not change',
+      icon: 'camera',
+      // Two selected content layers, or two in the comp: the command falls
+      // back to every content layer when nothing useful is selected.
+      enabled: () => subjectLayers().length >= 2 || frameableLayers().length >= 2,
+      execute: () => {
+        const r = distributeLayersInZ(playhead());
+        notify(
+          r
+            ? `Spread ${r.count} layers across ${r.span} px of depth — move the camera to see the parallax`
+            : 'Select at least two layers (or have two in the comp) to distribute in Z',
+          r ? 'success' : 'warning',
+        );
       },
     },
     {

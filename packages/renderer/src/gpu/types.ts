@@ -268,6 +268,14 @@ export const SHADOW_SAMPLER_BINDING = 10;
 export const AO_TEXTURE_BINDING = 11;
 export const AO_SAMPLER_BINDING = 12;
 
+/**
+ * The run's SECOND shadow map and its NEAREST sampler (13/14) — plan B2. Same
+ * contract as 9/10: bound on every lit-3d draw, gated by shadow2Params.x, the
+ * shared far texel when the run has no second mapped light.
+ */
+export const SHADOW2_TEXTURE_BINDING = 13;
+export const SHADOW2_SAMPLER_BINDING = 14;
+
 export interface PipelineDescriptor {
   label?: string;
   shader: ShaderModuleHandle;

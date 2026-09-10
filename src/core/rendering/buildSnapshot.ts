@@ -20,6 +20,8 @@ import { readNodeBlend } from '@core/effects/blendMode';
 import { readNodePreserveTransparency } from '@core/effects/preserveTransparency';
 import { readNodeMask, readNodeMaskAt, maskPathPolyline, roundedRectMask, applyMaskPropertyTracks, type LayerMask } from '@core/effects/mask';
 import { BEAM_PEN_UP, BEAM_SOURCE } from '@core/effects/beamPath';
+import { displacedMeshFor, getHeightField } from '@core/scene/heightDisplacement';
+import type { MaterialOptions } from '@core/scene/material';
 import { traceTextRuns } from '@core/scene/shapesFromText';
 import {
   clampCornerRadii,
@@ -985,6 +987,27 @@ export function buildSnapshot(
   const assetById = (): NonNullable<typeof assetIndex> => {
     assetIndex ??= new Map(useAssetStore.getState().assets.map((a) => [a.id, a]));
     return assetIndex;
+  };
+
+  /**
+   * Height displacement (B1) for one mesh carrier, or null when the material
+   * has none set, the amount is zero, or the field is still decoding. The
+   * field is keyed by asset id (or the asset-free `heightMapSrc`), so every
+   * carrier sharing a map shares one decode.
+   */
+  const displacedCarrierFor = (
+    meshKey: string,
+    vertices: Float32Array,
+    indices: Uint16Array | Uint32Array,
+    mat: MaterialOptions,
+  ): ReturnType<typeof displacedMeshFor> | null => {
+    if (!(Math.abs(mat.displacement) > 1e-6)) return null;
+    const fieldKey = mat.heightMapAssetId ?? mat.heightMapSrc;
+    if (!fieldKey) return null;
+    const src = mat.heightMapAssetId ? assetById().get(mat.heightMapAssetId)?.src : mat.heightMapSrc;
+    const field = getHeightField(fieldKey, src);
+    if (!field) return null;
+    return displacedMeshFor(meshKey, fieldKey, vertices, indices, field, mat.displacement, mat.displacementSubdivisions);
   };
 
   const valueCache = new Map<string, Map<PropPath, number>>();
@@ -2086,7 +2109,14 @@ export function buildSnapshot(
           color: lt.color,
           intensity: av?.get('intensity') ?? lt.intensity,
           radius: shape.radius,
-          screenRadius: shape.radius,
+          // Ambient covers the FRAME, not a radius: its wash is a flat plate
+          // (see rasterizeLight), so the quad must span the comp — the square
+          // quad is 2·screenRadius on a side, centred, so max(w,h)/2 covers.
+          // A radius-sized ambient quad was the phantom "second light": a
+          // 2·radius blob pinned to the comp centre.
+          screenRadius: lt.type === 'ambient'
+            ? Math.max(comp.width, comp.height) / 2
+            : shape.radius,
           type: lt.type,
           cone: av?.get('lightCone') ?? lt.cone,
           // Without this the wash had no feather to apply and a spot's soft
@@ -2126,7 +2156,29 @@ export function buildSnapshot(
           emitterWidth: pW,
           emitterHeight: pH,
         };
-        const cfg = resolveParticleConfig(syncedCfg, (path) => pv?.get(path));
+        const resolvedCfg = resolveParticleConfig(syncedCfg, (path) => pv?.get(path));
+        // Particles v2 — three facts only the snapshot knows:
+        //  · the comp shutter (for velocity streaks), taken only when this
+        //    layer's own motion-blur switch is on, like any other layer;
+        //  · the sprite asset's source, resolved from its id here so the
+        //    field painter needs no store;
+        //  · the scene camera's focal length as the field's perspective when
+        //    the layer is 3D and no explicit perspective is set, so depth
+        //    parallax follows the comp lens instead of a private one.
+        const blurOn = motionBlur?.enabled === true && readNodeMotionBlur(node);
+        const shutterSec = blurOn && motionBlur
+          ? (Math.max(0, Math.min(360, motionBlur.shutterAngle)) / 360) / Math.max(1, motionBlur.fps)
+          : 0;
+        const spriteAsset = resolvedCfg.spriteAssetId ? assetById().get(resolvedCfg.spriteAssetId) : undefined;
+        const autoPerspective = is3DEnabled(node) && camera && !((resolvedCfg.perspective ?? 0) > 0)
+          ? camera.focalLength
+          : undefined;
+        const cfg = {
+          ...resolvedCfg,
+          shutterSec,
+          ...(spriteAsset ? { spriteSrc: spriteAsset.src } : {}),
+          ...(autoPerspective ? { perspective: autoPerspective } : {}),
+        };
         emitLayer({
           id: node.id, kind: 'shape',
           x: w.x, y: w.y, rotation: w.rotation, scaleX: w.scaleX, scaleY: w.scaleY, depth: 0,
@@ -3750,7 +3802,19 @@ export function buildSnapshot(
               ...(paintTextured ? { paintTextured: true } : {}),
             };
           });
-          const extrudedMesh = { key, vertices: mesh.vertices, indices: mesh.indices, ranges, ...(wallPaint ? { paint: wallPaint } : {}) };
+          // Height displacement (B1): substitute the displaced vertices and
+          // remap the ranges by the subdivision's triangle multiple. The
+          // field decodes asynchronously — until it lands the mesh draws flat
+          // and the decode nudges a re-render (heightDisplacement.ts).
+          const disp = displacedCarrierFor(key, mesh.vertices, mesh.indices, extMat);
+          const dispRanges = disp ? ranges.map((r) => ({ ...r, first: r.first * disp.triangleScale, count: r.count * disp.triangleScale })) : ranges;
+          const extrudedMesh = {
+            key: disp ? disp.key : key,
+            vertices: disp ? disp.vertices : mesh.vertices,
+            indices: disp ? disp.indices : mesh.indices,
+            ranges: dispRanges,
+            ...(wallPaint ? { paint: wallPaint } : {}),
+          };
           // A carrier that samples the layer's raster (media back cap, or a
           // front cap the mesh owns) must keep the layer's content fields so
           // the texture provider rasterises the same thing under the new id.
@@ -4160,6 +4224,14 @@ export function buildSnapshot(
           )
         : null;
       const deformed = skinned ?? morphed;
+      // Height displacement (B1) rides on whatever the skin/morph produced —
+      // the same interleaved layout — so a displaced model still animates.
+      const mDisp = displacedCarrierFor(
+        deformed ? deformed.key : modelEntry.key,
+        deformed ? deformed.vertices : modelEntry.vertices,
+        modelEntry.indices,
+        mMat,
+      );
       modelMeshLayer = {
         ...layer,
         // Same scrub as the extrusion carrier: features the mesh path cannot
@@ -4177,13 +4249,13 @@ export function buildSnapshot(
         lighting: undefined,
         shade3d: undefined,
         extrudedMesh: {
-          key: deformed ? deformed.key : modelEntry.key,
-          vertices: deformed ? deformed.vertices : modelEntry.vertices,
-          indices: modelEntry.indices,
+          key: mDisp ? mDisp.key : deformed ? deformed.key : modelEntry.key,
+          vertices: mDisp ? mDisp.vertices : deformed ? deformed.vertices : modelEntry.vertices,
+          indices: mDisp ? mDisp.indices : modelEntry.indices,
           ranges: [{
             role: modelEntry.doubleSided ? 'front' : 'side',
             first: 0,
-            count: modelEntry.indices.length,
+            count: mDisp ? mDisp.indices.length : modelEntry.indices.length,
             fill: textured ? '#ffffffff' : modelEntry.fill,
             gain: 1,
             ...(textured ? { textured: true } : {}),

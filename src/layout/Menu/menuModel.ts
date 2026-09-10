@@ -287,8 +287,8 @@ export const APP_MENU: MenuGroupModel[] = [
         children: [
           { commandId: 'layer.newText', label: 'Text' },
           { commandId: 'layer.newSolid', label: 'Solid…' },
-          { commandId: 'layer.newCamera', label: 'Camera' },
-          { commandId: 'layer.newLight', label: 'Light' },
+          { commandId: 'layer.newCamera', label: 'Camera…' },
+          { commandId: 'layer.newLight', label: 'Light…' },
           { commandId: 'layer.newNull', label: 'Null Object' },
           { commandId: 'layer.newAdjustment', label: 'Adjustment Layer' },
           { separator: true },
@@ -339,6 +339,7 @@ export const APP_MENU: MenuGroupModel[] = [
         label: 'Camera',
         children: [
           { commandId: 'camera.createOrbitNull', label: 'Create Orbit Null' },
+          { commandId: 'camera.distributeZ', label: 'Distribute Layers in Z' },
           { separator: true },
           { commandId: 'camera.setFocusToLayer', label: 'Set Focus Distance to Layer' },
           { commandId: 'camera.linkFocusToLayer', label: 'Link Focus Distance to Layer' },

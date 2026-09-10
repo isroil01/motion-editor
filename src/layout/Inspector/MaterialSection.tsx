@@ -24,7 +24,7 @@
  * that repaints on every scrub.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Switch } from '@components/Switch';
 import { ValueField } from '@components/ValueField';
 import { Button } from '@components/Button';
@@ -43,9 +43,13 @@ import {
   setNodeSpecular,
   setNodeShadingModel,
   setNodeToonBands,
+  setNodeHeightMap,
+  setNodeDisplacement,
+  setNodeDisplacementSubdivisions,
   MATERIAL_PCT_DEFAULTS,
   type MaterialParams,
 } from '@core/scene/material';
+import { useAssetStore } from '@stores/assetStore';
 import {
   useMaterialStore,
   applyMaterialToNodes,
@@ -268,6 +272,35 @@ function MaterialChip({
 
 /* ── The section ──────────────────────────────────────────────────────────── */
 
+export function MaterialPresetAction({
+  nodeId,
+  nodeIds,
+}: {
+  nodeId: string;
+  nodeIds?: ReadonlyArray<string>;
+}): JSX.Element {
+  const selectedIds = useSelectionStore((x) => x.ids);
+  const effectiveTargets = nodeIds && nodeIds.length > 0
+    ? nodeIds
+    : (selectedIds.includes(nodeId) ? selectedIds : [nodeId]);
+
+  const capturePreset = useCallback(() => captureMaterialPreset(nodeId), [nodeId]);
+  const applyPreset = useCallback(
+    (values: Readonly<Record<string, number | string | boolean>>) =>
+      applyMaterialPreset(effectiveTargets, values),
+    [effectiveTargets],
+  );
+
+  return (
+    <SectionPresetMenu
+      sectionId="material"
+      label="Material presets"
+      capture={capturePreset}
+      apply={applyPreset}
+    />
+  );
+}
+
 export function MaterialSection({ nodeId }: { nodeId: string }): JSX.Element | null {
   useSceneRevision((x) => x.rev);
   const selectedIds = useSelectionStore((x) => x.ids);
@@ -309,21 +342,6 @@ export function MaterialSection({ nodeId }: { nodeId: string }): JSX.Element | n
 
   return (
     <div className={s.stack}>
-      {/*
-       * Presets vs. the library below: a PRESET is the numeric material
-       * surface only (roughness, shading model, shadow modes) and is applied
-       * to every selected layer as one undo entry; a LIBRARY material also
-       * carries a base colour and is a named, project-wide object. The two
-       * share a store shape but not a meaning, so they get separate controls.
-       */}
-      <div className={s.presetRow}>
-        <SectionPresetMenu
-          sectionId="material"
-          label="Material presets"
-          capture={() => captureMaterialPreset(nodeId)}
-          apply={(values) => applyMaterialPreset(targets, values)}
-        />
-      </div>
       <span className={s.groupHeader}>
         Material Library
         <Button
@@ -417,7 +435,9 @@ export function MaterialSection({ nodeId }: { nodeId: string }): JSX.Element | n
         <p className={s.hint}>
           Accepts Lights is off, so scene lights wash over this layer instead of
           shading it — these responses are stored and animate, but nothing below
-          changes the picture until it is on.
+          changes the picture until it is on. Shadow-map shadows also land only
+          on lit surfaces: with this off, Accepts Shadows cannot darken this
+          layer.
         </p>
       )}
 
@@ -478,6 +498,50 @@ export function MaterialSection({ nodeId }: { nodeId: string }): JSX.Element | n
         <p className={s.hint}>
           Metal tints the specular highlight — raise Specular to see it.
         </p>
+      )}
+
+      <div className={s.divider} />
+
+      {/* ── Displacement (AE 26.2) ───────────────────────────────── */}
+      {/* A height map's luma pushes the mesh along its normals: 50 % grey is
+          flat, white rises, black sinks. Applies to extrusions, primitives
+          and imported models alike (heightDisplacement.ts). The asset list is
+          read once per render rather than subscribed — it changes on import,
+          which re-renders the inspector anyway. */}
+      <span className={s.groupHeader}>Displacement</span>
+      <div className={s.row}>
+        <span className={s.label}>Height Map</span>
+        <select
+          className={s.select}
+          value={material.heightMapAssetId ?? ''}
+          onChange={(e) => setNodeHeightMap(nodeId, e.target.value || undefined)}
+          aria-label="Height map asset"
+        >
+          <option value="">None</option>
+          {useAssetStore.getState().assets.filter((a) => a.type === 'image').map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      </div>
+      {(material.heightMapAssetId || material.heightMapSrc) && (
+        <>
+          <MaterialRow
+            label="Displacement"
+            value={material.displacement}
+            min={-200}
+            max={200}
+            unit="px"
+            onChange={(v) => setNodeDisplacement(nodeId, v)}
+          />
+          <MaterialRow
+            label="Subdivide"
+            value={material.displacementSubdivisions}
+            min={0}
+            max={3}
+            unit=""
+            onChange={(v) => setNodeDisplacementSubdivisions(nodeId, v)}
+          />
+        </>
       )}
 
       <div className={s.divider} />

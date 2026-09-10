@@ -194,18 +194,55 @@ interface FxSpace {
  * generous for blur-like effects: the shader treats the radius as a Gaussian
  * SIGMA and samples to ±2.5σ, so a margin of one radius would clip the tail
  * into a visible straight edge.
+ *
+ * Only effects whose shaders actually WRITE outside the layer's box appear
+ * here. Nearly every ported effect (rounds six through fifteen) passes
+ * through pixels outside the box — the shaders' `wp`/`gp` guard mirrors the
+ * CPU kernels, which never see pixels beyond the layer canvas — so for them
+ * a margin buys nothing and costs content resolution; they stay at 0 on
+ * purpose, and that is a statement about the shader, not an omission. The
+ * exceptions are the ones below that ride an unguarded whole-buffer pass:
+ * the Gaussian riders, the additive generators, and Motion Tile.
+ *
+ * `layerW`/`layerH` are the layer's size in comp px, for the effects whose
+ * reach is a fraction of the layer (lens-flare's halo, beam's endpoints).
  */
-function effectSpreadPx(effects: readonly RenderableEffect[]): number {
+export function effectSpreadPx(effects: readonly RenderableEffect[], layerW: number, layerH: number): number {
   let max = 0;
   for (const e of effects) {
     let s = 0;
     if (e.type === 'blur') s = (e.cocCorners
       ? Math.max(e.radiusPx, ...e.cocCorners)
       : e.radiusPx) * BLUR_TAIL;
+    // Ride the SAME separable Gaussian pass as `blur`, with `radiusPx` already
+    // converted to its sigma (r/√3, see snapshotToFrameScene) — same tail.
+    else if (e.type === 'gaussian-blur' || e.type === 'fast-box-blur') s = e.radiusPx * BLUR_TAIL;
     else if (e.type === 'glow') s = (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
     // The widest octave is a Gaussian of `radiusPx`; the pyramid's tail is its tail.
     else if (e.type === 'deep-glow') s = e.radiusPx * Math.max(e.aspect[0], e.aspect[1]) * Math.max(e.chroma[0], e.chroma[1], e.chroma[2]) * BLUR_TAIL;
     else if (e.type === 'beam-path') s = e.spreadPx;
+    else if (e.type === 'beam') {
+      // The beam field is evaluated over the whole buffer: its halo crosses
+      // the box edge by the soft radius (thickness·(1+3·softness)/2 — reserve
+      // the diameter), and its endpoints are FRACTIONS of the box that the
+      // controls happily push outside it.
+      const overX = Math.max(0, -e.startX, -e.endX, e.startX - 1, e.endX - 1) * layerW;
+      const overY = Math.max(0, -e.startY, -e.endY, e.startY - 1, e.endY - 1) * layerH;
+      s = overX + overY + Math.max(0.5, e.thickness) * (1 + e.softness * 3);
+    }
+    // Rays are wedges of length `rayLength` from a centre that is itself an
+    // offset from the layer mid — both in comp px, so their sum bounds the fan.
+    else if (e.type === 'light-rays') s = Math.hypot(e.centerX, e.centerY) + e.rayLength;
+    else if (e.type === 'lens-flare') {
+      // Ghosts land at centre + axis·2t for t up to 1.9 (see LENS_FLARE) —
+      // as far as 2.8 offsets beyond the layer mid — and the halo spans
+      // 0.35·max(w,h)·scale around the centre. Three offsets plus half a span
+      // over-covers both, streak included.
+      s = 3 * Math.hypot(e.centerX, e.centerY) + 0.5 * Math.max(layerW, layerH) * e.scale;
+    }
+    // Wraps the WHOLE buffer through its scaled uv — reach is unbounded by
+    // construction, so let the MAX_FX_MARGIN cap decide what it is worth.
+    else if (e.type === 'motion-tile') { if (e.scale !== 1) s = Number.POSITIVE_INFINITY; }
     else if (e.type === 'drop-shadow') {
       s = Math.hypot(e.offsetX, e.offsetY) + (e.radiusPx + (e.spreadPx ?? 0)) * BLUR_TAIL;
     }
@@ -2474,7 +2511,7 @@ export class CompositionPass extends RenderPass {
     // so its first two column vectors ARE the width and height edges.
     const worldW = Math.hypot(model[0]!, model[1]!, model[2]!) || 1;
     const worldH = Math.hypot(model[4]!, model[5]!, model[6]!) || 1;
-    const spread = effectSpreadPx(r.effects!);
+    const spread = effectSpreadPx(r.effects!, worldW, worldH);
 
     // Margin as a fraction of the layer, per axis, capped so a small layer
     // under a large glow degrades to a soft-edged result instead of shrinking
@@ -2873,6 +2910,8 @@ export class CompositionPass extends RenderPass {
     ctx: RenderPassContext,
     group: ReadonlyArray<Renderable>,
     light: { type: 'ambient' | 'point' | 'spot' | 'parallel'; x: number; y: number; z: number; aimX: number; aimY: number; aimZ: number; shadowMapSize?: number },
+    /** 0 = the run's first map (bindings 9/10), 1 = the second (13/14, plan B2). */
+    slot: 0 | 1 = 0,
   ): { texture: TextureHandle; sampler: SamplerHandle; camera: ShadowCamera; size: number } | null {
     const casters = group.filter((r) => r.threeD?.castsShadow === true && r.opacity > 0);
     if (casters.length === 0) return null;
@@ -2883,11 +2922,13 @@ export class CompositionPass extends RenderPass {
 
     const { services } = ctx;
     const size = shadowMapSizeOf(light.shadowMapSize);
-    // Pinned and keyed by SIZE alone: one map per resolution serves every run in
-    // the frame, because a run consumes its map before the next one is drawn.
+    // Pinned and keyed by SIZE and SLOT: one map per resolution per slot serves
+    // every run in the frame, because a run consumes its maps before the next
+    // one is drawn — and the two slots must not share a target, since both are
+    // sampled by the same draw.
     const rt = services.resources.renderTarget(
-      `shadow-map:${size}`,
-      { label: `shadow-map:${size}`, width: size, height: size, format: 'rgba8unorm', depth: true },
+      `shadow-map:${size}:${slot}`,
+      { label: `shadow-map:${size}:${slot}`, width: size, height: size, format: 'rgba8unorm', depth: true },
       /* pinned */ true,
     );
     // White = a distance past the far plane, so an untouched texel says "no
@@ -3015,27 +3056,39 @@ export class CompositionPass extends RenderPass {
     const envMap = ctx.scene.envMap?.levels === ENV_SPEC_LEVELS ? ctx.scene.envMap : undefined;
     const env = this.envBindingFor(ctx);
     /*
-      Geometry-aware shadows for ONE light per run.
+      Geometry-aware shadows for up to TWO lights per run (plan B2).
 
-      One, not all of them, and the limit is the binding rather than the maths:
-      a second map is a second texture at a second slot on every lit-3d
-      material, plus a second matrix in a uniform tail that is already 184
-      floats. The first light with `shadowMap` on wins; the rest keep the 2.5D
-      projected copy the adapter still emits for them, so turning the switch on
-      for two lamps gives one geometric shadow and one projected one rather than
-      a silent downgrade of both.
+      Two, not all of them, and the limit is the binding rather than the maths:
+      each map is a texture at its own slot on every lit-3d material (9/10 and
+      13/14), plus its own 28-float block in a uniform tail that is already
+      long. The first two lights with `shadowMap` on get maps; the rest keep
+      the 2.5D projected copy the adapter still emits for them, so turning the
+      switch on for three lamps gives two geometric shadows and one projected
+      one rather than a silent downgrade of any.
 
       Rendered BEFORE the main pass opens, because the map is a texture the
       main pass samples and no backend lets one pass read the target another is
       still writing.
     */
     const shadowLightIndex = lights ? lights.findIndex((l) => l.shadowMap === true && l.type !== 'ambient' && l.gain > 0) : -1;
-    const shadowRun = shadowLightIndex >= 0 ? this.renderShadowMap(ctx, group, lights![shadowLightIndex]!) : null;
+    const shadowRun = shadowLightIndex >= 0 ? this.renderShadowMap(ctx, group, lights![shadowLightIndex]!, 0) : null;
     const shadowLight = shadowRun ? lights![shadowLightIndex]! : undefined;
-    // `shadowed` is what `packShade3D` matches on to resolve the light's index
-    // AFTER its own filtering — see the flag's note there.
-    const litLights = lights && shadowRun
-      ? lights.map((l, i) => (i === shadowLightIndex ? { ...l, shadowed: true } : l))
+    // The SECOND mapped light (plan B2): the next light with the switch on
+    // gets its own map at bindings 13/14 and its own uniform block. A third
+    // still falls back to the projected copy — two is the binding budget.
+    const shadow2LightIndex = lights && shadowLightIndex >= 0
+      ? lights.findIndex((l, i) => i > shadowLightIndex && l.shadowMap === true && l.type !== 'ambient' && l.gain > 0)
+      : -1;
+    const shadow2Run = shadow2LightIndex >= 0 ? this.renderShadowMap(ctx, group, lights![shadow2LightIndex]!, 1) : null;
+    const shadow2Light = shadow2Run ? lights![shadow2LightIndex]! : undefined;
+    // `shadowed` / `shadowed2` are what `packShade3D` matches on to resolve
+    // each light's index AFTER its own filtering — see the flags' note there.
+    const litLights = lights && (shadowRun || shadow2Run)
+      ? lights.map((l, i) => (
+        i === shadowLightIndex && shadowRun ? { ...l, shadowed: true }
+          : i === shadow2LightIndex && shadow2Run ? { ...l, shadowed2: true }
+            : l
+      ))
       : lights;
     /*
       The v flip is the OPPOSITE of `targetSampleUv`'s, and that is not a typo.
@@ -3049,6 +3102,9 @@ export class CompositionPass extends RenderPass {
     const shadowFlipV = !ctx.services.backend.renderTargetFlipV;
     const shadow = shadowRun
       ? { texture: shadowRun.texture, sampler: shadowRun.sampler }
+      : this.shadowFallback(ctx);
+    const shadow2 = shadow2Run
+      ? { texture: shadow2Run.texture, sampler: shadow2Run.sampler }
       : this.shadowFallback(ctx);
     /*
       Ambient occlusion, for the whole run.
@@ -3092,6 +3148,18 @@ export class CompositionPass extends RenderPass {
         // rather than asking the UI to know the far plane.
         bias: Math.max(0, shadowLight?.shadowBias ?? 3) * shadowRun.camera.invFar,
         step: Math.max(0, shadowLight?.shadowSoftness ?? 1) / shadowRun.size,
+        flipV: shadowFlipV,
+      }
+      : undefined;
+    const shadow2Tail = shadow2Run
+      ? {
+        matrix: shadow2Run.camera.matrix,
+        axis: shadow2Run.camera.axis,
+        invFar: shadow2Run.camera.invFar,
+        origin: shadow2Run.camera.origin,
+        darkness: Math.max(0, Math.min(1, shadow2Light?.shadowDarkness ?? 1)),
+        bias: Math.max(0, shadow2Light?.shadowBias ?? 3) * shadow2Run.camera.invFar,
+        step: Math.max(0, shadow2Light?.shadowSoftness ?? 1) / shadow2Run.size,
         flipV: shadowFlipV,
       }
       : undefined;
@@ -3157,6 +3225,7 @@ export class CompositionPass extends RenderPass {
         // no second gate: a shadow catcher turned off packs the block as zeros
         // and reads exactly as it did before this existed.
         ...(shadowTail && s.acceptsShadows !== false ? { shadow: shadowTail } : {}),
+        ...(shadow2Tail && s.acceptsShadows !== false ? { shadow2: shadow2Tail } : {}),
         // Attached to every lit surface in the run, unconditionally: AO is
         // contact darkening of AMBIENT light, and there is no per-layer switch
         // for it because there is no per-layer question — a surface either has
@@ -3175,6 +3244,7 @@ export class CompositionPass extends RenderPass {
     let cmds = new CommandBuffer();
     cmds.env = env;
     cmds.shadow = shadow;
+    cmds.shadow2 = shadow2;
     cmds.ao = ao;
     let depthCleared = false;
     // True when `cmds` holds a queued draw sampling the resolved-effect texture
@@ -3194,6 +3264,7 @@ export class CompositionPass extends RenderPass {
       // would queue incomplete bind groups.
       cmds.env = env;
       cmds.shadow = shadow;
+      cmds.shadow2 = shadow2;
       cmds.ao = ao;
       depthCleared = true;
       pendingResolved = false;

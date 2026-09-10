@@ -42,12 +42,15 @@ function envBinding(cmds: CommandBuffer): {
   envSampler?: SamplerHandle;
   shadowTexture?: TextureHandle;
   shadowSampler?: SamplerHandle;
+  shadow2Texture?: TextureHandle;
+  shadow2Sampler?: SamplerHandle;
   aoTexture?: TextureHandle;
   aoSampler?: SamplerHandle;
 } {
   return {
     ...(cmds.env ? { envTexture: cmds.env.texture, envSampler: cmds.env.sampler } : {}),
     ...(cmds.shadow ? { shadowTexture: cmds.shadow.texture, shadowSampler: cmds.shadow.sampler } : {}),
+    ...(cmds.shadow2 ? { shadow2Texture: cmds.shadow2.texture, shadow2Sampler: cmds.shadow2.sampler } : {}),
     ...(cmds.ao ? { aoTexture: cmds.ao.texture, aoSampler: cmds.ao.sampler } : {}),
   };
 }

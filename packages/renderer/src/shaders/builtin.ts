@@ -4356,6 +4356,10 @@ struct Object {
   shadowAxis : vec4<f32>,
   shadowOrigin : vec4<f32>,
   shadowParams : vec4<f32>,
+  shadow2Matrix : mat4x4<f32>,
+  shadow2Axis : vec4<f32>,
+  shadow2Origin : vec4<f32>,
+  shadow2Params : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> obj : Object;
 
@@ -4369,6 +4373,9 @@ struct Object {
 // and a bilinear blend of two packed depths is not a depth.
 @group(0) @binding(9) var shadowTex : texture_2d<f32>;
 @group(0) @binding(10) var shadowSmp : sampler;
+// The run's SECOND shadow map, 13/14 (plan B2) — same contract as 9/10.
+@group(0) @binding(13) var shadow2Tex : texture_2d<f32>;
+@group(0) @binding(14) var shadow2Smp : sampler;
 
 // The run's ambient-occlusion buffer, 11/12. Its own sampler for the opposite
 // reason the shadow map has one: this one must be LINEAR (it is a half-res
@@ -4466,29 +4473,40 @@ fn unpackShadowDepth(c : vec4<f32>) -> f32 {
   return dot(c.rgb, vec3<f32>(1.0, 1.0 / 255.0, 1.0 / 65025.0));
 }
 
-fn shadowFactor(world : vec3<f32>) -> f32 {
-  if (obj.shadowParams.x < 0.0005) { return 1.0; }
-  let clip = obj.shadowMatrix * vec4<f32>(world, 1.0);
+// One body for both maps: the block's four uniforms and the map's handles are
+// parameters, so the second light's shadow (plan B2) is the same arithmetic
+// against its own map rather than a copy that could drift.
+fn shadowTerm(world : vec3<f32>, mtx : mat4x4<f32>, axis : vec4<f32>, origin : vec4<f32>, params : vec4<f32>, tex : texture_2d<f32>, smp : sampler) -> f32 {
+  if (params.x < 0.0005) { return 1.0; }
+  let clip = mtx * vec4<f32>(world, 1.0);
   if (clip.w <= 1e-6) { return 1.0; }
   var uv = (clip.xy / clip.w) * 0.5 + vec2<f32>(0.5);
-  if (obj.shadowParams.w > 0.5) { uv.y = 1.0 - uv.y; }
+  if (params.w > 0.5) { uv.y = 1.0 - uv.y; }
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
-  let d = dot(world - obj.shadowOrigin.xyz, obj.shadowAxis.xyz) * obj.shadowAxis.w - obj.shadowParams.y;
+  let d = dot(world - origin.xyz, axis.xyz) * axis.w - params.y;
   if (d <= 0.0 || d >= 1.0) { return 1.0; }
-  let s = obj.shadowParams.z;
+  let s = params.z;
   var lit = 0.0;
   for (var y = -1; y <= 1; y = y + 1) {
     for (var x = -1; x <= 1; x = x + 1) {
       // Explicit LOD, like envFetch: the map has no mip chain, and an implicit
       // derivative inside this nest is both meaningless and illegal in WGSL.
-      let occ = unpackShadowDepth(textureSampleLevel(shadowTex, shadowSmp, uv + vec2<f32>(f32(x), f32(y)) * s, 0.0));
+      let occ = unpackShadowDepth(textureSampleLevel(tex, smp, uv + vec2<f32>(f32(x), f32(y)) * s, 0.0));
       lit = lit + select(0.0, 1.0, d <= occ);
     }
   }
   // Darkness lerps the term back toward fully lit, so 100 % is a black shadow
   // and 60 % leaves 40 % of the light through — the same meaning the slider has
   // on the projected path.
-  return 1.0 - (1.0 - lit / 9.0) * obj.shadowParams.x;
+  return 1.0 - (1.0 - lit / 9.0) * params.x;
+}
+fn shadowFactor(world : vec3<f32>) -> f32 {
+  if (obj.shadowParams.x < 0.0005) { return 1.0; }
+  return shadowTerm(world, obj.shadowMatrix, obj.shadowAxis, obj.shadowOrigin, obj.shadowParams, shadowTex, shadowSmp);
+}
+fn shadowFactor2(world : vec3<f32>) -> f32 {
+  if (obj.shadow2Params.x < 0.0005) { return 1.0; }
+  return shadowTerm(world, obj.shadow2Matrix, obj.shadow2Axis, obj.shadow2Origin, obj.shadow2Params, shadow2Tex, shadow2Smp);
 }
 
 /*
@@ -4565,6 +4583,10 @@ fn shade3d(world : vec3<f32>, baseRgb : vec3<f32>) -> vec3<f32> {
   let shTerm = shadowFactor(world);
   let shadowIdx = i32(obj.shadowOrigin.w + 0.5);
   let shadowOn = obj.shadowParams.x > 0.0005;
+  // The second mapped light's term (plan B2), against its own map and index.
+  let shTerm2 = shadowFactor2(world);
+  let shadow2Idx = i32(obj.shadow2Origin.w + 0.5);
+  let shadow2On = obj.shadow2Params.x > 0.0005;
   // Sampled once, beside the shadow term and for the same reasons: it is a fact
   // about this fragment, and a tap per light would be seven wasted.
   let aoTerm = aoFactor(world);
@@ -4640,6 +4662,7 @@ fn shade3d(world : vec3<f32>, baseRgb : vec3<f32>) -> vec3<f32> {
     // the early continue above and never reaches here). That is what shadow
     // means: this lamp cannot see you.
     if (shadowOn && shadowIdx == i) { atten = atten * shTerm; }
+    if (shadow2On && shadow2Idx == i) { atten = atten * shTerm2; }
     let k = gain * lambert * atten;
     if (pbr) {
       // Cook-Torrance: D (GGX) · G (Smith-Schlick) · F (Schlick) / (4 N·L N·V),
@@ -4720,7 +4743,7 @@ fn shade3d(world : vec3<f32>, baseRgb : vec3<f32>) -> vec3<f32> {
 `;
 
 // GLSL twins of the above (UBO tail + light model), same layout contract.
-const GLSL_TEX3D_UBO = `layout(std140) uniform Object { mat4 mvp; vec4 uvRect; vec4 tint; vec4 cr0; vec4 cr1; vec4 cr2; vec4 srcSpace; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; };`;
+const GLSL_TEX3D_UBO = `layout(std140) uniform Object { mat4 mvp; vec4 uvRect; vec4 tint; vec4 cr0; vec4 cr1; vec4 cr2; vec4 srcSpace; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; mat4 shadow2Matrix; vec4 shadow2Axis; vec4 shadow2Origin; vec4 shadow2Params; };`;
 
 const GLSL_SHADE3D_FN = /* glsl */ `
 
@@ -4757,30 +4780,45 @@ uniform sampler2D uShadowTex;
 float unpackShadowDepth(vec4 c) {
   return dot(c.rgb, vec3(1.0, 1.0 / 255.0, 1.0 / 65025.0));
 }
-float shadowFactor(vec3 world) {
-  if (shadowParams.x < 0.0005) return 1.0;
-  vec4 clip = shadowMatrix * vec4(world, 1.0);
+// One body for both maps — see the WGSL twin.
+float shadowTerm(vec3 world, mat4 mtx, vec4 axis, vec4 origin, vec4 params, sampler2D tex) {
+  if (params.x < 0.0005) return 1.0;
+  vec4 clip = mtx * vec4(world, 1.0);
   if (clip.w <= 1e-6) return 1.0;
   vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
-  if (shadowParams.w > 0.5) uv.y = 1.0 - uv.y;
+  if (params.w > 0.5) uv.y = 1.0 - uv.y;
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
-  float d = dot(world - shadowOrigin.xyz, shadowAxis.xyz) * shadowAxis.w - shadowParams.y;
+  float d = dot(world - origin.xyz, axis.xyz) * axis.w - params.y;
   if (d <= 0.0 || d >= 1.0) return 1.0;
-  float s = shadowParams.z;
+  float s = params.z;
   float lit = 0.0;
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
-      float occ = unpackShadowDepth(textureLod(uShadowTex, uv + vec2(float(x), float(y)) * s, 0.0));
+      float occ = unpackShadowDepth(textureLod(tex, uv + vec2(float(x), float(y)) * s, 0.0));
       lit += d <= occ ? 1.0 : 0.0;
     }
   }
   // Darkness lerps back toward fully lit — see the WGSL twin.
-  return 1.0 - (1.0 - lit / 9.0) * shadowParams.x;
+  return 1.0 - (1.0 - lit / 9.0) * params.x;
+}
+float shadowFactor(vec3 world) {
+  if (shadowParams.x < 0.0005) return 1.0;
+  return shadowTerm(world, shadowMatrix, shadowAxis, shadowOrigin, shadowParams, uShadowTex);
 }
 
 // Screen-space ambient occlusion. See the WGSL twin for the full note; the two
 // must stay identical term for term, including the off-buffer answer.
 uniform sampler2D uSsaoTex;
+// The second shadow map (13/14, plan B2) — declared AFTER uSsaoTex because the
+// WebGL2 backend names units in binding order and 13 comes after 11, and its
+// wrapper is defined HERE, after the declaration: GLSL, unlike WGSL, resolves
+// identifiers in order, and a wrapper above this line failed to compile on
+// every lit-3d shader ("uShadow2Tex: undeclared identifier").
+uniform sampler2D uShadow2Tex;
+float shadowFactor2(vec3 world) {
+  if (shadow2Params.x < 0.0005) return 1.0;
+  return shadowTerm(world, shadow2Matrix, shadow2Axis, shadow2Origin, shadow2Params, uShadow2Tex);
+}
 float aoFactor(vec3 world) {
   if (aoParams.x < 0.0005) return 1.0;
   vec4 clip = aoMatrix * vec4(world, 1.0);
@@ -4816,6 +4854,10 @@ vec3 shade3d(vec3 world, vec3 baseRgb) {
   float shTerm = shadowFactor(world);
   int shadowIdx = int(shadowOrigin.w + 0.5);
   bool shadowOn = shadowParams.x > 0.0005;
+  // The second mapped light's term (plan B2) — see the WGSL twin.
+  float shTerm2 = shadowFactor2(world);
+  int shadow2Idx = int(shadow2Origin.w + 0.5);
+  bool shadow2On = shadow2Params.x > 0.0005;
   // Sampled once, beside the shadow term — see the WGSL twin.
   float aoTerm = aoFactor(world);
   vec3 diff = vec3(0.0);
@@ -4880,6 +4922,7 @@ vec3 shade3d(vec3 world, vec3 baseRgb) {
     }
     // The shadow multiplies ATTENUATION — see the WGSL twin.
     if (shadowOn && shadowIdx == i) atten *= shTerm;
+    if (shadow2On && shadow2Idx == i) atten *= shTerm2;
     float k = gain * lambert * atten;
     if (pbr) {
       // Cook-Torrance: D (GGX) · G (Smith-Schlick) · F (Schlick) / (4 N·L N·V).
@@ -4965,6 +5008,10 @@ struct Object {
   shadowAxis : vec4<f32>,
   shadowOrigin : vec4<f32>,
   shadowParams : vec4<f32>,
+  shadow2Matrix : mat4x4<f32>,
+  shadow2Axis : vec4<f32>,
+  shadow2Origin : vec4<f32>,
+  shadow2Params : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> obj : Object;
 
@@ -4976,6 +5023,9 @@ struct Object {
 // The shadow map, 9/10 — see the note on the textured twin's block.
 @group(0) @binding(9) var shadowTex : texture_2d<f32>;
 @group(0) @binding(10) var shadowSmp : sampler;
+// The run's SECOND shadow map, 13/14 (plan B2) — same contract as 9/10.
+@group(0) @binding(13) var shadow2Tex : texture_2d<f32>;
+@group(0) @binding(14) var shadow2Smp : sampler;
 
 // The ambient-occlusion buffer, 11/12 — see the note on the textured twin's
 // block. This material has no layer sampler at all, which is exactly why the AO
@@ -5031,7 +5081,7 @@ fn fs(@location(0) local : vec2<f32>, @location(1) world : vec3<f32>) -> @locati
   glsl: {
     vertex: /* glsl */ `#version 300 es
 layout(location = 0) in vec2 pos;
-layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; };
+layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; mat4 shadow2Matrix; vec4 shadow2Axis; vec4 shadow2Origin; vec4 shadow2Params; };
 out vec2 vLocal;
 out vec3 vWorld;
 void main() {
@@ -5042,7 +5092,7 @@ void main() {
 `,
     fragment: /* glsl */ `#version 300 es
 precision highp float;
-layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; };
+layout(std140) uniform Object { mat4 mvp; vec4 color; vec4 shape; mat4 model; vec4 eyeLit; vec4 shadeParams; vec4 lights[32]; vec4 envParams; mat4 aoMatrix; vec4 aoParams; mat4 shadowMatrix; vec4 shadowAxis; vec4 shadowOrigin; vec4 shadowParams; mat4 shadow2Matrix; vec4 shadow2Axis; vec4 shadow2Origin; vec4 shadow2Params; };
 in vec2 vLocal;
 in vec3 vWorld;
 out vec4 frag;

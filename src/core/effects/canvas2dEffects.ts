@@ -34,6 +34,7 @@ import type { Effect } from './effects';
 import { effectNumber, paramsOf } from './effects';
 import { deepGlowData, deepGlowSettings } from './deepGlow';
 import { beamPathData, beamPathSettings } from './beamPath';
+import { drawPlexus } from './plexus';
 import { applyKeyData, chokeAlpha, softenAlpha } from './keylight';
 import { waveWarpData, turbulentDisplaceData, curlNoiseData } from './warp';
 import { blurRgba, radialBlurData, blurDimensions, channelBlurData, unsharpMaskData } from './blurs';
@@ -252,6 +253,8 @@ const CANVAS2D_ONLY = new Set<string>([
   // Perspective — projects a silhouette, then blurs and composites it.
   // Generate — these DRAW, like Beam, Lens Flare and Checkerboard.
   'lightning',
+  // Plexus (2026-09-09) — a point/line network; draws, no per-pixel form.
+  'plexus',
   // 'light-rays' PORTED 2026-08-14 — GPU shader; Canvas2D retained below.
   // 'light-sweep' PORTED 2026-08-14 — GPU shader; Canvas2D retained below.
   'audio-waveform',
@@ -618,6 +621,8 @@ export function applyCanvas2dEffect(
       return applyRadioWaves(oc, w, h, e);
     case 'lightning':
       return applyLightning(oc, w, h, e);
+    case 'plexus':
+      return drawPlexus(oc, w, h, e);
     case 'light-rays':
       return applyLightRays(oc, w, h, e);
     case 'light-sweep':

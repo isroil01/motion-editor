@@ -136,7 +136,8 @@ import { PresentationMode } from '@layout/Presentation/PresentationMode';
 import { openPalette } from '@stores/commandPaletteStore';
 import { focusNavigationClaimedNow } from '@core/commands/focusContext';
 import { isNativeMenuActionId } from '@layout/Menu/nativeMenuTemplate';
-import { insertCamera, insertLight, insertAdjustmentLayer, precomposeSelected, insertPrimitive, insertSolid, deleteSelectedLayers, duplicateSelectedLayers, insert3DPrimitive } from '@core/scene/sceneInsert';
+import { insertAdjustmentLayer, precomposeSelected, insertPrimitive, insertSolid, deleteSelectedLayers, duplicateSelectedLayers, insert3DPrimitive } from '@core/scene/sceneInsert';
+import { openCameraDialog, openLightDialog } from '@layout/Workspace/SceneInsertDialogs';
 import { runSceneEditDetection, type SceneEditMode } from '@core/tracking/sceneEditCommand';
 import { getWorkspaceManager } from '@core/layout/workspaceManager';
 import { findNavTarget } from '@core/workspace/cameraNav';
@@ -1498,16 +1499,25 @@ function buildProjectCommands(): ReadonlyArray<Command> {
       execute: () => insertSolid(),
     },
     {
+      // The AE-style options dialog, not a bare insert. This called
+      // `insertCamera()` directly, so the menu path and the TopNav "+" path
+      // disagreed: one silently dropped a default camera, the other asked for
+      // name / lens / two-node. The dialog is the one that teaches what a
+      // camera IS, so both entry points get it. Shortcut is AE's.
       id: asCommandId('layer.newCamera'),
-      label: 'Camera',
+      label: 'Camera…',
+      shortcut: { key: 'c', meta: true, alt: true, shift: true },
       enabled: () => true,
-      execute: () => insertCamera(),
+      execute: () => openCameraDialog(),
     },
     {
+      // Same story as the camera: the dialog (type / colour / intensity), not
+      // a silent default point light.
       id: asCommandId('layer.newLight'),
-      label: 'Light',
+      label: 'Light…',
+      shortcut: { key: 'l', meta: true, alt: true, shift: true },
       enabled: () => true,
-      execute: () => insertLight(),
+      execute: () => openLightDialog(),
     },
     {
       id: asCommandId('layer.newNull'),

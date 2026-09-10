@@ -255,9 +255,30 @@ function shadowMapSpotPair(): Scene[] {
     }));
     graph.addNode(node('cam', { kind: 'camera', position: CENTER, transform: { z: -1000, focalLength: 1000 } }));
   };
+  /*
+    Two mapped lights (plan B2, 2026-09-09): a second spot from the other side,
+    also with Shadow Map on, so the caster throws TWO geometric shadows on the
+    floor — one per map, each darkening only its own light. Before B2 the
+    second light fell back to the projected copy; with both mapped, the two
+    shadows land where each light's frustum puts them and cross on the floor.
+  */
+  const buildTwo: Scene['build'] = (graph) => {
+    build(true)(graph);
+    graph.addNode(node('L2', {
+      kind: 'light',
+      position: { x: 420, y: 60 },
+      transform: {
+        z: -380, intensity: 90, lightType: 'spot', lightCone: 100, radius: 1600,
+        poiX: 240, poiY: 180, poiZ: 400,
+        castShadows: true, shadowDiffusion: 0, shadowDarkness: 70, shadowMap: true,
+      },
+      style: { fill: '#ffe0c0' },
+    }));
+  };
   return [
     scene('shadow-map-spot', 'A spot light with Shadow Map on: the caster is rasterised from the light and sampled per fragment.', build(true)),
     scene('shadow-map-spot-off', 'The same scene with Shadow Map off — the 2.5D projected caster copy, the control the pair is measured against.', build(false)),
+    scene('shadow-map-two-lights', 'Two spot lights with Shadow Map on: the caster throws one geometric shadow per light, each map darkening only its own lamp.', buildTwo),
   ];
 }
 
@@ -365,17 +386,16 @@ export const threeDScenes: Scene[] = [
       'The reference is frozen output of the DELETED Canvas2D backend, which shaded a lit plane '
       + 'PER QUAD — one flat tint for the whole layer — while the GPU shades per fragment '
       + '(Lambert + Blinn-Phong, see FrameScene.threeD.shade, whose `quadGain` is explicitly the '
-      + 'old per-quad value kept as a fallback). A plane that was one flat colour is now a '
-      + 'gradient, so the two disagree across the whole lit area rather than at its edges. A light '
-      + 'also emits a comp-sized WASH layer (buildSnapshot, `emitLayer` for kind light), and the '
-      + 'two engines draw that wash differently too. NOT YET ESTABLISHED, and the reason this '
-      + 'entry is not simply re-blessed: whether the ambient wash SHOULD have a radial falloff at '
-      + 'all. An ambient light has no position — buildSnapshot pins its wash to the comp centre — '
-      + 'so a falloff looks wrong on inspection and may be a real defect rather than an upgrade.',
+      + 'old per-quad value kept as a fallback). The ambient-wash question this note used to '
+      + 'carry IS now settled: an ambient light has no position, so its wash is a FLAT '
+      + 'frame-covering plate (rasterizeLight ambient branch; screenRadius = max(w,h)/2 in '
+      + 'buildSnapshot), not a radial blob pinned to the comp centre — the blob read as a '
+      + 'phantom second light. The frozen reference still shows the old centred radial glow, '
+      + 'so this entry diverges on both the shading model and the wash shape.',
     wouldMatchWhen:
-      'The ambient-wash question is settled and, if the GPU behaviour is confirmed correct, the '
-      + 'reference is re-blessed from the GPU engine. Blessing before settling it would certify '
-      + 'whatever the wash currently does.',
+      'The reference is re-blessed from the GPU engine after a human confirms the flat lift: '
+      + 'a uniform #ff88aa tint over the whole frame, brighter on the lit panel, with no '
+      + 'radial hotspot at the comp centre.',
   }),
 
   // 2.5D light-cast shadow: a shadow-casting point light above-left of a small

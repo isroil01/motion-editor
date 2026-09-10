@@ -494,7 +494,7 @@ export const addEffectDef: AiToolDef = {
           // Perspective
           'radial-shadow',
           // Generate
-          'circle', 'ellipse', 'radio-waves', 'lightning', 'light-rays', 'light-sweep',
+          'circle', 'ellipse', 'radio-waves', 'lightning', 'plexus', 'light-rays', 'light-sweep',
           'audio-waveform',
           // Stylize
           'cartoon', 'brush-strokes', 'strobe-light', 'color-emboss', 'halftone',

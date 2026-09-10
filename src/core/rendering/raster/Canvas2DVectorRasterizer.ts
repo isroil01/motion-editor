@@ -98,6 +98,24 @@ function supersampleFor(
   return Math.min(want, cap / longest);
 }
 
+
+/**
+ * A BAKED layer's canvas is drawn on the CPU on purpose.
+ *
+ * The effect chain reads the canvas back (`getImageData`) for every pixel
+ * pass, which is what `willReadFrequently` exists for — but the reason here
+ * is determinism, not speed. With hardware acceleration on, Chrome rasterises
+ * a 2D canvas on the GPU, and a GPU's antialiasing and 8-bit blend rounding
+ * are the adapter's own: thousands of overlapping translucent fills (a plexus
+ * mesh, an additive particle field) drift by whole levels from one GPU to the
+ * next, and from the CPU raster the WebGL2 golden run uses. A bake that reads
+ * the same on every machine is worth more than a faster one that does not;
+ * the plain (unbaked) path keeps the accelerated canvas.
+ */
+function bakeContextOptions(bake: boolean): CanvasRenderingContext2DSettings | undefined {
+  return bake ? { willReadFrequently: true } : undefined;
+}
+
 export class Canvas2DVectorRasterizer implements VectorRasterizer {
   private cache = new Map<string, { texture: TextureHandle; bytes: number; w: number; h: number }>();
   private currentBytes = 0;
@@ -246,7 +264,7 @@ export class Canvas2DVectorRasterizer implements VectorRasterizer {
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', bakeContextOptions(bake));
     if (!ctx) return canvas;
 
     const finishBake = (): HTMLCanvasElement => {
@@ -298,7 +316,7 @@ export class Canvas2DVectorRasterizer implements VectorRasterizer {
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', bakeContextOptions(bake));
     if (!ctx) return canvas;
 
     ctx.scale(ss, ss);

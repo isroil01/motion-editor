@@ -12,6 +12,7 @@ import {
   type PresetTrack,
 } from './animationPresets';
 import { TEXT_PRESETS } from './textPresets';
+import { CAMERA_PRESETS } from './cameraPresets';
 import { DEFAULT_PRESET_CONTEXT } from './presetUnits';
 import { samplePresetFrame, PREVIEW_CONTEXT } from './presetPreview';
 import { AnimationEngine } from '@motion/animation';
@@ -277,7 +278,7 @@ describe('the text preset library', () => {
     // name→copy map living in the component, which meant the description and
     // the preset could drift apart — and did, the moment presets were added
     // that the map had never heard of. Copy belongs on the preset.
-    for (const p of [...BUILTIN_PRESETS, ...TEXT_PRESETS]) {
+    for (const p of [...BUILTIN_PRESETS, ...TEXT_PRESETS, ...CAMERA_PRESETS]) {
       expect({ name: p.name, hasDescription: !!p.description }).toEqual({
         name: p.name,
         hasDescription: true,
@@ -328,5 +329,109 @@ describe('3D presets', () => {
     expect(is3DEnabled(node)).toBe(false);
     applyPresetByName(nodeId, 'Flip In 3D', 0);
     expect(is3DEnabled(defaultSceneGraph.getNode(nodeId)!)).toBe(true);
+  });
+});
+
+describe('Camera presets', () => {
+  test('every camera preset is gated to camera layers and filed under Camera', () => {
+    expect(CAMERA_PRESETS.length).toBeGreaterThanOrEqual(6);
+    for (const p of CAMERA_PRESETS) {
+      expect({ preset: p.name, requires: p.requires, folder: presetFolder(p) }).toEqual({
+        preset: p.name,
+        requires: 'camera',
+        folder: 'Camera',
+      });
+      // Every dolly / lateral move is an OFFSET in comp-relative units — an
+      // absolute pixel value would teleport a camera that isn't at the default
+      // rig, which is the AE preset bug the unit system exists to avoid.
+      for (const t of p.tracks) {
+        if (t.prop !== 'x' && t.prop !== 'z') continue;
+        expect({ preset: p.name, prop: t.prop, relative: t.relative, unit: t.unit }).toEqual({
+          preset: p.name,
+          prop: t.prop,
+          relative: true,
+          unit: 'compW',
+        });
+      }
+    }
+  });
+
+  test('Handheld starts and ends at rest — relative offsets must return to zero', () => {
+    const handheld = CAMERA_PRESETS.find((p) => p.name === 'Handheld')!;
+    for (const t of handheld.tracks) {
+      const first = t.keyframes[0]!;
+      const last = t.keyframes[t.keyframes.length - 1]!;
+      expect({ prop: t.prop, first: first.value, last: last.value }).toEqual({
+        prop: t.prop,
+        first: 0,
+        last: 0,
+      });
+    }
+  });
+
+  test('applies to a camera relative to its current z; refuses an ordinary layer', async () => {
+    const { applyPresetByName } = await import('./animationPresets');
+    const { default: defaultSceneGraph } = await import('@core/scene/DefaultSceneGraph');
+    const { insertCamera, insertShape } = await import('@core/scene/sceneInsert');
+    const { useSelectionStore } = await import('@stores/selectionStore');
+    const { defaultAnimation } = await import('@motion/animation');
+    const { setCommandSystem, CommandSystem } = await import('@core/commands/CommandSystem');
+    const dummyServices = {
+      undo: { push: () => {}, undo: () => {}, redo: () => {}, canUndo: () => false, canRedo: () => false },
+      selection: { get: () => [], set: () => {}, clear: () => {} },
+      panels: { open: () => {}, close: () => {}, toggle: () => {}, isOpen: () => false },
+      workspace: { setActive: () => {}, getActive: () => '' },
+      get: () => undefined,
+    } as never;
+    setCommandSystem(new CommandSystem({ services: dummyServices, getState: () => ({}) }));
+
+    // A camera preset on a plain layer is refused, not half-applied.
+    insertShape('rect', 'Camera Preset Rect');
+    const rectId = useSelectionStore.getState().ids[0]!;
+    expect(applyPresetByName(rectId, 'Push In', 0)).toBe(false);
+    expect(defaultAnimation.getTrackKeyframes(rectId, 'z') ?? []).toHaveLength(0);
+
+    insertCamera({ name: 'Preset Test Camera' });
+    const camId = useSelectionStore.getState().ids[0]!;
+    const trans = defaultSceneGraph
+      .getNode(camId)!
+      .components.find((c) => typeof (c.props as Record<string, unknown>).z === 'number')!;
+    const baseZ = (trans.props as Record<string, unknown>).z as number;
+
+    expect(applyPresetByName(camId, 'Push In', 0)).toBe(true);
+    const kfs = defaultAnimation.getTrackKeyframes(camId, 'z')!;
+    expect(kfs).toHaveLength(2);
+    // Relative track: starts exactly where the camera already was…
+    expect(kfs[0]!.value).toBeCloseTo(baseZ, 6);
+    // …and dollies TOWARD the comp plane (z rises toward 0).
+    expect(kfs[1]!.value).toBeGreaterThan(kfs[0]!.value);
+  });
+
+  test('Dolly Zoom counter-zooms the lens so comp-plane framing holds', async () => {
+    const { applyPresetByName } = await import('./animationPresets');
+    const { insertCamera } = await import('@core/scene/sceneInsert');
+    const { useSelectionStore } = await import('@stores/selectionStore');
+    const { defaultAnimation } = await import('@motion/animation');
+
+    insertCamera({ name: 'Vertigo Test Camera' });
+    const camId = useSelectionStore.getState().ids[0]!;
+    expect(applyPresetByName(camId, 'Dolly Zoom (Vertigo)', 1)).toBe(true);
+
+    const zKfs = defaultAnimation.getTrackKeyframes(camId, 'z')!;
+    const fKfs = defaultAnimation.getTrackKeyframes(camId, 'focalLength')!;
+    expect(zKfs.length).toBe(5);
+    expect(fKfs.length).toBe(5);
+    // Both tracks share keyframe times (anchored at the playhead, t=1)…
+    expect(fKfs.map((k) => k.t)).toEqual(zKfs.map((k) => k.t));
+    expect(zKfs[0]!.t).toBe(1);
+    // …and every sample satisfies f = f0 · d / d0, the framing invariant.
+    const d0 = -zKfs[0]!.value;
+    const f0 = fKfs[0]!.value;
+    for (let i = 0; i < zKfs.length; i++) {
+      const d = -zKfs[i]!.value;
+      expect(fKfs[i]!.value).toBeCloseTo((f0 * d) / d0, 6);
+    }
+    // The move actually dollies in.
+    expect(-zKfs[4]!.value).toBeLessThan(d0);
   });
 });

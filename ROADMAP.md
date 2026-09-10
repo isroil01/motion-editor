@@ -10,7 +10,7 @@ If you want to help, the **Now** section is where help changes the most.
 ## Where it stands today
 
 Working and used daily: compositions and nesting, 2D/3D layers with cameras and
-lights, keyframes and the graph editor, 203 effects, masks and mattes, shape
+lights, keyframes and the graph editor, 204 effects, masks and mattes, shape
 layers, per-glyph text animators, expressions, bone and puppet rigging,
 particles, SVG and Lottie import, and export to mp4/mov/webm/GIF/PNG/Lottie
 through a local ffmpeg.
@@ -73,6 +73,22 @@ on-canvas **gradient editor**, **smart guides** with distance badges and
 equal-spacing detection, **project swatches**, an interactive **onboarding
 tour**, one home for the preview controls (with Cache Work Area Now, Purge RAM
 and Purge Disk), and Window ▸ Workspace.
+
+Added 2026-09-10, from a user report that "one light shows two lights": the
+Ambient Fill companion a first light brings no longer masquerades as a second
+light — ambient/environment lights draw their badge only while selected, and
+the ambient wash became a flat frame lift instead of a radial blob pinned to
+the comp centre (settling the question three known-divergent goldens had on
+record). Flipping a layer's 3D switch now writes `acceptsLights: true`, so
+lights and shadow maps act on new 3D layers out of the box. The camera and
+light became first-class in the timeline — Camera Options / Light Options
+twirls with stopwatches for Zoom, orbit, POI, DOF, intensity, cone and the
+shadow dials — Layer ▸ New ▸ Camera…/Light… open their dialogs, **Distribute
+Layers in Z** builds a size-compensated parallax rig in one command, a Camera
+preset folder ships the standard moves (Push In / Pull Out / Orbit Sweep /
+Drift Parallax / Dolly Zoom / Handheld), and outward-reaching effects on 3D
+layers stopped being clipped at the layer rectangle (`effectSpreadPx` now
+covers the blur family, beam, light rays, lens flare and motion tile).
 
 The engine is one GPU render graph (WebGPU, falling back to WebGL2) shared by the
 viewport and the exporter, covered by golden-image render tests.
@@ -198,7 +214,7 @@ storage layer.
   one mapped light per run, point lights along their aim. What remains is
   **SSAO** (blocked: every 3D run draws into a multisampled target, so neither
   backend can sample its depth — it needs a linear-depth prepass bound before
-  the run draws) and **height displacement** (not started). The target remains
+  the run draws) and ~~height displacement~~ — **height displacement shipped 2026-09-09** (Material Options ▸ Displacement). The target remains
   AE's *Classic* 3D, plus extrusion/bevels and this imported-model foothold —
   full parametric Advanced 3D is not planned.
 - **Local AI conversation persistence.** The assistant ships in the local

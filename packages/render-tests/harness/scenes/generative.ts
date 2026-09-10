@@ -15,6 +15,37 @@ const COMP = { width: 360, height: 280, background: '#0c0c12' };
 const SIZE = { w: 360, h: 280 };
 
 export const generativeScenes: Scene[] = [
+  /*
+    Particles v2 (2026-09-09): the GPU is the oracle — the Canvas2D reference
+    never rasterised the sim (see the header). One frame at t = 1 s exercises
+    the ball emitter (depth + the comp-independent perspective), exact drag,
+    the mid-point size/opacity/colour ramps and continuous sub-emission; the
+    ballistic form is a pure function of (config, time), so the frame is a
+    real golden rather than an eyeball.
+  */
+  defineScene({
+    id: 'particles-v2',
+    description: 'Ballistic particles from a sphere emitter with drag, mid-point ramps and continuous sub-emission (GPU oracle).',
+    size: SIZE,
+    comp: COMP,
+    fps: 30,
+    frames: [30],
+    oracle: 'gpu',
+    gpuParity: 'expect-pass',
+    build(graph) {
+      graph.addNode(node('p', { kind: 'particle', position: { x: 180, y: 150 }, transform: { width: 320, height: 240 } }));
+      graph.setParticle('p', {
+        emitterType: 'sphere', emitterWidth: 60, emitterHeight: 60, birthRate: 120, maxParticles: 5000,
+        lifetime: 1.2, lifetimeRandom: 0.3, speed: 220, speedRandom: 0.4, direction: -90, spread: 70,
+        gravityX: 0, gravityY: 260, drag: 1.4, spin: 90, seed: 3, simMode: 'ballistic',
+        sizeStart: 3, sizeMid: 14, sizeEnd: 0, midAge: 0.35,
+        colorStart: '#fff3b0', colorMid: '#ff8a2a', colorEnd: '#7a1e00',
+        opacityStart: 1, opacityMid: 0.9, opacityEnd: 0,
+        shape: 'circle', blend: 'add', perspective: 600, speedZ: 120,
+        subEmit: 'continuous', subRate: 6, subLifetime: 0.4, subSpeed: 40, subSizeScale: 0.4,
+      });
+    },
+  }),
   defineScene({
     id: 'paint-strokes',
     description: 'Freehand paint strokes on a layer.',

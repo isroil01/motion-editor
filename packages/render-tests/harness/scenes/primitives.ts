@@ -16,6 +16,7 @@
  */
 
 import { defineScene, node, type Scene } from '../sceneKit';
+import { primeHeightField, type HeightField } from '@core/scene/heightDisplacement';
 
 const COMP = { width: 480, height: 360, background: '#0c0c12' };
 
@@ -36,7 +37,56 @@ function primitive(
   });
 }
 
+/**
+ * A procedural height field for the displacement golden — primed into the
+ * cache so the frame needs no image decode. Bumps: 6 × 4 sine cells, 50 %
+ * grey mean, so half the surface rises and half sinks.
+ */
+function bumpsField(): HeightField {
+  const w = 64; const h = 64;
+  const data = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      data[y * w + x] = 0.5 + 0.5 * Math.sin((x / w) * Math.PI * 2 * 6) * Math.sin((y / h) * Math.PI * 2 * 4);
+    }
+  }
+  return { width: w, height: h, data };
+}
+
 export const primitiveScenes: Scene[] = [
+  /*
+    Height displacement (B1, 2026-09-09): a lit UV sphere pushed along its
+    normals by a primed bump field after one round of subdivision. The
+    relief is the point: the terminator breaks into a bumpy silhouette and
+    the recomputed normals light every bump on the lit side. An undisplaced
+    sphere — the field missing, the amount ignored, the normals stale — is a
+    visibly different picture.
+  */
+  defineScene({
+    id: 'primitive-displaced-sphere',
+    description: 'UV sphere with a primed bump height field displacing it along its normals (one subdivision, recomputed normals).',
+    size: { w: 480, h: 360 },
+    comp: COMP,
+    fps: 30,
+    frames: [0],
+    gpuParity: 'expect-pass',
+    build: (graph) => {
+      primeHeightField('prime:bumps', bumpsField());
+      graph.addNode(primitive(
+        'bumpy',
+        { x: 240, y: 180 },
+        { z: 0, rotationX: 10, rotationY: 20, heightMapSrc: 'prime:bumps', displacement: 22, displacementSubdiv: 1 },
+        { type: 'sphere', radius: 96, radialSegments: 36, heightSegments: 18 },
+        '#c9a05a',
+      ));
+      graph.addNode(node('key', {
+        kind: 'light',
+        position: { x: 120, y: 70 },
+        transform: { z: -150, intensity: 110, radius: 460, lightType: 'point' },
+        style: { fill: '#fff2d8' },
+      }));
+    },
+  }),
   defineScene({
     id: 'primitive-sphere-torus',
     description:

@@ -28,13 +28,13 @@ document is either already at parity or is a finishing item.
 | Release | Headline additions | Premation today |
 |---|---|---|
 | 26.0 (Jan) | Native parametric 3D meshes; 1,300 Substance materials; SVG import with editable gradients; Unmult; audio effects (Distortion / Compressor / Gate); per-character styling via expressions | Meshes ✅ (sphere/cylinder/cone/torus/capsule/box), SVG ✅, Unmult ✅, audio effects ✅ (`src/core/audio/`), Substance library ✗ (a material library exists, not a Substance graph) |
-| 26.2 (Apr) | **AI Object Matte**; Quick Apply; **displacement for 3D materials**; proportional scrubbing; SVG workflow polish | Object Matte ✅ (bundled SlimSAM, 2026-09-07), Quick Apply ✅, proportional scrubbing ✅, **displacement ✗** |
-| 26.3 (Jun) | **Advanced 3D depth of field** (near/far blur, focus linked to a layer); Curl Noise; mask tracker "up to 5× faster"; Illustrator/SVG paste; variable-font filter; copy frame to clipboard | DOF ✅ (depth-buffer gather + focus verbs), Curl Noise ✅, mask tracker ✅ (one decode walk, analysis tier), paste ✗ (import only), font filter ✅, copy frame ✅ |
+| 26.2 (Apr) | **AI Object Matte**; Quick Apply; **displacement for 3D materials**; proportional scrubbing; SVG workflow polish | Object Matte ✅ (bundled SlimSAM, 2026-09-07), Quick Apply ✅, proportional scrubbing ✅, **displacement ✅ (2026-09-09, B1)** |
+| 26.3 (Jun) | **Advanced 3D depth of field** (near/far blur, focus linked to a layer); Curl Noise; mask tracker "up to 5× faster"; Illustrator/SVG paste; variable-font filter; copy frame to clipboard | DOF ✅ (depth-buffer gather + focus verbs), Curl Noise ✅, mask tracker ✅ (one decode walk, analysis tier), paste ✅ (2026-09-08, C1), font filter ✅, copy frame ✅ |
 
 Sources: [Digital Production](https://digitalproduction.com/2026/01/23/adobe-after-effects-2026-lands-with-3d-text-and-performance-boosts/), [Newsshooter](https://www.newsshooter.com/2026/01/22/whats-new-in-adobe-after-effects-26-0/), [CG Channel on 26.3](https://www.cgchannel.com/2026/06/adobe-releases-after-effects-26-3/), [Plugin Play](https://www.pluginplay.app/blog/whats-new-in-adobe-after-effects-2026), [Adobe release notes](https://helpx.adobe.com/after-effects/release-note/release-notes-after-effects.html).
 
 ### The plugins people keep installed
-Every 2026 round-up converges on the same core: **Trapcode Particular** (3D particles, now with a fluids engine), **Element 3D**, **Saber** (free — energy beams along masks and text), **Deep Glow** (physically based glow), **Plexus / Stardust** (point-line networks, node particles), **Mocha** (planar tracking), **Duik** (rigging), **Newton** (2D physics), **Animation Composer / FX Console** (workflow). Of these, Premation already covers Element 3D (extrusion + glTF + PBR), Duik (bones/IK/ARAP — natively better), Newton (2D rigid bodies), Mocha's common cases (planar + mesh + RANSAC), and Animation Composer's role (presets + Quick Apply). **The uncovered four are Deep Glow, Saber, Particular and Plexus** — and they are all *looks*, which is why users perceive "our effects are weaker" even with 203 effects on the list.
+Every 2026 round-up converges on the same core: **Trapcode Particular** (3D particles, now with a fluids engine), **Element 3D**, **Saber** (free — energy beams along masks and text), **Deep Glow** (physically based glow), **Plexus / Stardust** (point-line networks, node particles), **Mocha** (planar tracking), **Duik** (rigging), **Newton** (2D physics), **Animation Composer / FX Console** (workflow). Of these, Premation already covers Element 3D (extrusion + glTF + PBR), Duik (bones/IK/ARAP — natively better), Newton (2D rigid bodies), Mocha's common cases (planar + mesh + RANSAC), and Animation Composer's role (presets + Quick Apply). **The uncovered four are Deep Glow, Saber, Particular and Plexus** — and they are all *looks*, which is why users perceive "our effects are weaker" even with 204 effects on the list.
 
 Sources: [School of Motion](https://schoolofmotion.com/blog/best-after-effects-plugins-and-effect-packs-you-need-in-2026), [Maxon](https://www.maxon.net/en/article/best-after-effects-plugins), [Vagon](https://vagon.io/blog/top-10-plugins-for-after-effects), [Creative Dojo — Deep Glow review](https://creativedojo.net/deep-glow-review/), [Plugin Everything — Deep Glow](https://www.plugineverything.com/deep-glow), [ProVideo Coalition — Saber](https://www.provideocoalition.com/saber-new-free-effects-plug-video-copilot/), [Motion Array — Saber review](https://motionarray.com/learn/post-production/video-copilots-free-saber-plug-in-review/), [Lesterbanks — Stardust vs Particular](https://lesterbanks.com/2017/07/stardust-compare-trapcode-particular/).
 
@@ -58,9 +58,9 @@ the commit messages of `f4651302`, `94db94be`, `632f52be`.
 |---|---|---|
 | Glow | `glow` is a single-scale CSS `drop-shadow` (radius ≤ 60 px, no falloff model, no aspect, no HDR) — was the single biggest *look* gap next to AE + Deep Glow. **Closed 2026-09-08 by `deep-glow` (A1)**; `glow` stays for existing documents | `effects.ts` glow + deep-glow defs, `deepGlow.ts`, `fxDeepGlow.ts` |
 | Energy beams | Path effects existed since 09-07 (Write-on/Vegas along masks) and `lightning` was start→end only; there was no core-plus-glow-plus-distortion beam that follows a mask or text. **Closed 2026-09-08 by `beam-path` (A2)**; `lightning` follows a mask path too | `beamPath.ts`, `fxBeamPath.ts`, `generateAdvanced.ts` |
-| Particles | Deterministic closed-form 2D system with point/box/circle emitters and 4 sprite shapes; stateful mode adds floor bounce. No 3D emitters, no camera/light awareness, no sprite/texture particles, no turbulence fields as a first-class force, no parent/child emitters, no fluids | `src/core/particles/particleSim.ts` header |
-| Motion blur | Layer motion blur is an N-sample additive accumulation in `CompositionPass` (correct, film-like at high N, ghosts at low N); no adaptive sample count and no per-layer shutter phase UI | `CompositionPass.ts:2162, 3679`, `forceMotionBlur.ts` |
-| 3D | Displacement (AE 26.2) not started; one shadow-mapped light per run; SSAO shipped | `ROADMAP.md`, `AE_COMPARISON.md` §3 item 13 |
+| Particles | Was: closed-form 2D system, 4 sprite shapes, no 3D emitters, no camera awareness, no sprite particles, no drag, no parent/child. **Closed 2026-09-09 by A3** (sphere emitter, camera-lens-aware depth, sprite sheets, exact drag, mid-point ramps, continuous children, velocity streaks); still one card in 3D, no fluids | `particleSim.ts` header, `particleV2.test.ts` |
+| Motion blur | N-sample additive accumulation (correct); the adaptive count was sized from ANCHOR travel (spins and flips strobed) and there was no per-layer shutter phase. **Closed 2026-09-08 by B3** (silhouette travel, Force Motion Blur ▸ Shutter Phase) | `CompositionPass.ts:2162, 3679`, `forceMotionBlur.ts` |
+| 3D | ~~Displacement (AE 26.2) not started~~ **shipped 2026-09-09 (B1)**; ~~one shadow-mapped light per run~~ **two since 2026-09-09 (B2)**; SSAO shipped | `ROADMAP.md`, `AE_COMPARISON.md` §3 item 13 |
 | Segment UX | Fixed 09-07: the old Segment button ran on a synthetic blob, the SAM box prompt selected everything (no box embeddings in the slimsam export) | `objectMask.ts`, `samPipeline.ts` |
 | Tracker UX | Fixed 09-07: dead pick after apply, phantom handle, no marquee/loupe/resize | `TrackPointOverlay.tsx` |
 | Code health | 6 TODO/FIXME markers in `src/core`, 0 in renderer/tracking/timeline — the tree is clean; "not supported" strings are honest format limits (tiled/deep EXR, compressed DPX, PSD merged RLE) | grep 2026-09-08 |
@@ -148,11 +148,59 @@ Fluids are explicitly *not* in this phase.
 Verify: sim unit tests (already the pattern), golden for a sprite emitter
 under a moving camera.
 
+**A3 — DONE 2026-09-09 (scoped).** Everything stays a closed form of
+(config, time) — the property the whole system is built on — so each item is
+exact, scrub-free and byte-identical for pre-v2 configs:
+- **Sphere emitter** (uniform ball, born with depth) beside point/box/disc;
+  box + Depth is the 3D box. The stateful sim shares the origin sampler.
+- **Camera-lens-aware depth**: a 3D particle layer under a scene camera takes
+  the camera's focal length as its perspective when none is set, so z parallax
+  follows the comp lens. Honest limit: the field is still ONE card in 3D
+  (placed and projected like any 3D layer) — particles do not sort against
+  other 3D layers and do not take the camera's DOF per particle; that is the
+  "renderer subsystem" the sim header describes and stays out of scope.
+- **Sprite particles**: `shape: 'sprite'` draws an image asset (any layer can
+  be pre-composed to one), with horizontal sprite sheets indexed by age or at
+  a fixed rate; the provider decodes through the image loader and re-renders
+  the frame when the bitmap lands.
+- **Drag** as a first-class force, the EXACT solution of `v' = a − k·v`
+  (`flightAt`), which the bursts, trails and children all share; turbulence
+  was already first-class.
+- **Per-age curves**: mid-point rows for size / opacity / colour at `midAge`
+  (unset → the old straight ramps, byte for byte).
+- **Parent/child**: `subEmit: 'continuous'` sheds children along a living
+  parent's path at `subRate` (death and bounce bursts already existed).
+- **Velocity streaks**: `motionBlur` × the comp shutter (handed to the field
+  only when the layer's motion-blur switch is on) stamps each sprite along
+  its own closed-form velocity.
+Verified: `particleV2.test.ts` (compat byte-identity, drag vs a fine Euler
+reference, ball fill, ramp mid values, continuous children on the parent
+path, streak velocity, sheet indexing); golden `particles-v2` (GPU oracle —
+the Canvas2D reference never rasterised the sim).
+
 **A4. Point/line networks (`plexus`)** — a generator drawing points (from a
 particle system, a mask, or a layer's shape vertices) and lines between
 points within a max distance, with per-line opacity by distance, optional
 triangles, and 3D camera awareness. Cheap once A3's 3D point cloud exists;
 schedule it *after* A3.
+
+**A4 — DONE 2026-09-09.** One renderer, two homes (`plexus.ts`). (1) The
+`plexus` EFFECT (Generate, Canvas2D-only like Lightning; EffectType 204): a
+deterministic point cloud hashed into the layer box and drifting on value
+noise as Evolution advances — or the vertices of an assigned mask path
+(every `pathStep`-th polyline sample), so a tracked mask makes the network
+follow the object — with every pair inside Max Distance linked by a line
+whose opacity falls to zero at that distance, optional triangles over
+mutually-close triples, and points on top. (2) The same network over a
+PARTICLE SYSTEM's live particles (Plexus Distance in the Particle section),
+drawn under the sprites at their projected positions — which is where A3's
+depth/perspective makes it read as 3D; per-particle camera sorting against
+other layers is the same "one card" limit as A3. Cost is O(n²) with a hard
+cap (`PLEXUS_MAX_POINTS` = 700), chosen over a spatial hash because at these
+counts the hash costs more than it saves. Verified: `plexus.test.ts` (link
+rule and edge opacity, triangle rule, cap, cloud determinism/spread/drift,
+heads-not-ghosts in the field); golden `effect-plexus` (both engines bake
+the same pass).
 
 ### Phase B — 3D (AE 26.2/26.3 parity) · ~1.5 weeks
 
@@ -163,8 +211,39 @@ subdivision level for extruded/parametric meshes. Blocked-by list in
 carries the sampler.
 Verify: golden on a subdivided plane with a ramp height map.
 
+**B1 — DONE 2026-09-09.** `heightDisplacement.ts`: a height field (the luma
+of an image asset, or a primed procedural field) pushes every vertex along
+its normal by `(h − 0.5)·Displacement` px — 50 % grey is flat — after 0–3
+rounds of midpoint subdivision (edge midpoints shared, attributes
+interpolated, triangle order preserved so a carrier's material ranges remap
+by ×4ⁿ), then the normals are recomputed from the displaced faces so the
+lighting follows the relief. It runs on the CPU at snapshot time over the
+interleaved mesh the renderer already takes, on the same seam skinning and
+morphs use — so extrusions, parametric primitives and imported glTF meshes
+all displace through one function and no shader changed. Material Options
+▸ Displacement: Height Map (any image asset), Displacement (keyframeable,
+`MATERIAL_ANIMATABLE`), Subdivide. The field decodes asynchronously and
+nudges a re-render when it lands. Verified: `heightDisplacement.test.ts`
+(bilinear clamp sampling, watertight order-preserving subdivision, exact
+(h−0.5)·amount along the normal, normals tilt with the slope and keep their
+authored sense, memo keys); golden `primitive-displaced-sphere` (a lit UV
+sphere over a primed 6×4 sine bump field, one subdivision).
+
 **B2. Second shadow-mapped light** — lift the one-light-per-run limit in
 `shadowMap.ts` (two packed targets, additive shadow terms).
+
+**B2 — DONE 2026-09-09.** The run's second light with Shadow Map on gets its
+own map (a second pinned target per size, bindings 13/14 on every lit-3d
+material, its own NEAREST sampler on both backends) and its own 28-float
+block at the end of the shade tail (`shadow2Matrix/Axis/Origin/Params`,
+`Shade3D.shadow2`, light flag `shadowed2`). The shader's shadow body became
+ONE parameterised `shadowTerm` (block uniforms + map handles as arguments)
+called once per map, so the second light's shadow is the same arithmetic
+against its own map rather than a copy; each term multiplies only its own
+light's attenuation, so the two shadows compose as light does. A third mapped
+light still takes the projected copy. Golden `shadow-map-two-lights`
+(two spots, two crossing geometric shadows); `shadowMaps.test.ts` pins the
+tail layout, the binding order and the single tap site.
 
 **B3. Motion blur quality** — adaptive sample count from screen-space velocity
 (cap at 32, floor at 4), and a per-layer *shutter phase* row; cheap and it is
@@ -190,6 +269,18 @@ importer (`clipboard.ts` already reads text; the parser exists).
 per-object mattes as selectable layer mattes (`exr.ts` refuses multi-part;
 Cryptomatte lives in extra channels of a single part, so scope is the channel
 reader + a picker).
+**C2 — DONE 2026-09-09.** `exr.ts` now keeps the header's string attributes
+(the `cryptomatte/<id>/name` + `manifest` pair); `cryptomatte.ts` finds each
+layer's `<name>00.R/G/B/A…` rank planes, reads the manifest's object → hash
+map (or lists the ids it finds, by hex, when the manifest is stripped), and
+builds an object's matte as the sum of its coverage over ranks on the ids'
+BIT patterns — shared edges split, every object sums to one. Registered
+at import beside the float planes; the Track Matte ▸ Matte Source picker
+lists "ID matte: <object>" for a layer whose EXR carries a set, and picking
+one bakes the coverage to a grey PNG asset, inserts it above and sets it as
+the luma matte (`cryptomatteCommands.ts`) — a matte layer like any other
+from there. Tests in `cryptomatte.test.ts`.
+
 **C3. Render-queue resume across relaunch** — serialize `resumeFrame` +
 output path (session-only today).
 **C4. Apply-to-"this layer" guard** in the tracker (one confirm).
@@ -233,10 +324,13 @@ verified by looking at the diffs:
 The rig / 3D / DOF diffs in `.artifacts/diff` are stale files from 09-03 and
 are not part of this run.
 
-- Puppet black first frame after alpha decode — reproduce with the browser
+- ~~Mask-tracker vertex cap (64)~~ — **done 2026-09-08** (`maskVertexSampling.ts`: tracks an arc-length-even subset ≤ 64, moves the rest with their neighbours).
+- Puppet black first frame after alpha decode — **still open** (2026-09-09): not reproduced this round; needs a WebM alpha clip through the browser recipe. Left on the ledger rather than guessed at.
+- ~~Golden gate drifting between runs on one machine~~ — **done 2026-09-10.** Three separate causes, each now pinned or logged: (1) the WebGL2 harness window inherited the desktop's display scaling (`devicePixelRatio` 2.18 on this laptop's panel, 1 on its docked monitor), and particle fields and vector tiers scale their rasters by it — `main.cjs` now forces `device-scale-factor=1`; (2) the WebGPU process runs on the machine's real adapter with hardware Canvas2D, so a baked layer's thousands of translucent Canvas2D fills (Plexus) came out 20 % different from the CPU raster the references are blessed from — baked layers now take a `willReadFrequently` (CPU) context in `Canvas2DVectorRasterizer`, and the divergence is gone on both adapters; (3) a dual-GPU laptop hands WebGPU a different adapter from run to run (Radeon 780M vs RTX 4060), which moves antialiased edges by a pixel — `renderEntry` now logs the WebGL2 renderer string, the WebGPU adapter and the DPR once per run so a drifted ratchet reads as an environment fact. Also: `primitive-displaced-sphere` flickered one pixel on WebGPU because a UV sphere's seam column and pole fans were displaced per vertex and tore into z-fighting slivers — coincident vertices (same position AND normal) now share one height and pool their recomputed normals (`positionGroups`).
+- ~~Puppet black first frame after alpha decode~~ (original note) — reproduce with the browser
   recipe (`motion-editor-browser-repro`) on a WebM alpha clip; suspect the
   first `VideoFrame` closing before the texture upload.
-- Mask-tracker vertex cap (64) — SAM contours are decimated to 48 now; make
+- ~~Mask-tracker vertex cap (64)~~ (original note) — SAM contours are decimated to 48 now; make
   `trackLayerMask` sample vertices instead of refusing when a hand-drawn path
   exceeds the cap.
 

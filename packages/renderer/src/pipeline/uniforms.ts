@@ -163,8 +163,10 @@ export const AO3D_FLOATS = MAT4_STD140_FLOATS + 4;
 /** Floats occupied by the shade tail appended to every 3d material uniform:
  *  mat4 model (16) + vec4 eye (4) + vec4 shadeParams (4) + lights (8×4 vec4)
  *  + vec4 envParams (4) + the AO block (20) + the shadow-map block (28). */
+/** Both shadow blocks together — the tail's last floats since plan B2 added a second mapped light. */
+export const SHADOW3D_TAIL_FLOATS = SHADOW3D_FLOATS * 2;
 export const SHADE3D_FLOATS =
-  MAT4_STD140_FLOATS + 4 + 4 + MAX_LIGHTS3D * LIGHT3D_VEC4S * 4 + 4 + AO3D_FLOATS + SHADOW3D_FLOATS;
+  MAT4_STD140_FLOATS + 4 + 4 + MAX_LIGHTS3D * LIGHT3D_VEC4S * 4 + 4 + AO3D_FLOATS + SHADOW3D_TAIL_FLOATS;
 
 /** One scene light in the shader's terms. Structurally compatible with the
  *  FrameScene `SceneLight3D` DTO (kept independent so the pipeline layer does
@@ -203,6 +205,8 @@ export interface Shade3DLight {
    * packer resolves the index where the filter actually happens.
    */
   shadowed?: boolean;
+  /** This is the light the run's SECOND shadow map was rendered from (plan B2). */
+  shadowed2?: boolean;
 }
 
 const LIGHT3D_TYPE_ID: Record<Shade3DLight['type'], number> = { ambient: 0, point: 1, spot: 2, parallel: 3 };
@@ -351,6 +355,8 @@ export interface Shade3D {
      *  map itself and cancel out. */
     flipV: boolean;
   };
+  /** The run's SECOND shadow-mapped light (plan B2): the same block, its own map, gated the same way. */
+  shadow2?: Shade3D['shadow'];
   lights: ReadonlyArray<Shade3DLight>;
 }
 
@@ -417,7 +423,7 @@ export function packShade3D(out: Float32Array, floatOffset: number, shade?: Shad
   // left (shadeParams.w became Metal). Zeros mean "no environment map", which
   // is what an absent `env` leaves behind and what every pre-existing scene
   // packs; the shader's reflection block is gated on x alone.
-  const envAt = end - SHADOW3D_FLOATS - AO3D_FLOATS - 4;
+  const envAt = end - SHADOW3D_TAIL_FLOATS - AO3D_FLOATS - 4;
   if (shade.env) {
     out[envAt + 0] = 1;
     out[envAt + 1] = shade.env.intensity;
@@ -441,27 +447,34 @@ export function packShade3D(out: Float32Array, floatOffset: number, shade?: Shad
   // shadows AND the run rendered a map — and unless the light the map came
   // from survived the filter above, because an index into a list that no
   // longer holds it would darken the wrong light.
+  const packShadowBlock = (at: number, block: NonNullable<Shade3D['shadow']>, index: number): void => {
+    let s = at;
+    for (let i = 0; i < 16; i++) out[s + i] = block.matrix[i] ?? 0;
+    s += MAT4_STD140_FLOATS;
+    out[s + 0] = block.axis[0];
+    out[s + 1] = block.axis[1];
+    out[s + 2] = block.axis[2];
+    out[s + 3] = block.invFar;
+    out[s + 4] = block.origin[0];
+    out[s + 5] = block.origin[1];
+    out[s + 6] = block.origin[2];
+    out[s + 7] = index;
+    // x is the gate the shader reads AND the strength it applies; everything
+    // else here is inert without it.
+    out[s + 8] = Math.max(0, Math.min(1, block.darkness));
+    out[s + 9] = block.bias;
+    out[s + 10] = block.step;
+    out[s + 11] = block.flipV ? 1 : 0;
+  };
   if (shade.shadow) {
     const shadowIndex = lights.findIndex((l) => l.shadowed === true);
-    if (shadowIndex >= 0) {
-      let s = aoAt + AO3D_FLOATS;
-      for (let i = 0; i < 16; i++) out[s + i] = shade.shadow.matrix[i] ?? 0;
-      s += MAT4_STD140_FLOATS;
-      out[s + 0] = shade.shadow.axis[0];
-      out[s + 1] = shade.shadow.axis[1];
-      out[s + 2] = shade.shadow.axis[2];
-      out[s + 3] = shade.shadow.invFar;
-      out[s + 4] = shade.shadow.origin[0];
-      out[s + 5] = shade.shadow.origin[1];
-      out[s + 6] = shade.shadow.origin[2];
-      out[s + 7] = shadowIndex;
-      // x is the gate the shader reads AND the strength it applies; everything
-      // else here is inert without it.
-      out[s + 8] = Math.max(0, Math.min(1, shade.shadow.darkness));
-      out[s + 9] = shade.shadow.bias;
-      out[s + 10] = shade.shadow.step;
-      out[s + 11] = shade.shadow.flipV ? 1 : 0;
-    }
+    if (shadowIndex >= 0) packShadowBlock(aoAt + AO3D_FLOATS, shade.shadow, shadowIndex);
+  }
+  // The second map's block (plan B2), the LAST 28 floats — same rule, its own
+  // light: the one flagged `shadowed2`, resolved after the same filter.
+  if (shade.shadow2) {
+    const shadow2Index = lights.findIndex((l) => l.shadowed2 === true);
+    if (shadow2Index >= 0) packShadowBlock(aoAt + AO3D_FLOATS + SHADOW3D_FLOATS, shade.shadow2, shadow2Index);
   }
   return end;
 }

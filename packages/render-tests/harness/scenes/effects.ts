@@ -48,6 +48,9 @@ const EFFECTS: EffectSpec[] = [
   // a taper and curl distortion all engaged so every branch of the field is
   // gated; the mask-path form is `beamPathMaskScene` below.
   { type: 'beam-path', params: { source: 1, startX: -130, startY: -60, endX: 130, endY: 60, start: 10, end: 90, coreWidth: 8, coreSoftness: 30, startSize: 40, endSize: 120, glowSpread: 24, glowIntensity: 120, glowBias: 33, distortion: 10, distortionScale: 60, evolution: 12 }, tolerance: 0.009 },
+  // Plexus (2026-09-09): Canvas2D-only, so both engines bake the same pass;
+  // the cloud, the drift and the links are all closed forms of the params.
+  { type: 'plexus', params: { pointCount: 60, spread: 90, drift: 30, evolution: 7, maxDistance: 90, lineWidth: 1, lineOpacity: 70, lineColor: '#9fd0ff', triangles: true, triangleOpacity: 12, pointSize: 3, pointColor: '#ffffff', opacity: 100, seed: 5, composite: 0 } },
   // tolerance: the GPU shadow penumbra sits at 0.501% vs the 0.5% default gate —
   // visually identical (soft-edge AA rounding), so give the blurred edge headroom.
   { type: 'drop-shadow', params: { distance: 6, angle: 135, softness: 12, color: '#000000', opacity: 55 }, tolerance: 0.008 },
