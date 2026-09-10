@@ -5,8 +5,7 @@ would want to know; the engine-level detail is in `ROADMAP.md`.
 
 ## 0.8.1 — 2026-09-10
 
-0.8.0 was never published, so this is the first release carrying everything
-below it, plus a refreshed interface:
+Everything in 0.8.0, plus a refreshed interface:
 
 - **Refreshed controls**: new styling for buttons, inputs, sliders, switches,
   tabs, segmented controls and accordions, on updated theme tokens (radius,
