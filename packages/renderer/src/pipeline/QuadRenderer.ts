@@ -9,7 +9,7 @@
 import type { CommandBuffer } from '../commands/DrawCommand';
 import type { RenderBackend, RenderPassEncoder } from '../gpu/RenderBackend';
 import type { ResourceManager } from '../gpu/ResourceManager';
-import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING, type TextureFormat } from '../gpu/types';
+import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, LUT3D_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING, type TextureFormat } from '../gpu/types';
 import { QUAD_VERTEX_COUNT, unitQuadBuffer } from '../resources/Geometry';
 import type { MaterialSystem } from '../shaders/Material';
 
@@ -101,6 +101,10 @@ export class QuadRenderer {
         // same rule as the three pairs above; `uShadow2Tex` is the next name.
         if (item.shadow2Texture) entries.push({ binding: SHADOW2_TEXTURE_BINDING, texture: item.shadow2Texture });
         if (item.shadow2Sampler) entries.push({ binding: SHADOW2_SAMPLER_BINDING, sampler: item.shadow2Sampler });
+        // Binding 15: the colour LUT strip on the lit-3d LUT variants. After 13,
+        // so its texture unit is the last one and `uLutTex` the last declared
+        // name — and absent on every other material, whose units stay put.
+        if (item.lutTexture) entries.push({ binding: LUT3D_TEXTURE_BINDING, texture: item.lutTexture });
 
         const p = item.pbrTextures;
         const bg = this.resources.bindGroup(
@@ -124,6 +128,9 @@ export class QuadRenderer {
           + `:${item.aoTexture?.id ?? 0}`
           // And for the second shadow map, for the same reason as the first.
           + `:${item.shadow2Texture?.id ?? 0}`
+          // And for the LUT strip — appended only when bound, so every key a
+          // draw without one produced before is produced unchanged.
+          + (item.lutTexture ? `:lut${item.lutTexture.id}` : '')
           + `:${idx}`,
           { pipeline, entries },
         );

@@ -1076,9 +1076,26 @@ export interface CameraSeed {
 /** Insert a Camera layer, centred on the REAL comp and pulled back by its focal
  *  length so the comp plane renders 1:1. Position / z / focalLength are plain
  *  editable + keyframeable props (the inspector shows them automatically). */
+/**
+ * `Camera N` / `Light N` with the lowest N no layer of that kind in the active
+ * comp already uses. Both inserts hard-coded "… 1", so the second camera was
+ * another "Camera 1" — and the view menu, which lists cameras by name so you
+ * can look through one, showed two identical entries.
+ */
+export function nextDeviceName(kind: 'camera' | 'light'): string {
+  const base = kind === 'camera' ? 'Camera' : 'Light';
+  const used = new Set<string>();
+  for (const n of flattenComposition(defaultSceneGraph, activeCompRootId())) {
+    if (readNodeKind(n) === kind && n.name) used.add(n.name.trim());
+  }
+  let i = 1;
+  while (used.has(`${base} ${i}`)) i += 1;
+  return `${base} ${i}`;
+}
+
 export function insertCamera(seed: CameraSeed = {}): void {
   const rootId = activeCompRootId();
-  const node = makeNode('camera', seed.name?.trim() || 'Camera 1');
+  const node = makeNode('camera', seed.name?.trim() || nextDeviceName('camera'));
   const compSize = useCompositionStore.getState();
   const cam = Project3D.defaultCamera(compSize.width, compSize.height);
   const focal = typeof seed.focalLength === 'number' && seed.focalLength > 0 ? seed.focalLength : cam.focalLength;
@@ -1195,7 +1212,7 @@ export function insertLight(seed: LightSeed = {}): void {
       durationMs: 7000,
     });
   }
-  const node = makeNode('light', seed.name?.trim() || 'Light 1');
+  const node = makeNode('light', seed.name?.trim() || nextDeviceName('light'));
   const compSize = useCompositionStore.getState();
   // Seed position + keyframeable intensity/radius; warm colour via Style.fill.
   // Radius scales with the comp so the glow reads on any size (a fixed 500px

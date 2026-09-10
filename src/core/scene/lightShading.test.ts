@@ -233,3 +233,18 @@ describe('toShaderLights (shader-term conversion for the per-fragment path)', ()
     });
   });
 });
+
+describe('toShaderLights — the shadow map follows Cast Shadows', () => {
+  it('a light with Shadow Map on AND Cast Shadows on hands the renderer a map', () => {
+    const [l] = toShaderLights([light({ type: 'spot', shadows: true, shadowMap: true })]);
+    expect(l!.shadowMap).toBe(true);
+  });
+
+  it('Cast Shadows off suppresses the map even when Shadow Map is still ticked', () => {
+    // The inspector hides the Shadow Map checkbox under Cast Shadows, so this
+    // is the state a user reaches by unticking Cast Shadows: no visible switch
+    // is on, and nothing may shadow.
+    const [l] = toShaderLights([light({ type: 'spot', shadows: false, shadowMap: true })]);
+    expect(l!.shadowMap).toBeUndefined();
+  });
+});

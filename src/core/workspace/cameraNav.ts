@@ -12,7 +12,8 @@ import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenComposition, readNodeKind } from '@core/scene/sceneDerive';
 import { activeCompRootId } from '@core/scene/activeComp';
 import { is3DEnabled } from '@core/scene/threeD';
-import { activeCameraNode, defaultFocalLength } from '@core/scene/camera3d';
+import { defaultFocalLength, viewCameraNode } from '@core/scene/camera3d';
+import { isSceneCameraView, orthoViewOf, type CameraViewMode } from '@core/scene/cameraViewMode';
 import { applyNodePropsKeyframed } from '@core/workspace/ports';
 import { bumpScene } from '@stores/sceneStore';
 import { useGuidesStore, type Camera3dMode } from '@stores/guidesStore';
@@ -46,7 +47,9 @@ export interface CameraNavTarget {
  * requires a Camera layer AND at least one 3D content layer (a camera over a
  * flat scene moves nothing).
  */
-export function findCameraNav(): CameraNavTarget | null {
+export function findCameraNav(
+  mode: Camera3dMode = useGuidesStore.getState().camera3dMode,
+): CameraNavTarget | null {
   const rootId = activeCompRootId();
   // THE shared selection rule — topmost enabled camera, not the first one found.
   //
@@ -54,7 +57,11 @@ export function findCameraNav(): CameraNavTarget | null {
   // took the LAST. Paint order is back-to-front, so "first" is the BOTTOM-most
   // camera: with two cameras in a comp the C tool drove one camera while the
   // user watched through another, and every drag looked like it did nothing.
-  const camNode = activeCameraNode(defaultSceneGraph, rootId);
+  //
+  // Resolved through the VIEW for the same reason: in a `camera:<id>` view the
+  // camera on screen is not the topmost, and orbiting the topmost would bring
+  // that exact bug back.
+  const camNode = viewCameraNode(defaultSceneGraph, mode, rootId);
   if (!camNode || !compHasAny3D()) return null;
   const t = camNode.components.find((c) => c.type === 'Transform');
   return t ? { nodeId: camNode.id, transId: t.id } : null;
@@ -206,7 +213,7 @@ export function describeNavUnavailable(): string | null {
   if (findNavTarget()) return null;
   const mode = useGuidesStore.getState().camera3dMode;
   if (!compHasAny3D()) {
-    return mode === 'active' && !sceneHasCamera()
+    return isSceneCameraView(mode) && !sceneHasCamera()
       ? 'Camera tools need a Camera layer and a 3D layer — add a camera, then switch a layer to 3D.'
       : 'Camera tools need something 3D to move around — switch a layer to 3D with its 3D toggle.';
   }
@@ -235,10 +242,12 @@ export function findNavTarget(): NavTarget | null {
   if (isCustomViewId(mode)) {
     return sceneHasAny3D() ? { kind: 'view', viewId: mode } : null;
   }
-  if (mode !== 'active') {
-    return sceneHasAny3D() ? { kind: 'ortho', view: mode as OrthoView } : null;
+  const ortho = orthoViewOf(mode);
+  if (ortho) {
+    return sceneHasAny3D() ? { kind: 'ortho', view: ortho } : null;
   }
-  const nav = findCameraNav();
+  // Active Camera or a camera view: the scene camera that view looks through.
+  const nav = findCameraNav(mode);
   if (nav) return { kind: 'scene', ...nav };
   // No camera layer: the default view still navigates. AE's own default view
   // promotes to a custom view on the first orbit rather than demanding a
@@ -356,12 +365,16 @@ export function cancelSmoothDolly(): void {
  * REPLACES the scene camera downstream), everything else passes through
  * unchanged. `mode` defaults to the store's current camera3dMode so render
  * closures always see the live view; a pane can pass its own override.
+ *
+ * A `camera:<id>` view passes through as-is: buildSnapshot resolves the node
+ * itself, per frame and with the same stale-id fallback as every other reader,
+ * rather than trusting a camera pre-built here from an id that may have died.
  */
 export function resolveViewCameraInput(
   width: number,
   height: number,
   mode: Camera3dMode = useGuidesStore.getState().camera3dMode,
-): { camera3dMode: 'active' | OrthoView; customViewCamera?: Camera3D } {
+): { camera3dMode: 'active' | OrthoView | CameraViewMode; customViewCamera?: Camera3D } {
   if (isCustomViewId(mode)) {
     return {
       camera3dMode: 'active',

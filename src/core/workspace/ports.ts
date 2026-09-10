@@ -63,7 +63,7 @@ import { getRemappedTime, getTimelineController, governingClipsFor } from '@core
 import { is3DEnabled, readNode3D } from '@core/scene/threeD';
 import { Matrix4Math, Project3D } from '@motion/scene';
 import { currentViewProjector, currentViewCamera } from '@core/workspace/viewProjection';
-import { isCustomViewId } from '@core/workspace/customViews';
+import { orthoViewOf } from '@core/scene/cameraViewMode';
 import { composeNodeWorld3d, parentWorld3d, resolveNode3DTransform } from '@core/scene/nodeMatrix';
 import { addMaskPath, rectangleMask, ellipseMask, readNodeMask, setMaskPoints, MaskPath, MaskPoint } from '@core/effects/mask';
 
@@ -912,8 +912,9 @@ function orthoDelta3D(
   delta: { x: number; y: number },
   view: Camera3dMode,
 ): { x: number; y: number; z: number } | null {
-  if (view === 'active' || isCustomViewId(view)) return null;
-  const { right, down } = Project3D.orthoDragBasis(view as Project3D.OrthoView);
+  const ortho = orthoViewOf(view);
+  if (!ortho) return null;
+  const { right, down } = Project3D.orthoDragBasis(ortho);
   return {
     x: right.x * delta.x + down.x * delta.y,
     y: right.y * delta.x + down.y * delta.y,

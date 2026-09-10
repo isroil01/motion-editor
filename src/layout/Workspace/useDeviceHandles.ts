@@ -26,7 +26,7 @@ import { useCurrentTime } from '@stores/playbackClockStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { getWorkspaceController } from '@core/workspace/WorkspaceController';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
-import { isCustomViewId } from '@core/workspace/customViews';
+import { isSceneCameraView, orthoViewOf } from '@core/scene/cameraViewMode';
 import { useSceneRefGeometry } from './useSceneRefGeometry';
 import { viewDragToWorldDelta } from '@core/workspace/ports';
 import { beginViewportGesture, endViewportGesture } from '@core/workspace/viewportGesture';
@@ -55,7 +55,7 @@ export function useDeviceHandles(stageRef: React.RefObject<HTMLElement | null>) 
   // the wireframe already has, resolved from the same shared hook so the two
   // can never disagree about which camera that is.
   const { activeCameraId } = useSceneRefGeometry(camera3dMode);
-  const viewingThrough = camera3dMode === 'active' ? activeCameraId : null;
+  const viewingThrough = isSceneCameraView(camera3dMode) ? activeCameraId : null;
 
   const [hovered, setHovered] = useState<DeviceHandle | null>(null);
   const dragRef = useRef<DeviceDrag | null>(null);
@@ -90,7 +90,7 @@ export function useDeviceHandles(stageRef: React.RefObject<HTMLElement | null>) 
     /** Project a world point exactly as the overlay draws it. */
     const projector = (): ((p: Vec3) => { x: number; y: number }) => {
       const { camera3dMode: mode, compWidth: w, compHeight: h, time: t } = stateRef.current;
-      const ortho = mode !== 'active' && !isCustomViewId(mode) ? (mode as Project3D.OrthoView) : null;
+      const ortho = orthoViewOf(mode);
       if (ortho) return (p) => Project3D.projectOrtho(p, ortho, w, h);
       // `currentViewCamera` is the shared resolver — the renderer, the gizmos
       // and this all read the same camera, which is what keeps a handle on its

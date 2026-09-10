@@ -22,7 +22,8 @@ import { Mat3, Color, depthEligible3D, squareToQuad, isConvexQuad, isIdentityQua
 import { Matrix4Math } from '@motion/scene';
 import type { LayerBlendMode } from '@core/effects/blendMode';
 import { effectColorMatrix, applyColorMatrix, IDENTITY_COLOR_MATRIX } from '@core/effects/effectColorMatrix';
-import { isLutEffect } from '@core/effects/colorLut';
+import { isLutEffect, buildChannelLut, sampleChannelLutAsUploaded, type ChannelLut } from '@core/effects/colorLut';
+import type { Effect } from '@core/effects/effects';
 import { readCubeLutParam } from '@core/effects/cubeLut';
 import { readMatte } from '@core/effects/matte';
 import { effectNumber, effectParam, paramsOf, withAlpha, isGpuOnlyEffect } from '@core/effects/effects';
@@ -279,6 +280,58 @@ function isIdentityMat3(m: Mat3): boolean {
   );
 }
 
+/**
+ * May a layer flattened under `parentMatrix` keep its true-3D placement?
+ *
+ * `placement3d` is the 2D matrix the CAMERA it will be drawn through already
+ * carries: absent = the host camera, which carries none (identity — the
+ * legacy gate); a sealed comp's own camera carries the instance placement
+ * (see `precompCamera3d`). The 3D model is in that camera's world, so the
+ * layer's parent must be exactly that placement — any OTHER transform folded
+ * into its mat3 is one the mat4 world never saw, and the layer keeps the
+ * affine path. Exact comparison, like `isIdentityMat3`: an inline-collapsed
+ * group carrier multiplies by an exact identity, so equal inputs stay equal.
+ */
+function threeDPlacementOk(parentMatrix: Mat3 | undefined, placement3d: Mat3 | undefined): boolean {
+  if (!placement3d) return !parentMatrix || isIdentityMat3(parentMatrix);
+  if (!parentMatrix) return isIdentityMat3(placement3d);
+  for (let i = 0; i < 9; i++) if (parentMatrix[i] !== placement3d[i]) return false;
+  return true;
+}
+
+/**
+ * A sealed comp instance's own 3D frame, placed on the host.
+ *
+ * The isolated offscreen is viewport-sized and drawn with the host viewport's
+ * 2D camera, i.e. in HOST comp px — while the inner camera's P·V outputs
+ * homogeneous INNER comp px. `placement` (`precompChildParent`) is exactly the
+ * inner px → host px map, and it is affine in x/y, so lifting it onto the
+ * projection (lift(placement) · P) moves the homogeneous x/y without touching
+ * z or w: depth order, the DOF depth row (projection[10]/[14]) and the
+ * perspective divide are the inner camera's, unchanged. `view` and `eye` stay
+ * in inner world space, which is where the children's models, the lights and
+ * the shadow maps live.
+ */
+function precompCamera3d(
+  own: NonNullable<RenderLayer['precompScene3d']>,
+  placement: Mat3,
+): Pick<NonNullable<Renderable['precomp']>, 'camera3d' | 'lights3d' | 'envMap'> {
+  const a = placement[0]!, b = placement[1]!, c = placement[3]!, d = placement[4]!;
+  const tx = placement[6]!, ty = placement[7]!;
+  const lift: import('@motion/scene').Matrix4 = [
+    a, b, 0, 0,
+    c, d, 0, 0,
+    0, 0, 1, 0,
+    tx, ty, 0, 1,
+  ];
+  const projection = Matrix4Math.multiply(lift, own.camera3d.projection as import('@motion/scene').Matrix4);
+  return {
+    camera3d: { ...own.camera3d, projection },
+    ...(own.lights3d && own.lights3d.length > 0 ? { lights3d: own.lights3d } : {}),
+    ...(own.envMap ? { envMap: own.envMap } : {}),
+  };
+}
+
 /** World-space AABB of the transformed unit quad, for the renderer's culling. */
 /**
  * Corner Pin, resolved for the render.
@@ -362,25 +415,56 @@ function representativeColor(layer: RenderLayer): string {
   return p && p.type === 'solid' ? p.color : '#000000';
 }
 
-/** One mesh-range fill graded by the layer's colour effects — the per-range
- *  form of {@link gradedSolidColor}, for extruded walls / bevels / caps. */
-function gradeFillByEffects(layer: RenderLayer, fill: string): Color {
-  const base = Color.fromHex(fill);
-  if (!layer.effects || layer.effects.length === 0) return base;
-  const cm = effectColorMatrix(layer.effects);
-  const [r, g, b] = applyColorMatrix(cm, [base.r, base.g, base.b]);
-  return { r, g, b, a: base.a };
+/**
+ * The composed per-channel table for an effect stack, memoised on the stack
+ * ARRAY: an extrusion grades three or four ranges off one layer per frame, and
+ * the snapshot hands each layer a fresh array, so this only ever saves the
+ * repeats within a frame and never serves a stale table.
+ */
+const uniformLutCache = new WeakMap<ReadonlyArray<Effect>, ChannelLut | null>();
+function uniformLutFor(effects: ReadonlyArray<Effect>): ChannelLut | null {
+  let lut = uniformLutCache.get(effects);
+  if (lut === undefined) {
+    lut = buildChannelLut(effects);
+    uniformLutCache.set(effects, lut);
+  }
+  return lut;
 }
 
-/** The layer's solid fill graded by its colour effects (brightness/contrast/…),
- *  applied on the CPU since the colour is uniform. Spatial effects (blur/glow)
- *  are ignored here — they need offscreen passes. */
-function gradedSolidColor(layer: RenderLayer): Color {
-  const base = Color.fromHex(representativeColor(layer));
+/**
+ * A UNIFORM colour graded by the layer's colour effects on the CPU: the affine
+ * matrix, then the per-channel LUT (Levels, Curves, Posterize, Exposure,
+ * Lumetri, …) — the order the GPU runs them in on a textured layer, where
+ * `lut-textured` remaps after the matrix whatever the stack order.
+ *
+ * The LUT is the SAME table `MotionRendererBackend` uploads as `lut:<id>`
+ * (`buildChannelLut` over the stack), read the way the shader reads the strip
+ * (`sampleChannelLutAsUploaded`). Before it ran here, a Levels reached only the
+ * textured half of a layer: an extruded title's cap graded and its walls,
+ * bevels and back cap did not, and a solid quad — 2D or 3D — ignored it
+ * outright, because only textured renderables carry a `lutTextureKey`.
+ */
+function gradeUniformColor(layer: RenderLayer, base: Color): Color {
   if (!layer.effects || layer.effects.length === 0) return base;
   const cm = effectColorMatrix(layer.effects);
-  const [r, g, b] = applyColorMatrix(cm, [base.r, base.g, base.b]);
-  return { r, g, b, a: base.a };
+  let rgb = applyColorMatrix(cm, [base.r, base.g, base.b]);
+  const lut = uniformLutFor(layer.effects);
+  if (lut) rgb = sampleChannelLutAsUploaded(lut, rgb);
+  return { r: rgb[0], g: rgb[1], b: rgb[2], a: base.a };
+}
+
+/** One mesh-range fill graded by the layer's colour effects — the per-range
+ *  form of {@link gradedSolidColor}, for extruded walls / bevels / caps and
+ *  untextured model ranges. */
+function gradeFillByEffects(layer: RenderLayer, fill: string): Color {
+  return gradeUniformColor(layer, Color.fromHex(fill));
+}
+
+/** The layer's solid fill graded by its colour effects (brightness/contrast/…,
+ *  and any colour LUT), applied on the CPU since the colour is uniform. Spatial
+ *  effects (blur/glow) are ignored here — they need offscreen passes. */
+function gradedSolidColor(layer: RenderLayer): Color {
+  return gradeUniformColor(layer, Color.fromHex(representativeColor(layer)));
 }
 
 /**
@@ -2393,7 +2477,14 @@ export function needsShapeRaster(layer: RenderLayer): boolean {
   return false;
 }
 
-export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, parentOpacity?: number): Renderable {
+export function layerToRenderable(
+  layer: RenderLayer,
+  parentMatrix?: Mat3,
+  parentOpacity?: number,
+  /** The 2D placement the camera this layer draws through already carries —
+   *  absent for the host camera (see `threeDPlacementOk`). */
+  placement3d?: Mat3,
+): Renderable {
   // Raster padding grows the placement quad to match the padded stroke texture
   // (0 for unstroked shapes/text/image). Used by every matrix branch below.
   const pad = rasterPadding(layer);
@@ -2550,15 +2641,26 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
     effects: baked ? extractSpatialEffects(layer, true) : extractSpatialEffects(layer),
     ...(layer.deformedMesh ? { deformedMesh: normalizeDeformedMesh(layer.deformedMesh, layer.width, layer.height, pad) } : {}),
     // True-3D placement for the depth-tested GPU path. Only meaningful for a
-    // layer whose 2D model came from the projected affine (`layer.matrix`) —
-    // an inline-collapsed precomp child folds an extra parent transform into
-    // the mat3 that the mat4 world doesn't know about, so it must keep the
-    // affine path (the top-level flatten passes an identity parent).
+    // layer whose 2D model came from the projected affine (`layer.matrix`),
+    // and only when the camera it will be drawn through knows every 2D
+    // transform folded into that mat3 (`threeDPlacementOk`):
+    //  • host layers (the top-level flatten, an identity parent) draw through
+    //    the host camera, which carries no placement;
+    //  • a SEALED comp instance with its own 3D frame flattens its children
+    //    under the instance placement — and its precomp carries the inner
+    //    camera with exactly that placement lifted onto the projection, so
+    //    they keep `threeD` in INNER world space and depth-test / light / shadow
+    //    through the comp they live in (never the host's camera — the leak
+    //    `buildSnapshotCollapseTransforms.test.ts` pins — and that includes an
+    //    instance whose frame happens to equal the host's, whose identity
+    //    placement used to pass the old gate and draw through the host camera);
+    //  • any other extra parent (a transformed inline-collapsed carrier) is a
+    //    transform the mat4 world doesn't know about, so the affine path.
     // A corner-pinned layer stays on the 2D pinned path: the 3D path uses its own
     // mat4 (model3dFor) which does not carry the 2D homography, so taking it would
     // silently drop the pin. Combining corner pin with a true-3D camera is a
     // documented follow-up (lift the 3x3 pin into the mat4 in front of mvp3dFor).
-    ...(layer.world3d && layer.matrix && !pinned && (!parentMatrix || isIdentityMat3(parentMatrix))
+    ...(layer.world3d && layer.matrix && !pinned && threeDPlacementOk(parentMatrix, placement3d)
       ? { threeD: { model: model3dFor(layer.world3d, layer) } }
       : {}),
     // Extruded mesh: the vertices are already in the layer's centred pixel
@@ -2570,9 +2672,25 @@ export function layerToRenderable(layer: RenderLayer, parentMatrix?: Mat3, paren
     // raster padding — the quad path absorbs that by growing the quad, which a
     // mesh cap cannot. So the carrier maps the box into the padded texture via
     // uvRect; pad 0 (media assets keep their own crop rect above) is identity.
-    ...(layer.extrudedMesh && layer.world3d && layer.matrix && (!parentMatrix || isIdentityMat3(parentMatrix))
+    // Same placement gate as the quad above — a sealed comp's extrusion is in
+    // its INNER world and draws through the inner camera like its front face.
+    ...(layer.extrudedMesh && layer.world3d && layer.matrix && threeDPlacementOk(parentMatrix, placement3d)
       ? {
           threeD: { model: layer.world3d },
+          // Gradient walls sample their paint plate, whose texels are UNGRADED.
+          // Colour effects reach a texture sample only through `colorMatrix` /
+          // `lutTextureKey`, which the spread above sets for textured layers
+          // alone — and a bare (non-content) carrier is a 'rect'. So an Invert
+          // or a Levels graded a solid extrusion's walls (on the CPU, below)
+          // and skipped a gradient-filled one's. Both fields are read only
+          // where a texture is sampled, so the solid ranges and any solid draw
+          // of this carrier stay exactly as they were.
+          ...(!textured && !baked && layer.extrudedMesh.paint && layer.extrudedMesh.ranges.some((r) => r.paintTextured)
+            ? {
+                colorMatrix: texturedColorMatrix(layer),
+                ...(hasLutEffect(layer) ? { lutTextureKey: `lut:${layer.id}` } : {}),
+              }
+            : {}),
           ...(!layer.uvRect && pad > 0
             ? {
                 uvRect: {
@@ -2702,6 +2820,12 @@ export function precompChildParent(layer: RenderLayer, parentMatrix: Mat3): Mat3
  */
 export function precompNeedsIsolation(layer: RenderLayer): boolean {
   if (!layer.precompLayers || layer.precompLayers.length === 0) return false;
+  // A sealed comp with its own 3D frame needs its own render SCOPE (its camera
+  // and lights swapped in for the host's), which only the isolated path has —
+  // collapsed inline, its 3D children would draw through the host camera.
+  // Normally already isolated by its frame mask; this covers an instance whose
+  // referenced size is unknown (no `compSizeOf`, so no frame and no mask).
+  if (layer.precompScene3d) return true;
   if (layer.blend && layer.blend !== 'normal') return true;
   if (layer.mask && layer.mask.paths.length > 0) return true;
   if (readMatte(layer.matte) && layer.matteSourceId) return true;
@@ -2730,7 +2854,12 @@ function precompSubtreeHasAdjustment(layers: ReadonlyArray<RenderLayer>): boolea
  *  texture under `precomp:<id>`, and then composites this renderable through
  *  the ordinary per-layer machinery (blend / advanced blend / effects / matte),
  *  so the whole group behaves exactly like a single layer. */
-function precompToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpacity: number): Renderable {
+function precompToRenderable(
+  layer: RenderLayer,
+  parentMatrix: Mat3,
+  parentOpacity: number,
+  placement3d?: Mat3,
+): Renderable {
   // Children flatten under the container's OWN transform — the same matrix the
   // inline-collapse path below builds, so the two agree.
   //
@@ -2740,7 +2869,12 @@ function precompToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpaci
   // instance has a real position, size and rotation, and the isolated path threw
   // all three away — so the moment a precomp got a blend mode, a mask, a matte
   // or an effect (the things that force isolation) it jumped back to the origin.
-  const inner = flattenLayers(layer.precompLayers!, precompChildParent(layer, parentMatrix), 1);
+  const childParent = precompChildParent(layer, parentMatrix);
+  // A sealed comp with its own 3D frame: its children's 3D is in the INNER
+  // world and draws through the inner camera, which carries `childParent` (see
+  // `precompCamera3d`). Anything else inherits the camera it is drawn under.
+  const own = layer.precompScene3d;
+  const inner = flattenLayers(layer.precompLayers!, childParent, 1, [], own ? childParent : placement3d);
   const local = centerModel(layer);
   const model = Mat3.multiply(parentMatrix, local);
   const advBlend = advancedBlendId(layer.blend);
@@ -2762,7 +2896,7 @@ function precompToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpaci
     ...(layer.isMatteSource ? { matteSource: true } : {}),
     colorMatrix: texturedColorMatrix(layer),
     effects: extractSpatialEffects(layer),
-    precomp: { renderables: inner },
+    precomp: { renderables: inner, ...(own ? precompCamera3d(own, childParent) : {}) },
   };
 }
 
@@ -2883,6 +3017,9 @@ function lightToRenderable(layer: RenderLayer, parentMatrix: Mat3, parentOpacity
     blend: 'screen',
     color: Color.white(),
     textureKey: `light:${layer.id}`,
+    // Marks the quad so CompositionPass can hoist it past a 3D depth run
+    // instead of splitting the run (see Renderable.lightWash).
+    lightWash: true,
   };
 }
 
@@ -2890,7 +3027,11 @@ function flattenLayers(
   layers: ReadonlyArray<RenderLayer>,
   parentMatrix: Mat3,
   parentOpacity: number,
-  result: Renderable[] = []
+  result: Renderable[] = [],
+  /** The 2D placement the camera these layers draw through carries — absent
+   *  for the host camera; a sealed comp's own camera carries its instance
+   *  placement (see `threeDPlacementOk`). Inherited by nested groups. */
+  placement3d?: Mat3,
 ): Renderable[] {
   // A layer's leaf renderable, honouring the special content sources (particle
   // fields, isolated precomps) so matte sources and plain draws share one path.
@@ -2898,8 +3039,8 @@ function flattenLayers(
     layer.particles
       ? particlesToRenderable(layer, parentMatrix, parentOpacity)
       : layer.precompLayers && layer.precompLayers.length > 0 && precompNeedsIsolation(layer)
-        ? precompToRenderable(layer, parentMatrix, parentOpacity)
-        : layerToRenderable(layer, parentMatrix, parentOpacity);
+        ? precompToRenderable(layer, parentMatrix, parentOpacity, placement3d)
+        : layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
 
   for (const layer of layers) {
     if (!layer.visible) continue;
@@ -2941,16 +3082,18 @@ function flattenLayers(
       if (precompNeedsIsolation(layer)) {
         // True isolation: render offscreen, composite as one unit with the
         // container's opacity / blend / mask / matte / effects.
-        result.push(precompToRenderable(layer, parentMatrix, parentOpacity));
+        result.push(precompToRenderable(layer, parentMatrix, parentOpacity, placement3d));
         continue;
       }
       // Fast path (plain transform + full/single-child opacity, no compositing
-      // features): collapse inline — transform folds, opacity multiplies.
+      // features): collapse inline — transform folds, opacity multiplies. The
+      // children draw under the same camera, so they inherit its placement.
       flattenLayers(
         layer.precompLayers,
         precompChildParent(layer, parentMatrix),
         parentOpacity * layer.opacity,
         result,
+        placement3d,
       );
     } else if (layer.kind === 'video' && layer.frameBlend && layer.frameBlend.mode === 'pixelMotion') {
       // Pixel Motion: ONE renderable sampling the motion-compensated
@@ -2958,7 +3101,7 @@ function flattenLayers(
       // bracket frames — see rendering/pixelMotion.ts). The feed falls back to
       // the ordinary `vfm:` video ladder when either bracket frame has not
       // decoded yet, so the degradation is nearest-frame, never a hole.
-      const r = layerToRenderable(layer, parentMatrix, parentOpacity);
+      const r = layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
       r.textureKey = `vfm:${layer.id}`;
       result.push(r);
     } else if (layer.kind === 'video' && layer.frameBlend) {
@@ -2968,17 +3111,17 @@ function flattenLayers(
       // `vfa:`/`vfb:` from the decoded-frame cache (falling back to the live
       // element's frame for both until the cache lands, which degrades to
       // nearest-frame instead of showing nothing).
-      const a = layerToRenderable(layer, parentMatrix, parentOpacity);
+      const a = layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
       a.textureKey = `vfa:${layer.id}`;
       result.push(a);
-      const b = layerToRenderable(layer, parentMatrix, parentOpacity);
+      const b = layerToRenderable(layer, parentMatrix, parentOpacity, placement3d);
       b.id = `${layer.id}::fb`;
       b.textureKey = `vfb:${layer.id}`;
       b.opacity = a.opacity * layer.frameBlend.weight;
       result.push(b);
     } else {
       // Leaf layer: map to renderable with parent transformations applied
-      result.push(layerToRenderable(layer, parentMatrix, parentOpacity));
+      result.push(layerToRenderable(layer, parentMatrix, parentOpacity, placement3d));
     }
   }
   return result;
@@ -3093,7 +3236,9 @@ function dropMeshesOutsideDepthPath(renderables: Renderable[]): void {
 function dropMeshesEverywhere(renderables: Renderable[]): void {
   for (let i = renderables.length - 1; i >= 0; i--) {
     const r = renderables[i]!;
-    if (r.precomp) dropMeshesEverywhere(r.precomp.renderables as Renderable[]);
+    // A sealed comp with its own camera has a depth path of its own, whatever
+    // the host has — its meshes stay.
+    if (r.precomp && !r.precomp.camera3d) dropMeshesEverywhere(r.precomp.renderables as Renderable[]);
     if (r.extrudedMesh) renderables.splice(i, 1);
   }
 }

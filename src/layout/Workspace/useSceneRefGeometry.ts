@@ -21,7 +21,8 @@ import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenComposition, readNodeKind } from '@core/scene/sceneDerive';
 import { is3DEnabled } from '@core/scene/threeD';
-import { activeCameraNode, readSceneCamera } from '@core/scene/camera3d';
+import { readSceneCamera, viewCameraNode } from '@core/scene/camera3d';
+import { isSceneCameraView, orthoViewOf } from '@core/scene/cameraViewMode';
 import { toWorldPointAt } from '@core/scene/liveWorld3d';
 import { customViewCamera, isCustomViewId } from '@core/workspace/customViews';
 import { collectSceneGizmos } from '@core/workspace/sceneGizmoData';
@@ -37,7 +38,11 @@ export interface SceneRefGeometry {
   camera: Camera3D;
   /** The axis view, or null for Active Camera / a custom view. */
   orthoView: OrthoView | null;
-  /** The scene camera node id, when this view looks THROUGH it. */
+  /**
+   * The scene camera this view resolves to — the active one, or the one a
+   * `camera:<id>` view names (`viewCameraNode`). A view only looks THROUGH it
+   * when `isSceneCameraView(mode)`; the axis views still report it.
+   */
   activeCameraId: string | null;
   /** True when this view is looking at a 3D scene and should draw the aids. */
   scene3d: boolean;
@@ -88,8 +93,9 @@ export function useSceneRefGeometry(mode: Camera3dMode): SceneRefGeometry {
   if (isCustomViewId(mode)) {
     camera = customViewCamera(customViews[mode], compWidth, compHeight);
   } else {
-    // The shared resolver — same scope, same tie-break as the renderer.
-    const cameraNode = activeCameraNode(defaultSceneGraph, compRootId);
+    // The shared resolver — same scope, same tie-break and the same camera-view
+    // fallback as the renderer.
+    const cameraNode = viewCameraNode(defaultSceneGraph, mode, compRootId);
     activeCameraId = cameraNode?.id ?? null;
     if (cameraNode) {
       const camNode = cameraNode;
@@ -97,14 +103,13 @@ export function useSceneRefGeometry(mode: Camera3dMode): SceneRefGeometry {
       // Comp-scoped and parent-LIFTED, like the renderer: see `currentViewCamera`.
       camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, (id, p) =>
         id === camNode.id ? camValues.get(p) : undefined,
-      compRootId, (id, p) => toWorldPointAt(id, time, p));
+      compRootId, (id, p) => toWorldPointAt(id, time, p), { view: mode });
     } else {
       camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, undefined, compRootId);
     }
   }
 
-  const orthoView: OrthoView | null =
-    mode === 'active' || isCustomViewId(mode) ? null : (mode as OrthoView);
+  const orthoView: OrthoView | null = orthoViewOf(mode);
 
   /**
    * True when this view is looking at a 3D SCENE, regardless of selection. The
@@ -114,7 +119,7 @@ export function useSceneRefGeometry(mode: Camera3dMode): SceneRefGeometry {
    * shows a blank field with no way to tell which way is up.
    */
   const scene3d = (() => {
-    if (mode !== 'active' || draft3d) return true;
+    if (!isSceneCameraView(mode) || draft3d) return true;
     // Comp-scoped: a camera or 3D layer in a DIFFERENT composition must not
     // switch this one's reference geometry on.
     for (const n of flattenComposition(defaultSceneGraph, compRootId)) {
@@ -135,7 +140,7 @@ export function useSceneRefGeometry(mode: Camera3dMode): SceneRefGeometry {
             selectedIds: new Set(selectedIds),
             // The camera this view looks THROUGH is excluded: its own frustum
             // wraps the viewer and draws a full-screen X across the comp.
-            viewingThroughCameraId: mode === 'active' ? activeCameraId : null,
+            viewingThroughCameraId: isSceneCameraView(mode) ? activeCameraId : null,
             // Was unconditional. On a comp with many small layers the boxes
             // pack together into a picket fence of vertical lines that reads as
             // banding on the artwork itself — chrome mistaken for output.

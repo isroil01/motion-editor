@@ -74,7 +74,15 @@ import {
   removeCameraBookmark,
   saveCameraBookmark,
 } from '@core/workspace/cameraBookmarks';
-import { PreviewMenu, usePreviewMenuItems, CAMERA_VIEW_LABEL } from '@layout/TopNav/ViewControls';
+import { useCompositionStore } from '@stores/compositionStore';
+import {
+  PreviewMenu,
+  usePreviewMenuItems,
+  CAMERA_VIEW_LABEL,
+  cameraViewLabel,
+  effectiveViewMode,
+  useCompCameraViews,
+} from '@layout/TopNav/ViewControls';
 import { VIEWPORT_COMMAND_IDS } from './viewportCommands';
 import { isDisplayShed, type DisplayGroup } from './transportOverflow';
 import styles from './ViewportDisplayControls.module.css';
@@ -236,6 +244,7 @@ function useBookmarkItems(): { items: DropdownItem[]; count: number } {
  */
 export interface ViewportDisplayModel {
   viewLayout: ViewLayout;
+  /** The view on screen — a camera view whose camera is gone reads 'active'. */
   camera3dMode: Camera3dMode;
   layoutItems: DropdownItem[];
   channel: ViewChannel;
@@ -261,8 +270,15 @@ export function useViewportDisplayModel(): ViewportDisplayModel {
   // ── Layout / 3D view ───────────────────────────────────────────────
   const viewLayout = useGuidesStore((s) => s.viewLayout);
   const setViewLayout = useGuidesStore((s) => s.setViewLayout);
-  const camera3dMode = useGuidesStore((s) => s.camera3dMode);
+  const storeCameraMode = useGuidesStore((s) => s.camera3dMode);
   const setCamera3dMode = useGuidesStore((s) => s.setCamera3dMode);
+  // Every camera in the active comp, by layer name, right under Active Camera
+  // — AE's 3D View list. Looking through a camera that is not the topmost is
+  // the only way to preview it without reordering the stack.
+  const compId = useCompositionStore((s) => s.id);
+  const cameraViews = useCompCameraViews(compId);
+  // A stale camera view renders as the Active Camera; tick and label it so.
+  const camera3dMode = effectiveViewMode(storeCameraMode, compId);
   const layoutItems: DropdownItem[] = [
     ...(['1', '2', '4'] as ViewLayout[]).map<DropdownItem>((n) => ({
       type: 'checkbox',
@@ -274,6 +290,13 @@ export function useViewportDisplayModel(): ViewportDisplayModel {
     { type: 'separator' },
     { type: 'label', label: '3D view' },
     { type: 'checkbox', id: 'vd-cam-active', label: 'Active Camera', checked: camera3dMode === 'active', onChange: () => setCamera3dMode('active') },
+    ...cameraViews.map<DropdownItem>((c) => ({
+      type: 'checkbox',
+      id: `vd-cam-node-${c.nodeId}`,
+      label: c.label,
+      checked: camera3dMode === c.mode,
+      onChange: () => setCamera3dMode(c.mode),
+    })),
     ...CAMERA_ORTHO_VIEWS.map<DropdownItem>((v) => ({
       type: 'checkbox',
       id: `vd-cam-${v}`,
@@ -511,7 +534,7 @@ export function ViewportDisplayControlsView({ model: m, level = 0, overflow = 'o
       {!shed('layout') && (
         <Dropdown
           placement="top-end"
-          trigger={<Trigger icon={LAYOUT_ICON[m.viewLayout]} label={`Viewport layout: ${LAYOUT_LABEL[m.viewLayout]}${m.camera3dMode !== 'active' ? ` · ${CAMERA_VIEW_LABEL[m.camera3dMode]}` : ''}`} active={m.viewLayout !== '1' || m.camera3dMode !== 'active'} chevron />}
+          trigger={<Trigger icon={LAYOUT_ICON[m.viewLayout]} label={`Viewport layout: ${LAYOUT_LABEL[m.viewLayout]}${m.camera3dMode !== 'active' ? ` · ${cameraViewLabel(m.camera3dMode)}` : ''}`} active={m.viewLayout !== '1' || m.camera3dMode !== 'active'} chevron />}
           items={m.layoutItems}
         />
       )}

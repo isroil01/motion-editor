@@ -41,6 +41,7 @@ import { useSelectionStore } from '@stores/selectionStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useGuidesStore, CAMERA_ORTHO_VIEWS, type Camera3dMode } from '@stores/guidesStore';
 import { CUSTOM_VIEW_IDS, CUSTOM_VIEW_LABEL } from '@core/workspace/customViews';
+import { effectiveViewMode, useCompCameraViews } from '@layout/TopNav/ViewControls';
 import type { RenderView } from '@core/rendering/RenderBackend';
 import { useViewportRenderer } from './useViewportRenderer';
 import { usePaneWorkspace } from './usePaneWorkspace';
@@ -86,6 +87,19 @@ export function SecondaryViewPane({ mode: modeProp, onModeChange, style, classNa
   // fall back to the shared secondaryViewMode (2-up).
   const mode = modeProp ?? storeMode;
   const setMode = onModeChange ?? storeSetMode;
+
+  // Active Camera, then each camera by name, then the axis and custom views —
+  // so a 4-up can hold the shot in one pane and an alternate camera in
+  // another. A stale camera view shows as Active Camera, which is what the
+  // pane renders for it.
+  const compRootId = useCompositionStore((s) => s.id);
+  const cameraViews = useCompCameraViews(compRootId);
+  const viewOptions = useMemo<ReadonlyArray<{ id: Camera3dMode; label: string }>>(
+    () => [VIEW_OPTIONS[0]!, ...cameraViews.map((c) => ({ id: c.mode, label: c.label })), ...VIEW_OPTIONS.slice(1)],
+    [cameraViews],
+  );
+  const shownMode = effectiveViewMode(mode, compRootId);
+  const shownLabel = viewOptions.find((o) => o.id === shownMode)?.label ?? shownMode;
 
   // The comp box. Read straight from the store rather than through the
   // reference-geometry resolver, because the pane's engine needs it BEFORE the
@@ -248,11 +262,11 @@ export function SecondaryViewPane({ mode: modeProp, onModeChange, style, classNa
         <FocusPlaneOverlay mode={mode} getView={getPaneView} viewRev={framingRev} />
       )}
       <select
-        value={mode}
+        value={shownMode}
         onChange={(e) => setMode(e.target.value as Camera3dMode)}
         title="Secondary pane view"
         onPointerDown={(e) => e.stopPropagation()}
-        aria-label={`${VIEW_OPTIONS.find((o) => o.id === mode)?.label ?? mode} view`}
+        aria-label={`${shownLabel} view`}
         style={{
           position: 'absolute',
           top: 6,
@@ -268,7 +282,7 @@ export function SecondaryViewPane({ mode: modeProp, onModeChange, style, classNa
           borderRadius: 4,
         }}
       >
-        {VIEW_OPTIONS.map((o) => (
+        {viewOptions.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
           </option>
@@ -290,7 +304,7 @@ export function SecondaryViewPane({ mode: modeProp, onModeChange, style, classNa
           userSelect: 'none',
         }}
       >
-        {VIEW_OPTIONS.find((o) => o.id === mode)?.label ?? mode}
+        {shownLabel}
       </div>
     </div>
   );

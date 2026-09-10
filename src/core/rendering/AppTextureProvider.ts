@@ -55,6 +55,7 @@ import { paintMaskMatte, type LayerMask } from '@core/effects/mask';
 import { drawParticleField, particleFieldSignature, type ParticleSpriteImage } from '@core/particles/particleRender';
 import type { ParticleConfig } from '@core/particles/particleSim';
 import type { CubeLut } from '@core/effects/cubeLut';
+import { lutStripByte } from '@core/effects/colorLut';
 import {
   isLocalBlobRef,
   attachVideoSrc,
@@ -1263,10 +1264,13 @@ export class AppTextureProvider implements TextureProvider {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const img = ctx.createImageData(256, 1);
+    // `lutStripByte` is the packing the CPU colour grade reads back
+    // (`sampleChannelLutAsUploaded`), so a flat 3D wall graded on the CPU and
+    // its textured cap graded through this strip agree to the byte.
     for (let i = 0; i < 256; i++) {
-      img.data[i * 4] = Math.max(0, Math.min(255, Math.round(lut.r[i]!)));
-      img.data[i * 4 + 1] = Math.max(0, Math.min(255, Math.round(lut.g[i]!)));
-      img.data[i * 4 + 2] = Math.max(0, Math.min(255, Math.round(lut.b[i]!)));
+      img.data[i * 4] = lutStripByte(lut.r[i]!);
+      img.data[i * 4 + 1] = lutStripByte(lut.g[i]!);
+      img.data[i * 4 + 2] = lutStripByte(lut.b[i]!);
       img.data[i * 4 + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);

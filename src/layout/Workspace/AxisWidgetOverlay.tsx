@@ -16,7 +16,8 @@ import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenComposition, readNodeKind } from '@core/scene/sceneDerive';
 import { is3DEnabled } from '@core/scene/threeD';
-import { activeCameraNode, readSceneCamera } from '@core/scene/camera3d';
+import { readSceneCamera, viewCameraNode } from '@core/scene/camera3d';
+import { orthoViewOf } from '@core/scene/cameraViewMode';
 import { toWorldPointAt } from '@core/scene/liveWorld3d';
 import { customViewCamera, isCustomViewId } from '@core/workspace/customViews';
 import { getRemappedTime } from '@core/timeline/TimelineController';
@@ -68,7 +69,9 @@ export const AxisWidgetOverlay: React.FC = () => {
   // One resolver for every camera read in the app. A local first-match search
   // here would draw the widget for a different camera than the frame was
   // rendered through — same scope and same tie-break, or neither is trustworthy.
-  const cameraNode = activeCameraNode(defaultSceneGraph, compRootId);
+  // The view's camera, so a `camera:<id>` view orients the widget by the
+  // camera on screen rather than the topmost one.
+  const cameraNode = viewCameraNode(defaultSceneGraph, camera3dMode, compRootId);
   if (!has3D) return null;
 
   // Resolve the view camera at the playhead — same resolver chain the gizmo
@@ -83,12 +86,11 @@ export const AxisWidgetOverlay: React.FC = () => {
     // Comp-scoped and parent-LIFTED, like the renderer: see `currentViewCamera`.
     camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, (id, p) =>
       id === camNode.id ? camValues.get(p) : undefined,
-    compRootId, (id, p) => toWorldPointAt(id, time, p));
+    compRootId, (id, p) => toWorldPointAt(id, time, p), { view: camera3dMode });
   } else {
     camera = readSceneCamera(defaultSceneGraph, compWidth, compHeight, undefined, compRootId);
   }
-  const orthoView: OrthoView | null =
-    camera3dMode === 'active' || isCustomViewId(camera3dMode) ? null : (camera3dMode as OrthoView);
+  const orthoView: OrthoView | null = orthoViewOf(camera3dMode);
 
   const project = (p: Vec3): { x: number; y: number } =>
     orthoView ? Project3D.projectOrtho(p, orthoView, compWidth, compHeight) : Project3D.projectPoint(p, camera);

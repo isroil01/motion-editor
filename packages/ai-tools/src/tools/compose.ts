@@ -191,9 +191,13 @@ export const addCameraMoveDef: AiToolDef = {
   name: 'add_camera_move',
   kind: 'compose',
   description:
-    'Add a slow, cinematic push-in (or pull-out) across the whole scene — the subtle continuous ' +
-    'scale that makes a hero shot feel alive and three-dimensional. Call this AFTER the content ' +
-    'layers exist; it leaves layers that already animate their scale untouched.',
+    'Add a slow, cinematic push-in (or pull-out) with a real 3D camera: turns the 3D switch on for ' +
+    'the shape/text/image layers, reuses the comp\'s first camera or creates one, and keyframes the ' +
+    'camera\'s Z plus a gentle orbit. Layer scale is not touched. Call this AFTER the content ' +
+    'layers exist. Parallax comes from DEPTH: layers left at the same z move as one flat plane, so ' +
+    'for a layered hero shot give background/midground/foreground different z values ' +
+    '(update_layer with threeD: true and z; positive z is further from the camera) before or ' +
+    'after this call.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

@@ -3,8 +3,51 @@
 Newest first. Each entry is what a person opening the app after an update
 would want to know; the engine-level detail is in `ROADMAP.md`.
 
-## Unreleased
+## 0.8.0 — 2026-09-10
 
+- **3D lighting that behaves**: adding a light no longer shows a phantom
+  second light — the automatic Ambient Fill is now an even lift across the
+  frame, and its icon appears only while it is selected. New 3D layers answer
+  lights and shadows out of the box; a light sitting between two layers no
+  longer breaks shadow-map shadows; unticking Cast Shadows turns the shadow
+  map off too; 3D solids cast shadows in both shadow modes.
+- **Cameras you can direct**: Camera Options and Light Options in the
+  timeline (Zoom, orbit, point of interest, depth of field, intensity, cone,
+  shadow dials — stopwatch any of them from there); the View menu and every
+  2-up / 4-up pane list each camera by name to look through;
+  **Layer ▸ Camera ▸ Distribute Layers in Z** spreads layers in depth for
+  instant parallax without changing the framing; a **Camera** preset folder
+  (Push In, Pull Out, Orbit Sweep, Drift Parallax, Dolly Zoom, Handheld);
+  Layer ▸ New ▸ Camera… / Light… open their option dialogs
+  (Ctrl+Alt+Shift+C / L); new cameras and lights are numbered.
+- **Effects on 3D layers**: glows, blurs, beams, light rays and lens flares
+  are no longer clipped at a 3D layer's edge; Levels, Curves, Posterize,
+  Exposure, Lumetri and the colour effects reach extruded shapes, 3D
+  primitives and imported glTF models; gradient-filled extrusions grade their
+  walls too.
+- **Nested comps in 3D**: a composition placed as a layer renders its 3D
+  through its own camera and lights — real depth, lighting and shadows —
+  instead of a flat projection.
+- **Deep Glow**: a physically based glow with a tight core and a long 1/r²
+  tail, exposure, threshold, aspect, chromatic aberration and tint.
+- **Energy Beam**: a Saber-style beam along a mask path, a text outline or a
+  line — reveal, taper, distortion, flicker — with twenty presets
+  (Lightsaber, Neon, Electric Arc, Plasma…); Lightning follows a mask path.
+- **Particles v2 and Plexus**: sphere emitters, drag, size / opacity / colour
+  ramps, sub-emission, velocity streaks and sprite sheets; Plexus draws
+  point-and-line networks over a point cloud, a mask path or live particles.
+- **More 3D**: height displacement from an image on extrusions, primitives
+  and models; a second shadow-mapped light; Cryptomatte ID mattes from EXR in
+  the Track Matte picker.
+- **Tracking and masks**: Write-on and Vegas follow a mask path (a tracked
+  mask moves the effect with the object); draw around an object to get a mask;
+  the Object Matte neural model ships with the app and works out of the box;
+  one-click tracking fixes, Parent to null, and mask tracks over 64 points.
+- **Motion blur** is sized from how far a layer's silhouette travels, so
+  spins, scale pops and card flips no longer strobe; per-layer Shutter Phase.
+- **Also**: paste SVG straight from Illustrator; the render queue picks up
+  where it stopped after a relaunch; 3D text extrusion gains gradient walls and
+  face picking; the AI assistant's camera move is a real 3D camera.
 - **Eighteen more After Effects effects** (201 in the browser, every one a
   GPU shader with a CPU reference, except the three lookup-table colour
   effects that render free on both backends):

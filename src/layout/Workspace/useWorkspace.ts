@@ -95,6 +95,7 @@ import {
 } from '@core/workspace/cameraNav';
 import { useFaceSelectionStore } from '@stores/faceSelectionStore';
 import { facesOfNode, pickFace, faceHighlightGroups } from '@core/scene/facePicking';
+import { isSceneCameraView } from '@core/scene/cameraViewMode';
 import { compSizeOf } from '@core/composition/compSizes';
 import { RULER_CSS_PX, inStrip, rulerStrips } from './rulerGeometry';
 
@@ -477,8 +478,9 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
         // The only producer of `snapshot.roi`. Read live from the store so the
         // region takes effect on the very next frame after the menu toggles it.
         roi: useGuidesStore.getState().roi ?? undefined,
-        // Ortho / custom views must not be cropped to the comp rect.
-        viewIsActiveCamera: camera3dModeRef.current === 'active',
+        // Ortho / custom views must not be cropped to the comp rect; a
+        // camera view is a shot, and is — like Active Camera.
+        viewIsActiveCamera: isSceneCameraView(camera3dModeRef.current),
       };
       // Detect a live-set change (a layer crossed its in/out point this
       // frame). That frame pays one-off costs — rasterize the new layer's

@@ -276,6 +276,28 @@ export const AO_SAMPLER_BINDING = 12;
 export const SHADOW2_TEXTURE_BINDING = 13;
 export const SHADOW2_SAMPLER_BINDING = 14;
 
+/**
+ * The per-channel colour LUT strip (Levels / Curves / Posterize / Exposure /
+ * Lumetri, `lut:<layerId>`) on the lit-3d LUT VARIANTS — `textured3d-lut`,
+ * `mesh3d-textured-lut`, `mesh3d-pbr-lut`.
+ *
+ * 15 rather than the 2D path's 3, and past the scene set rather than inside the
+ * per-layer range, because the per-layer range is FULL on the one material that
+ * needs it most: `mesh3d-pbr` claims 3-6 for its maps, and 7-14 belong to the
+ * scene. One number for all three variants keeps the emit helpers from having
+ * to know which slot a given material chose.
+ *
+ * It breaks nothing the scene-level rule protects. That rule exists so a new
+ * per-layer texture can never renumber an EXISTING material's units; the LUT
+ * lives only on its own variants — separate pipelines — so every material that
+ * existed before keeps its layout, its GLSL units and its pixels. On a variant
+ * it is the LAST texture entry (QuadRenderer pushes it after 13), so `uLutTex`
+ * is the last declared sampler name. It is sampled with the layer's own
+ * broadcast sampler, like the 2D strip, so the WebGL2 backend needs no special
+ * case for it.
+ */
+export const LUT3D_TEXTURE_BINDING = 15;
+
 export interface PipelineDescriptor {
   label?: string;
   shader: ShaderModuleHandle;

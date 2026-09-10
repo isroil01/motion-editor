@@ -7,12 +7,15 @@
  */
 
 import { buildSnapshot } from './buildSnapshot';
+import { snapshotToFrameScene } from './snapshotToFrameScene';
 import SceneGraph from '@core/scene/SceneGraph';
 import { AnimationEngine } from '@motion/animation';
 import type { SceneNode } from '@core/types';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
 import { registerModel, clearModelRegistry, modelKeyForBytes, MODEL_COMPONENT } from '@core/scene/modelMesh';
 import { buildQuadGlb, buildMappedQuadGlb } from '@/__testHelpers__/buildTestGlb';
+import { buildChannelLut, sampleChannelLutAsUploaded } from '@core/effects/colorLut';
+import type { Effect } from '@core/effects/effects';
 
 const COMP = { width: 800, height: 600, background: '#101014' };
 
@@ -81,6 +84,65 @@ describe('buildSnapshot — imported model meshes', () => {
     g.addNode(node);
     const snap = buildSnapshot(g, new AnimationEngine(), 0, undefined, undefined, undefined, undefined, COMP);
     expect(snap.layers.find((l) => l.id.startsWith('m1'))!.extrudedMesh).toBeUndefined();
+  });
+});
+
+/**
+ * Effects on a model: the carrier keeps what the mesh draw can honour — the
+ * ENABLED colour effects, affine and LUT alike, the extrusion carrier's rule —
+ * and drops the rest rather than half-applying them. Checked through the
+ * adapter too, so the kept effects are shown to change the range colour the
+ * mesh is drawn with, not merely to survive on the snapshot.
+ */
+describe('buildSnapshot — colour effects on a model mesh', () => {
+  afterEach(() => clearModelRegistry());
+
+  function withEffects(effects: unknown[]): SceneNode {
+    const node = modelLayer('m1', modelKeyForBytes(new Uint8Array(buildQuadGlb())));
+    node.components.push({ id: 'm1_fx', type: 'fx', props: { effects } } as unknown as SceneNode['components'][number]);
+    return node;
+  }
+
+  it('keeps enabled colour effects — affine AND LUT — and grades the range by both; strips blur and disabled effects', () => {
+    const glb = buildQuadGlb();
+    registerModel(modelKeyForBytes(new Uint8Array(glb)), glb);
+    // Output white 128: halves whatever reaches white, so it cannot hide as a no-op.
+    const lv: Effect = { id: 'fx_lv', type: 'levels', params: { inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 128 } };
+    const g = new SceneGraph();
+    g.addNode(withEffects([
+      { id: 'fx_inv', type: 'invert', params: { amount: 100 } },
+      { id: 'fx_blur', type: 'blur', params: { amount: 8 } },
+      // Levels is a LUT grade: a flat range runs it through the uploaded table
+      // on the CPU, a textured one through the `-lut` mesh material.
+      lv,
+      { id: 'fx_off', type: 'sepia', enabled: false, params: { amount: 100 } },
+    ]));
+    const snap = buildSnapshot(g, new AnimationEngine(), 0, undefined, undefined, undefined, undefined, COMP);
+
+    const layer = snap.layers.find((l) => l.id.startsWith('m1'))!;
+    expect(layer.extrudedMesh).toBeDefined();
+    expect(layer.effects?.map((e) => e.id)).toEqual(['fx_inv', 'fx_lv']);
+
+    // Red fill, inverted → cyan, THEN the Levels table — the affine grade runs
+    // first, as it does on the GPU — on the range the mesh draw actually reads.
+    const r = snapshotToFrameScene(snap).renderables.find((x) => x.id === layer.id)!;
+    const c = r.extrudedMesh!.ranges[0]!.color;
+    const want = sampleChannelLutAsUploaded(buildChannelLut([lv])!, [0, 1, 1]);
+    expect(want[1]).toBeCloseTo(128 / 255, 5);
+    expect(c.r).toBeCloseTo(want[0], 10);
+    expect(c.g).toBeCloseTo(want[1], 10);
+    expect(c.b).toBeCloseTo(want[2], 10);
+  });
+
+  it('a model with only non-colour effects carries none', () => {
+    const glb = buildQuadGlb();
+    registerModel(modelKeyForBytes(new Uint8Array(glb)), glb);
+    const g = new SceneGraph();
+    g.addNode(withEffects([{ id: 'fx_blur', type: 'blur', params: { amount: 8 } }]));
+    const snap = buildSnapshot(g, new AnimationEngine(), 0, undefined, undefined, undefined, undefined, COMP);
+    const layer = snap.layers.find((l) => l.id.startsWith('m1'))!;
+    expect(layer.extrudedMesh).toBeDefined();
+    expect(layer.effects).toBeUndefined();
   });
 });
 

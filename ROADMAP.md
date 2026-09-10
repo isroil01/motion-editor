@@ -88,7 +88,25 @@ Layers in Z** builds a size-compensated parallax rig in one command, a Camera
 preset folder ships the standard moves (Push In / Pull Out / Orbit Sweep /
 Drift Parallax / Dolly Zoom / Handheld), and outward-reaching effects on 3D
 layers stopped being clipped at the layer rectangle (`effectSpreadPx` now
-covers the blur family, beam, light rays, lens flare and motion tile).
+covers the blur family, beam, light rays, lens flare and motion tile). A
+second pass the same day: the View menu lists every camera by name so you can
+look through any of them, not just the topmost; a light's glow no longer
+splits a shadow-mapped 3D scene into groups that each missed half of a
+caster/receiver pair; unticking Cast Shadows now turns the shadow map off
+too; 3D solids cast projected shadows like any other plane; imported glTF
+models take colour-matrix effects (Hue/Saturation, Tint, Invert, Brightness &
+Contrast, Channel Mixer — LUT effects like Levels and Curves still do not
+reach any mesh); and the AI's camera move is described to the model as the
+real camera move it has been since July. A third pass closed that LUT gap:
+Levels, Curves, Posterize, Exposure and Lumetri now reach extrusions,
+primitives and imported models — flat faces graded on the CPU through the same
+table the GPU uploads, textured ones through new `-lut` mesh and 3D-quad
+materials — and a gradient-filled extrusion's walls take colour effects at all.
+A sealed comp instance now renders its 3D layers through its OWN camera and
+lights on the GPU (depth test, per-fragment lighting, shadow maps, reflections)
+instead of a flat projection, and the host camera no longer leaks into a
+same-sized instance. Still open there: SSAO inside a sealed comp, and DOF blur
+radii that do not scale with the instance.
 
 The engine is one GPU render graph (WebGPU, falling back to WebGL2) shared by the
 viewport and the exporter, covered by golden-image render tests.

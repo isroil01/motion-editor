@@ -19,6 +19,7 @@ import { AnimationEngine } from '@motion/animation';
 import type { SceneNode } from '@core/types';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
 import { clearExtrusionMeshCaches } from '@core/scene/extrusionMesh';
+import { snapshotToFrameScene } from './snapshotToFrameScene';
 
 const COMP = { width: 800, height: 600, background: '#101014' };
 
@@ -104,5 +105,33 @@ describe('extruded solid — cast shadows', () => {
     const mesh = meshOf(g);
     expect(mesh?.extrudedMesh).toBeDefined();
     expect(mesh?.castsShadow3d).toBe(true);
+  });
+});
+
+describe('extruded walls — colour effects reach a gradient wall', () => {
+  // Gradient walls sample the paint plate, whose texels are ungraded, while a
+  // solid wall's colour is graded on the CPU. So only the gradient carrier
+  // needs the renderable-level grade — and a solid one must not get it, or its
+  // walls would be graded twice wherever a texture is sampled.
+  const INVERT = { id: 'fx_inv', type: 'invert', params: { amount: 100 } };
+  const LEVELS = { id: 'fx_lv', type: 'levels', params: { inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 128 } };
+  const carrier = (g: SceneGraph) => snapshotToFrameScene(snap(g)).renderables.find((r) => r.id === 'b::ext-mesh');
+
+  it('a gradient extrusion carries the colour matrix and the LUT strip key to its plate', () => {
+    const g = new SceneGraph();
+    g.addNode(box('b', {}, { fill: GRADIENT, effects: [INVERT, LEVELS] }));
+    const r = carrier(g)!;
+    expect(r.extrudedMesh!.ranges.some((x) => x.textured && x.textureKey === 'paint:b')).toBe(true);
+    expect(r.colorMatrix).toBeDefined();
+    expect(r.lutTextureKey).toBe('lut:b::ext-mesh');
+  });
+
+  it('a solid extrusion does not — its walls are already graded on the CPU', () => {
+    const g = new SceneGraph();
+    g.addNode(box('b', {}, { effects: [INVERT, LEVELS] }));
+    const r = carrier(g)!;
+    expect(r.extrudedMesh).toBeDefined();
+    expect(r.colorMatrix).toBeUndefined();
+    expect(r.lutTextureKey).toBeUndefined();
   });
 });

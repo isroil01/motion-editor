@@ -14,7 +14,8 @@
  */
 
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
-import { activeCameraNode, readSceneCamera } from '@core/scene/camera3d';
+import { readSceneCamera, viewCameraNode } from '@core/scene/camera3d';
+import { orthoViewOf } from '@core/scene/cameraViewMode';
 import { toWorldPointAt } from '@core/scene/liveWorld3d';
 import { getRemappedTime } from '@core/timeline/TimelineController';
 import { defaultAnimation } from '@motion/animation';
@@ -99,7 +100,7 @@ export function currentViewCamera(
   view?: Camera3dMode,
 ): Project3D.Camera3D | null {
   const cameraMode = view ?? useGuidesStore.getState().camera3dMode;
-  if (cameraMode !== 'active' && !isCustomViewId(cameraMode)) return null;
+  if (orthoViewOf(cameraMode)) return null;
 
   if (isCustomViewId(cameraMode)) {
     return customViewCamera(useGuidesStore.getState().customViews[cameraMode], width, height);
@@ -110,8 +111,10 @@ export function currentViewCamera(
   // projecting through a different camera than the render — scoped differently
   // (whole project vs. active comp) and ordered differently (bottom-most vs.
   // top-most) once those rules were corrected in one place and not the other.
+  // And through the camera a `camera:<id>` view names, with the renderer's
+  // fallback — the chrome has to project through the node the pixels did.
   const rootId = useCompositionStore.getState().comp().id;
-  const cameraNode = activeCameraNode(defaultSceneGraph, rootId);
+  const cameraNode = viewCameraNode(defaultSceneGraph, cameraMode, rootId);
   if (!cameraNode) return Project3D.defaultCamera(width, height);
   // Sample the camera at the playhead — an animated/orbited camera otherwise
   // projects through frame 0's view.
@@ -128,6 +131,7 @@ export function currentViewCamera(
     (id, p) => (id === camNode.id ? camValues.get(p) : undefined),
     rootId,
     (id, p) => toWorldPointAt(id, time, p),
+    { view: cameraMode },
   );
 }
 
@@ -137,10 +141,7 @@ function buildViewProjector(
   time: number,
   cameraMode: Camera3dMode = useGuidesStore.getState().camera3dMode,
 ): Projector {
-  const orthoView: Project3D.OrthoView | null =
-    cameraMode === 'active' || isCustomViewId(cameraMode)
-      ? null
-      : (cameraMode as Project3D.OrthoView);
+  const orthoView: Project3D.OrthoView | null = orthoViewOf(cameraMode);
 
   if (orthoView) {
     return (p) => Project3D.projectOrtho(p, orthoView, width, height);

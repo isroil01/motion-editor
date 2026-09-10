@@ -441,7 +441,7 @@ describe('tool results teach the model', () => {
     expect(c.scene.get(id)!.height).toBe(comp.height);
   });
 
-  it('add_camera_move ramps a push-in scale across content (no fragile 3D camera)', async () => {
+  it('add_camera_move dollies a 3D camera across the content', async () => {
     const reg = registry();
     const c = ctx();
     await reg.execute('add_title', { text: 'Depth', style: 'premium' }, c);
@@ -451,6 +451,11 @@ describe('tool results teach the model', () => {
     expect(camNode).toBeDefined();
     const zTrack = defaultAnimation.tracksFor(camNode.id).find((t) => t.prop === 'z');
     expect(zTrack).toBeTruthy();
+    // The count is CONTENT layers only; the camera is named, not counted.
+    const content = c.scene.all().filter((n) => n.kind === 'shape' || n.kind === 'text' || n.kind === 'image');
+    expect(move.content).toContain(`across ${content.length} layer(s)`);
+    expect(move.content).toContain(`a new 3D camera (id ${camNode.id})`);
+    expect((move.data as { cameraId: string }).cameraId).toBe(camNode.id);
   });
 
   it('applies the good half of a batch and names the bad half', async () => {

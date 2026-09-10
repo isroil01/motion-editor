@@ -10,7 +10,9 @@ import { AnimationEngine } from '@motion/animation';
 import type { SceneNode } from '@core/types';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
 import { snapshotToFrameScene } from './snapshotToFrameScene';
-import { depthEligible3D } from '@motion/renderer';
+import { depthEligible3D, Color } from '@motion/renderer';
+import { buildChannelLut, sampleChannelLutAsUploaded } from '@core/effects/colorLut';
+import type { Effect } from '@core/effects/effects';
 import { EXTRUSION_WALL_GAIN, EXTRUSION_BACK_GAIN } from '@core/scene/extrusion';
 import { clearExtrusionMeshCaches } from '@core/scene/extrusionMesh';
 import { MESH_VERTEX_FLOATS } from '@core/geometry/extrudeMesh';
@@ -44,6 +46,62 @@ function snap(graph: SceneGraph, anim = new AnimationEngine(), t = 0) {
 }
 
 beforeEach(() => clearExtrusionMeshCaches());
+
+/**
+ * A colour LUT (Levels / Curves / …) on an extrusion. It used to BLOCK the
+ * mesh path — the gate let only the affine colour effects through — so a Levels
+ * swapped the solid for the slice stack. It now rides the carrier: flat ranges
+ * are graded through the uploaded table on the CPU, textured ones through the
+ * `-lut` mesh materials.
+ */
+describe('buildSnapshot — colour LUT on the mesh extrusion', () => {
+  const LV: Effect = {
+    id: 'fx_lv', type: 'levels',
+    params: { inputBlack: 25, inputWhite: 210, gamma: 0.8, outputBlack: 0, outputWhite: 255 },
+  };
+  function withFx(node: SceneNode, effects: unknown[]): SceneNode {
+    node.components.push({ id: `${node.id}_fx`, type: 'fx', props: { effects } } as unknown as SceneNode['components'][number]);
+    return node;
+  }
+
+  it('a Levels keeps the solid on the mesh path and rides the carrier', () => {
+    const g = new SceneGraph();
+    g.addNode(withFx(shape3D('box', { extrusionDepth: 40 }), [LV]));
+    const layers = snap(g).layers;
+    expect(layers.map((l) => l.id)).toEqual(['box::ext-mesh', 'box']);
+    expect(layers[0]!.effects?.map((e) => e.id)).toEqual(['fx_lv']);
+  });
+
+  it('grades every flat range — walls and back cap — and the solid front exactly as the table says', () => {
+    const g = new SceneGraph();
+    g.addNode(withFx(shape3D('box', { extrusionDepth: 40 }), [LV]));
+    const scene = snapshotToFrameScene(snap(g));
+    const fill = Color.fromHex('#2b7eff');
+    const want = sampleChannelLutAsUploaded(buildChannelLut([LV])!, [fill.r, fill.g, fill.b]);
+    // Not vacuous: this Levels visibly moves the fill.
+    expect(Math.abs(want[1] - fill.g)).toBeGreaterThan(0.02);
+
+    const body = scene.renderables.find((r) => r.id === 'box::ext-mesh')!;
+    expect(body.extrudedMesh!.ranges.length).toBeGreaterThan(1);
+    for (const range of body.extrudedMesh!.ranges) {
+      expect(range.color.r).toBeCloseTo(want[0], 10);
+      expect(range.color.g).toBeCloseTo(want[1], 10);
+      expect(range.color.b).toBeCloseTo(want[2], 10);
+    }
+    // The front face is the layer's own SOLID quad: same table, same colour —
+    // no seam along the front edge.
+    const front = scene.renderables.find((r) => r.id === 'box')!;
+    expect(front.color!.r).toBeCloseTo(want[0], 10);
+    expect(front.color!.g).toBeCloseTo(want[1], 10);
+    expect(front.color!.b).toBeCloseTo(want[2], 10);
+  });
+
+  it('a SPATIAL effect still sends the object to the fallback — only the LUTs were let through', () => {
+    const g = new SceneGraph();
+    g.addNode(withFx(shape3D('box', { extrusionDepth: 40 }), [LV, { id: 'fx_blur', type: 'blur', params: { amount: 6 } }]));
+    expect(snap(g).layers.some((l) => l.extrudedMesh)).toBe(false);
+  });
+});
 
 describe('buildSnapshot — mesh extrusion', () => {
   it('extrusion > 0 emits ONE mesh carrier immediately before the front face', () => {

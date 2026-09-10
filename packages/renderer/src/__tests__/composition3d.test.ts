@@ -125,6 +125,68 @@ describe('CompositionPass 3D render groups', () => {
     expect(backend.passLog).toEqual(expect.arrayContaining(['blurH', 'blurV']));
   });
 
+  /** A frame whose light renders a shadow MAP — the only case the hoist is for. */
+  const withMapLight = (s: FrameScene): FrameScene => ({
+    ...s,
+    lights3d: [{
+      type: 'spot', color: { r: 1, g: 1, b: 1 }, gain: 1, x: 400, y: 300, z: -400, radius: 1000,
+      aimX: 0, aimY: 0, aimZ: 1, halfConeRad: 0.6, coneFeatherRad: 0.1, falloffMode: 0, falloffDistance: 500,
+      shadowMap: true,
+    }],
+  } as never);
+
+  it('with a shadow-mapped light, a WASH between two 3D layers does NOT split the run (hoisted after it)', async () => {
+    // The wash sits at the light layer's stacking position, i.e. wherever the
+    // user's light happens to be in the stack. It broke the run exactly like
+    // any 2D layer, so the shadow map — built per run — saw a caster with no
+    // receiver and darkened nothing (the golden scenes work around this by
+    // adding the light FIRST, and call the order load-bearing).
+    const backend = await render(withMapLight(
+      scene([
+        rect('caster', 100, 100, true),
+        rect('wash', 200, 200, false, { lightWash: true, blend: 'screen' }),
+        rect('receiver', 300, 300, true),
+      ]),
+    ));
+    expect(backend.depthPassLog).toEqual(['composition-3d']);
+    expect(backend.draws.filter((d) => d.pass === 'composition-3d')).toHaveLength(2);
+    // The wash still draws — through the ordinary composition pass, AFTER the
+    // one depth group rather than in the middle of it.
+    const order = backend.passLog.filter((p) => p === 'composition' || p === 'composition-3d');
+    expect(order).toEqual(['composition-3d', 'composition']);
+  });
+
+  it('WITHOUT a shadow-mapped light the wash keeps its painter position (splits the run as before)', async () => {
+    // Projected shadows are real geometry in paint order and do not care about
+    // runs, so there is nothing to gain — and hoisting would screen the glow
+    // over a 3D layer it used to sit beneath (`shadow-catcher`'s caster).
+    const backend = await render(
+      scene([
+        rect('caster', 100, 100, true),
+        rect('wash', 200, 200, false, { lightWash: true, blend: 'screen' }),
+        rect('receiver', 300, 300, true),
+      ]),
+    );
+    expect(backend.depthPassLog).toEqual(['composition-3d', 'composition-3d']);
+    const order = backend.passLog.filter((p) => p === 'composition' || p === 'composition-3d');
+    expect(order).toEqual(['composition-3d', 'composition', 'composition-3d']);
+  });
+
+  it('a light WASH before the first 3D layer keeps its position (nothing to hoist over)', async () => {
+    // The golden light scenes add the light first, so its wash precedes the
+    // run — that arrangement must render exactly as it always has.
+    const backend = await render(withMapLight(
+      scene([
+        rect('wash', 200, 200, false, { lightWash: true, blend: 'screen' }),
+        rect('a', 100, 100, true),
+        rect('b', 300, 300, true),
+      ]),
+    ));
+    expect(backend.depthPassLog).toEqual(['composition-3d']);
+    const order = backend.passLog.filter((p) => p === 'composition' || p === 'composition-3d');
+    expect(order).toEqual(['composition', 'composition-3d']);
+  });
+
   it('two effect-laden 3D layers split into two depth sub-passes (shared depth, no 2D break)', async () => {
     const backend = await render(
       scene([
@@ -166,3 +228,100 @@ describe('CompositionPass 3D render groups', () => {
     expect(backend.draws.filter((d) => d.pass === 'composition-3d')).toHaveLength(1);
   });
 });
+
+/**
+ * A SEALED comp instance with its own 3D frame: CompositionPass swaps the
+ * precomp's camera / lights in for the scene's while it draws the subtree, and
+ * the scope it was drawn in comes back afterwards.
+ */
+describe('CompositionPass: an isolated precomp with its OWN camera', () => {
+  const mapLight = {
+    type: 'spot', color: { r: 1, g: 1, b: 1 }, gain: 1, x: 400, y: 300, z: -400, radius: 1000,
+    aimX: 0, aimY: 0, aimZ: 1, halfConeRad: 0.6, coneFeatherRad: 0.1, falloffMode: 0, falloffDistance: 500,
+    shadowMap: true,
+  } as const;
+
+  /** A full-comp isolated container around `children`. */
+  const precomp = (id: string, children: Renderable[], own: Partial<NonNullable<Renderable['precomp']>> = {}): Renderable => ({
+    id,
+    kind: 'image',
+    modelMatrix: Mat3.multiply(Mat3.compose(400, 300, 0, 800, 600), Mat3.translation(-0.5, -0.5)),
+    bounds: { x: 0, y: 0, width: 800, height: 600 },
+    opacity: 1,
+    blend: 'normal',
+    color: Color.white(),
+    textureKey: `precomp:${id}`,
+    precomp: { renderables: children, ...own },
+  });
+  const depth3d = (b: NullBackend) => b.depthPassLog.filter((p) => p === 'composition-3d');
+
+  it('renders a composition-3d depth pass INSIDE the precomp through its own camera (the host has none)', async () => {
+    const backend = await render(scene([
+      precomp('inst', [rect('a', 100, 100, true), rect('b', 300, 300, true)], { camera3d: camera3d() }),
+    ], /* host camera */ false));
+    expect(depth3d(backend)).toEqual(['composition-3d']);
+    expect(backend.draws.filter((d) => d.pass === 'composition-3d')).toHaveLength(2);
+    // Inside the precomp: after its target is cleared.
+    expect(backend.passLog.indexOf('precomp-clear')).toBeLessThan(backend.passLog.indexOf('composition-3d'));
+  });
+
+  it('without its own camera (and none on the host) the children stay on the affine path', async () => {
+    const backend = await render(scene([
+      precomp('inst', [rect('a', 100, 100, true), rect('b', 300, 300, true)]),
+    ], false));
+    expect(depth3d(backend)).toEqual([]);
+  });
+
+  it('its camera does not leak OUT: a host 3D layer after it has no camera to depth-group with', async () => {
+    const backend = await render(scene([
+      precomp('inst', [rect('a', 100, 100, true)], { camera3d: camera3d() }),
+      rect('host3d', 500, 400, true),
+    ], false));
+    expect(depth3d(backend)).toEqual(['composition-3d']); // the inner one only
+  });
+
+  it('host lights do not reach IN: a host shadow-mapped light hoists nothing inside a comp with no lights', async () => {
+    const backend = await render(withMapLightOn(scene([
+      precomp('inst', [
+        rect('caster', 100, 100, true),
+        rect('wash', 200, 200, false, { lightWash: true, blend: 'screen' }),
+        rect('receiver', 300, 300, true),
+      ], { camera3d: camera3d() }),
+    ])));
+    // The inner frame has no mapped light, so the wash keeps its painter
+    // position and splits the run — as it would in that comp on its own.
+    expect(depth3d(backend)).toEqual(['composition-3d', 'composition-3d']);
+    expect(backend.passLog).not.toContain('shadow-map');
+  });
+
+  it('its own lights apply inside and do not leak out; nested instances swap in turn', async () => {
+    const run = (prefix: string) => [
+      rect(`${prefix}a`, 100, 100, true),
+      rect(`${prefix}wash`, 200, 200, false, { lightWash: true, blend: 'screen' }),
+      rect(`${prefix}b`, 300, 300, true),
+    ];
+    const backend = await render(scene([
+      // Outer sealed comp: own camera, NO lights. Inside it, a nested sealed
+      // comp with a shadow-mapped light — its wash hoists (one run) — and after
+      // it the outer's own run, where the inner light must be gone again (two).
+      precomp('outer', [
+        precomp('outer::inner', run('i'), { camera3d: camera3d(), lights3d: [mapLight] as never }),
+        ...run('o'),
+      ], { camera3d: camera3d() }),
+      // The host (camera, no lights): the same split as the outer.
+      ...run('h'),
+    ], true));
+    expect(depth3d(backend)).toEqual(['composition-3d', 'composition-3d', 'composition-3d', 'composition-3d', 'composition-3d']);
+  });
+});
+
+function withMapLightOn(s: FrameScene): FrameScene {
+  return {
+    ...s,
+    lights3d: [{
+      type: 'spot', color: { r: 1, g: 1, b: 1 }, gain: 1, x: 400, y: 300, z: -400, radius: 1000,
+      aimX: 0, aimY: 0, aimZ: 1, halfConeRad: 0.6, coneFeatherRad: 0.1, falloffMode: 0, falloffDistance: 500,
+      shadowMap: true,
+    }],
+  } as never;
+}

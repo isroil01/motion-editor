@@ -46,7 +46,7 @@ import { flattenComposition, readNodeKind } from '@core/scene/sceneDerive';
 import { activeCompRootId, activeCompSize } from '@core/scene/activeComp';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
 import {
-  activeCameraNode,
+  viewCameraNode,
   cameraFromNode,
   readCameraFocusDistance,
   readCameraPoi,
@@ -100,7 +100,9 @@ export function commandCamera(): SceneNode | null {
     const n = defaultSceneGraph.getNode(id);
     if (n && readNodeKind(n) === 'camera') return n;
   }
-  return activeCameraNode(defaultSceneGraph, activeCompRootId());
+  // Through the view, so in a `camera:<id>` view "the one you are looking
+  // through" is that camera and not the topmost one behind it.
+  return viewCameraNode(defaultSceneGraph, useGuidesStore.getState().camera3dMode, activeCompRootId());
 }
 
 /** The selected layers that are neither cameras nor lights. */

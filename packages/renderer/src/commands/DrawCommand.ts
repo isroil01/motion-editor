@@ -92,6 +92,15 @@ export interface DrawItem {
    *  usually half resolution and is being magnified. It cannot be the layer's:
    *  `solid3d` has no layer sampler for the backend to broadcast. */
   aoSampler?: SamplerHandle;
+  /**
+   * The layer's per-channel colour LUT strip, at binding 15 of the lit-3d LUT
+   * variants (`LUT3D_TEXTURE_BINDING`). Only those materials declare it, so it
+   * is set only by the helpers that select one — a 3D draw without a LUT keeps
+   * its narrow material and never binds a stand-in. The 2D `lut-textured`
+   * material reads its strip from `maskTexture` instead; that slot is taken by
+   * the PBR map set on the mesh path.
+   */
+  lutTexture?: TextureHandle;
   /** Optional custom geometry for mesh rendering. */
   vertexBuffer?: BufferHandle;
   indexBuffer?: BufferHandle;

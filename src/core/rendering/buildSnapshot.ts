@@ -75,6 +75,7 @@ import { environmentRigFor, environmentSpecularMap } from '@core/scene/environme
 // when the inspector happens to be open. See environmentImage.ts.
 import '@core/scene/environmentImage';
 import { isColorEffect } from '@core/effects/effectColorMatrix';
+import { isLutEffect } from '@core/effects/colorLut';
 import { readNodeFaceMaterials, resolveFaceMaterial, faceKindOf } from '@core/scene/faceMaterials';
 import { faceEffectsFor } from '@core/scene/faceEffects';
 import { shadeLayer, planeNormalOf, toShaderLights, lightAim3D, aimToCompAngleDeg, type SceneLight } from '@core/scene/lightShading';
@@ -90,7 +91,8 @@ import { resolveTextPath, resolveTextPathMask, flattenMaskPath } from '@core/tex
 import { bracketFrames } from './videoFrameCache';
 import { footageSourceOf, applyLoop } from '@core/source/sourceInfo';
 import { slotFitOf, coverUvRect } from '@core/template/mediaSlots';
-import { readSceneCamera, readSceneDof, dofBlurPx, dofIrisParams, activeCameraNode, cameraFromNode } from '@core/scene/camera3d';
+import { readSceneCamera, readSceneDof, dofBlurPx, dofIrisParams, viewCameraNode, cameraFromNode } from '@core/scene/camera3d';
+import { orthoViewOf, type CameraViewMode } from '@core/scene/cameraViewMode';
 import { planDofCocCorners, layerCornerDepths } from './dofStrips';
 import { expandCompInstances, instanceSourceOf, isCompInstanceRoot, readCompRef, readCompCollapse } from '@core/scene/compInstance';
 import { applyOverridesToComponents, overriddenPropsFor, readCompOverrides, type OverrideValue } from '@core/scene/compInstanceOverrides';
@@ -162,7 +164,13 @@ export interface SnapshotComp {
    * geometry through `exportView` — so if you are adding a fifth, set this too.
    */
   forExport?: boolean;
-  camera3dMode?: 'active' | Project3D.OrthoView;
+  /**
+   * The view the frame is drawn through. `camera:<id>` renders exactly like
+   * 'active' — perspective, DOF, camera motion blur — but through that camera
+   * node instead of the topmost; a stale id falls back to 'active'
+   * (`viewCameraNode`). Export and headless paths never set it.
+   */
+  camera3dMode?: 'active' | Project3D.OrthoView | CameraViewMode;
   /**
    * View-camera override (AE custom views): when set (and the mode is not an
    * ortho view), 3D layers project through THIS pre-built camera instead of
@@ -1225,7 +1233,12 @@ export function buildSnapshot(
     const remapped = anim.sample(groupNode.id, 'timeRemap', t) ?? anim.sample(groupNode.id, 'precompTime', t);
     return remapOf(groupNode.id)(remapped !== undefined ? remapped : t);
   };
-  const buildPrecompContainer = (groupNode: SceneNode, innerOverride?: RenderLayer[]): RenderLayer => {
+  const buildPrecompContainer = (
+    groupNode: SceneNode,
+    innerOverride?: RenderLayer[],
+    /** A sealed instance's nested 3D frame (see `nestedCompLayers`). */
+    scene3d?: RenderLayer['precompScene3d'],
+  ): RenderLayer => {
     const gv = valuesOf(groupNode.id);
     const gBase = readBase(groupNode);
     const inner = innerOverride ?? precompInner.get(groupNode.id) ?? [];
@@ -1309,6 +1322,7 @@ export function buildSnapshot(
       filter,
       effects: gFx.length ? gFx : undefined,
       precompLayers: inner,
+      ...(scene3d ? { precompScene3d: scene3d } : {}),
       sourceTime: precompSourceTime(groupNode),
     };
   };
@@ -1461,10 +1475,10 @@ export function buildSnapshot(
 
   const cameraMode = comp.camera3dMode ?? 'active';
   // The six axis views project orthographically (no perspective, no scene
-  // camera); 'active' uses the scene's Camera layer. One `project` closure so
-  // every projection site below is view-agnostic.
-  const orthoView: Project3D.OrthoView | null =
-    cameraMode === 'active' ? null : (cameraMode as Project3D.OrthoView);
+  // camera); 'active' and a `camera:<id>` view use a scene Camera layer —
+  // `viewCameraNode` decides which. One `project` closure so every projection
+  // site below is view-agnostic.
+  const orthoView: Project3D.OrthoView | null = orthoViewOf(cameraMode);
   // Custom views (AE parity): a pre-built view camera supplied by the editor
   // replaces the scene camera — the shot camera is deliberately IGNORED.
   const customCamera = orthoView ? null : comp.customViewCamera ?? null;
@@ -1479,7 +1493,7 @@ export function buildSnapshot(
         // The camera is a layer: it follows its parent chain like everything
         // else, through the renderer's own per-frame caches.
         toWorldPoint,
-        { isLiveAt },
+        { isLiveAt, view: cameraMode },
       );
   const project = orthoView
     ? (p: { x: number; y: number; z: number }) => Project3D.projectOrtho(p, orthoView, comp.width, comp.height)
@@ -1500,7 +1514,7 @@ export function buildSnapshot(
     (the documented static-chain approximation).
   */
   const cameraMotionNode = !orthoView && !customCamera && motionBlur
-    ? activeCameraNode(graph, comp.rootId, { isLiveAt })
+    ? viewCameraNode(graph, cameraMode, comp.rootId, { isLiveAt })
     : null;
   const cameraAnimated =
     cameraMotionNode !== null &&
@@ -1530,7 +1544,7 @@ export function buildSnapshot(
   // Draft 3D skips DOF entirely (dof = null ⇒ withDof/dofEffectOf no-op).
   const dof = orthoView || customCamera || comp.draft3d
     ? null
-    : readSceneDof(graph, comp.width, comp.height, (id, p) => valuesOf(id).get(p), comp.rootId, { isLiveAt });
+    : readSceneDof(graph, comp.width, comp.height, (id, p) => valuesOf(id).get(p), comp.rootId, { isLiveAt, view: cameraMode });
   // `depth: undefined` = this layer is not in the camera's space (a 2D layer),
   // so it is never defocused.
   const withDof = (f: string | undefined, depth: number | undefined): string | undefined => {
@@ -1894,9 +1908,18 @@ export function buildSnapshot(
    * `compStack` is the cycle guard. Insertion already refuses reference loops
    * (`wouldCreateCompCycle`), but a hand-edited or migrated document must not be
    * able to hang the renderer.
+   *
+   * Returns the nested layers AND, when the referenced comp has 3D content, its
+   * own 3D frame (`scene3d`: camera, lights, environment reflection) for the
+   * container to carry — the GPU path needs the nested camera to depth-test and
+   * light those layers in the comp they belong to. Without it only the CPU
+   * projection survived the nesting and the layers composited flat.
    */
   const stack = comp.compStack ?? [];
-  const nestedCompLayers = (node: SceneNode, ref: string): RenderLayer[] | null => {
+  const nestedCompLayers = (
+    node: SceneNode,
+    ref: string,
+  ): { layers: RenderLayer[]; scene3d?: RenderLayer['precompScene3d'] } | null => {
     if (stack.includes(ref) || stack.length >= MAX_COMP_DEPTH) return null;
     if (!graph.getNode(ref)) return null;
     const size = comp.compSizeOf?.(ref) ?? { width: comp.width, height: comp.height };
@@ -1929,13 +1952,29 @@ export function buildSnapshot(
         backgroundPaint: undefined,
         // The host's view mode does not reach inside a sealed comp: it is
         // composited as a flat card, so an ortho view or a custom view camera
-        // would be re-applied on top of the host's own.
+        // would be re-applied on top of the host's own — and a `camera:<id>`
+        // view names a HOST camera, which must not steer the precomp's shot.
         camera3dMode: 'active',
         customViewCamera: undefined,
         compStack: [...stack, ref],
       },
     );
-    return prefixLayerIds(nested.layers, `${node.id}::`);
+    // The nested comp's OWN 3D frame, exactly as its pass resolved it (inner
+    // world space, inner comp px). Present only when it has 3D content — a 2D
+    // comp's instance stays byte-identical. SSAO is deliberately NOT carried:
+    // `nested.ssao` is the HOST's `comp.ssao` inherited through `...comp`
+    // above, not a setting of the referenced composition.
+    const scene3d: RenderLayer['precompScene3d'] = nested.camera3d
+      ? {
+          camera3d: nested.camera3d,
+          ...(nested.lights3d && nested.lights3d.length > 0 ? { lights3d: nested.lights3d } : {}),
+          ...(nested.envMap ? { envMap: nested.envMap } : {}),
+        }
+      : undefined;
+    return {
+      layers: prefixLayerIds(nested.layers, `${node.id}::`),
+      ...(scene3d ? { scene3d } : {}),
+    };
   };
 
   // Which layers must be fully materialized this frame. Invisible / un-soloed
@@ -2004,7 +2043,8 @@ export function buildSnapshot(
         if (!needsFullBuild.has(node.id)) {
           emitInvisibleStub(node);
         } else {
-          emitLayer(buildPrecompContainer(node, nestedCompLayers(node, ref) ?? undefined), node);
+          const nested = nestedCompLayers(node, ref);
+          emitLayer(buildPrecompContainer(node, nested?.layers, nested?.scene3d), node);
         }
       }
       continue;
@@ -3481,7 +3521,13 @@ export function buildSnapshot(
       const dofFx = is3D ? dofEffectOf(depth) : null;
       if (dofFx) gpuFx.push(dofFx);
       const mat = readNodeMaterial(node, a);
-      if (!isSolid && mat.castsShadows) {
+      // Solids are excluded from the 2D drop shadow only: a 2D solid is pinned
+      // full-frame, so a drop shadow off it would be a shadow of the whole
+      // comp. A 3D solid is un-pinned onto its own transform (see
+      // set3DEnabled) and is an ordinary plane — it used to be excluded from
+      // the projected path too, while the shadow map below let it cast, so
+      // the same card threw a shadow or not depending on the light's mode.
+      if (mat.castsShadows && (is3D || !isSolid)) {
         // A 3D layer under a shadow-casting light gets a REAL projected shadow
         // (emitted after this walk, once every receiver plane is known). The
         // screen-space drop-shadow stays for 2D layers, where there is no depth
@@ -3728,18 +3774,28 @@ export function buildSnapshot(
       const complexOutline = layer.kind === 'text' || (layer.kind === 'shape' && layer.primitive === 'path');
       const meshOwnsFront = complexOutline && meshBevel > 0 && !perCharText;
       /*
-        Effect REACH decides the path. COLOUR effects (invert, tint, …) fold
-        into the mesh's range colours / colour matrix on the CPU, so they reach
-        every surface of the body. SPATIAL effects (blur, glow, DOF's appended
-        blur, drop shadow) need per-face offscreen resolves that only the quad
-        synthesis can stage — so their presence sends the whole object down the
-        fallback, where each face still carries them (see faceEffectsFor).
+        Effect REACH decides the path. COLOUR effects reach every surface of
+        the body on the mesh: the AFFINE ones (invert, tint, …) fold into the
+        range colours on the CPU and the colour matrix on textured ranges, and
+        the LUT ones (Levels, Curves, Posterize, Exposure, Lumetri — whatever
+        `isLutEffect` admits) grade flat ranges through the uploaded table on
+        the CPU and textured ranges through the `-lut` mesh materials. SPATIAL
+        effects (blur, glow, DOF's appended blur, drop shadow) need per-face
+        offscreen resolves that only the quad synthesis can stage — so their
+        presence sends the whole object down the fallback, where each face
+        still carries them (see faceEffectsFor).
+
+        The LUT grades used to be in the second group by default, having no
+        mesh stage: a Levels on an extruded title swapped its solid for the
+        slice stack.
       */
       // The camera-DOF blur (`id: 'dof'`) is excluded: inside a depth group the
       // mesh is defocused per pixel from the depth buffer (the gather pass),
       // so the appended flat-quad blur is not what it needs — and counting it
       // sent every extruded text to the slice stack the moment DOF came on.
-      const meshBlockedByFx = (layer.effects ?? []).some((e) => e.enabled !== false && e.id !== 'dof' && !isColorEffect(e.type));
+      const meshBlockedByFx = (layer.effects ?? []).some(
+        (e) => e.enabled !== false && e.id !== 'dof' && !isColorEffect(e.type) && !isLutEffect(e.type),
+      );
       /*
         INTERIOR layer styles (inner shadow, inner glow, satin, bevel, stroke)
         hug the contour of the surface they are on, so each one has to be
@@ -3820,8 +3876,9 @@ export function buildSnapshot(
           // the texture provider rasterises the same thing under the new id.
           const carriesContent = isMedia || hasFrontCap;
           const scrub = {
-            // Colour-only by the gate above; the adapter folds them into the
-            // range colours (solid) / colour matrix (textured).
+            // Colour-only by the gate above (affine + LUT); the adapter folds
+            // them into the range colours (solid) / colour matrix + LUT strip
+            // (textured).
             effects: layer.effects,
             matte: undefined,
             isMatteSource: undefined,
@@ -4232,11 +4289,25 @@ export function buildSnapshot(
         modelEntry.indices,
         mMat,
       );
+      /*
+        Enabled COLOUR effects ride along, exactly as on the extrusion carrier:
+        the adapter grades each solid range's colour on the CPU
+        (gradeFillByEffects — the affine matrix, then the LUT table) and hands a
+        textured model's colour matrix and `lut:<id>` strip to the mesh draw
+        (the `-lut` mesh materials), so a Tint, a Hue/Saturation or a Levels
+        reaches every surface. Both halves are kept — `isColorEffect` is the
+        AFFINE set only, and the LUT grades (Levels, Curves, Posterize,
+        Exposure, Lumetri, …) are `isLutEffect`. The rest are dropped, not
+        half-applied: a model has no quad fallback to send spatial effects to.
+      */
+      const meshFx = (layer.effects ?? []).filter(
+        (e) => e.enabled !== false && (isColorEffect(e.type) || isLutEffect(e.type)),
+      );
       modelMeshLayer = {
         ...layer,
         // Same scrub as the extrusion carrier: features the mesh path cannot
-        // stage yet must not half-apply (colour-effect folding is a follow-up).
-        effects: undefined,
+        // stage yet must not half-apply.
+        effects: meshFx.length > 0 ? meshFx : undefined,
         matte: undefined,
         isMatteSource: undefined,
         isAdjustment: undefined,

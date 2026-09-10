@@ -5,7 +5,7 @@ import { depthEligible3D, type Renderable, type RenderableEffect, type Renderabl
 import type { SolidShape, Shade3D } from '../../pipeline/uniforms';
 import type { TextureHandle, SamplerHandle, BufferHandle } from '../../gpu/types';
 import { RenderPass, type RenderPassContext } from '../RenderPass';
-import { beginViewportPass, beginSizedPass, emitSolid, emitTextured, emitSilhouette, emitMaskedTextured, emitLutTextured, emitMatteCombine, emitBlendCombine, modelFromRect, mvpFor, writeAttachment, emitLayerTexture, screenMvp, targetSampleUv, mvp3dFor, emitSolid3D, emitTextured3D, emitMaskedTextured3D, emitMesh3D, emitShadowCaster, emitSsao, emitSsaoBlur } from './passUtils';
+import { beginViewportPass, beginSizedPass, emitSolid, emitTextured, emitSilhouette, emitMaskedTextured, emitLutTextured, emitMatteCombine, emitBlendCombine, modelFromRect, mvpFor, writeAttachment, emitLayerTexture, screenMvp, targetSampleUv, mvp3dFor, emitSolid3D, emitTextured3D, emitLutTextured3D, emitMaskedTextured3D, emitMesh3D, emitShadowCaster, emitSsao, emitSsaoBlur } from './passUtils';
 import { addTransformedBox, boxIsEmpty, emptyBox, shadowCameraFor, shadowMapSizeOf, type ShadowCamera, type WorldBox } from './shadowMap';
 import { ssaoBufferSize, ssaoCameraFor, ssaoFarFor, ssaoIntensityOf, ssaoRadiusOf, SSAO_SAMPLES } from './ssao';
 import { BLUR_MATERIAL, BOKEH_MATERIAL, COC_BLUR_MATERIAL, DOF_GATHER_MATERIAL, GLASS_MATERIAL, GRADIENT_RAMP_MATERIAL, FRACTAL_NOISE_MATERIAL, DISPLACEMENT_MAP_MATERIAL, COMPOUND_BLUR_MATERIAL, APPLY_COLOR_LUT_MATERIAL, SET_MATTE_MATERIAL, MOTION_TILE_MATERIAL, FILL_MATERIAL, STROKE_MATERIAL, SHARPEN_MATERIAL, NOISE_MATERIAL, BEAM_MATERIAL, LIGHT_SWEEP_MATERIAL, LENS_FLARE_MATERIAL, LIGHT_RAYS_MATERIAL, BEND_MATERIAL, BEVEL_ALPHA_MATERIAL, BEVEL_EDGES_MATERIAL, SPOTLIGHT_MATERIAL, SPHERE_MATERIAL, CYLINDER_MATERIAL, ARITHMETIC_MATERIAL, VIGNETTE_MATERIAL, BLACK_AND_WHITE_MATERIAL, TRITONE_MATERIAL, PHOTO_FILTER_MATERIAL, THRESHOLD_MATERIAL, VIBRANCE_MATERIAL, MIRROR_MATERIAL, OFFSET_MATERIAL, BULGE_MATERIAL, TWIRL_MATERIAL, SPHERIZE_MATERIAL, KALEIDOSCOPE_MATERIAL, RIPPLE_MATERIAL, CHROMATIC_ABERRATION_MATERIAL, MAGNIFY_MATERIAL, MOSAIC_MATERIAL, FIND_EDGES_MATERIAL, EMBOSS_MATERIAL, COLOR_EMBOSS_MATERIAL, HALFTONE_MATERIAL, RADIAL_BLUR_MATERIAL, CORNER_PIN_MATERIAL, TRANSFORM_FX_MATERIAL, KEYLIGHT_MATERIAL, LINEAR_COLOR_KEY_MATERIAL, LUMA_KEY_MATERIAL, COLOR_KEY_MATERIAL, COLOR_RANGE_MATERIAL, EXTRACT_MATERIAL, SPILL_SUPPRESSOR_MATERIAL, WAVE_WARP_MATERIAL, ALPHA_MORPH_MATERIAL, ALPHA_BOX_MATERIAL, DIRECTIONAL_BLUR_MATERIAL, LINEAR_WIPE_MATERIAL, SHIFT_CHANNELS_MATERIAL, ALPHA_LEVELS_MATERIAL, SOLID_COMPOSITE_MATERIAL, CHANNEL_COMBINER_MATERIAL, REMOVE_COLOR_MATTING_MATERIAL, CHANGE_COLOR_MATERIAL, CHANGE_TO_COLOR_MATERIAL, LEAVE_COLOR_MATERIAL, TONER_MATERIAL, VENETIAN_BLINDS_MATERIAL, RADIAL_WIPE_MATERIAL, IRIS_WIPE_MATERIAL, LINE_SWEEP_MATERIAL, CHANNEL_BOX_MATERIAL, MINMAX_MATERIAL, UNSHARP_MASK_MATERIAL, SHADOW_HIGHLIGHT_MATERIAL, CHECKERBOARD_MATERIAL, GRID_MATERIAL, FOUR_COLOR_GRADIENT_MATERIAL, CIRCLE_MATERIAL, ELLIPSE_MATERIAL, RADIAL_SHADOW_PROJECT_FX_MATERIAL, RADIAL_SHADOW_FX_MATERIAL, PLASTIC_FX_MATERIAL, GLASS_FX_MATERIAL, VECTOR_BLUR_FX_MATERIAL, FX_HISTOGRAM_FX_MATERIAL, FX_AUTO_TABLE_FX_MATERIAL, FX_AUTO_APPLY_FX_MATERIAL, DEEP_GLOW_ACC_FX_MATERIAL, DEEP_GLOW_BLUR_FX_MATERIAL, DEEP_GLOW_COMPOSITE_FX_MATERIAL } from '../../shaders/Material';
@@ -2346,6 +2346,32 @@ export class CompositionPass extends RenderPass {
    * Beyond the depth cap: with `inlineFallback` the subtree collapses inline
    * (children × container opacity — the legacy behaviour), else null.
    */
+  /**
+   * The context a precomp's subtree renders under.
+   *
+   * A plain group inherits the current one. A sealed comp instance carrying its
+   * own 3D frame (`precomp.camera3d`) gets a scene whose 3D fields are REPLACED
+   * wholesale — camera, lights, environment, and SSAO dropped — so nothing of
+   * the scope it is drawn in (host lights, a shadow-mapped lamp, the host's env
+   * reflection or AO) reaches its layers. It is a fresh object, never a
+   * mutation, so nothing of the inner frame outlives the subtree either: the
+   * caller keeps rendering with its own `ctx`, and a nested instance derives
+   * from whatever scope it is drawn in, so each level "restores" its parent's
+   * by construction.
+   */
+  private static precompScope(ctx: RenderPassContext, pre: NonNullable<Renderable['precomp']>): RenderPassContext {
+    if (!pre.camera3d) return ctx;
+    const { camera3d: _cam, lights3d: _lights, envMap: _env, ssao: _ssao, ...base } = ctx.scene;
+    void _cam; void _lights; void _env; void _ssao;
+    const scene: RenderPassContext['scene'] = {
+      ...base,
+      camera3d: pre.camera3d,
+      ...(pre.lights3d && pre.lights3d.length > 0 ? { lights3d: pre.lights3d } : {}),
+      ...(pre.envMap ? { envMap: pre.envMap } : {}),
+    };
+    return { ...ctx, scene, target: (name: string) => ctx.target(name) };
+  }
+
   private prepareIsolatedPrecomp(
     ctx: RenderPassContext,
     r: Renderable,
@@ -2354,11 +2380,14 @@ export class CompositionPass extends RenderPass {
     inlineFallback: boolean,
   ): Renderable | null {
     const { services } = ctx;
+    // The subtree draws under its OWN scope (a sealed comp's camera/lights);
+    // everything after the subtree — mask bake, composite — stays in `ctx`.
+    const scope = CompositionPass.precompScope(ctx, r.precomp!);
     if (slot >= PRECOMP_TARGETS.length) {
       if (!inlineFallback) return null;
       st.flushMain();
       const folded = r.precomp!.renderables.map((c) => ({ ...c, opacity: c.opacity * r.opacity }));
-      this.renderList(ctx, folded, st.out, st.depth);
+      this.renderList(scope, folded, st.out, st.depth);
       return null;
     }
     st.flushMain();
@@ -2368,7 +2397,7 @@ export class CompositionPass extends RenderPass {
 
     // Clear, then render the subtree (nested precomps recurse into deeper slots).
     beginViewportPass(ctx, 'precomp-clear', writeAttachment(ctx, targetName, Color.transparent())).end();
-    this.renderList(ctx, r.precomp!.renderables, targetName, slot + 1);
+    this.renderList(scope, r.precomp!.renderables, targetName, slot + 1);
     let tex = ctx.services.backend.renderTargetTexture(ctx.target(targetName)!);
     if (!tex) return null;
 
@@ -2965,8 +2994,16 @@ export class CompositionPass extends RenderPass {
   /**
    * The per-pixel DOF gather setup for this frame's 3D groups, or null when the
    * per-layer CoC fallback must stand: no camera DOF, an ortho/custom view (no
-   * eye ⇒ no lens), or a backend/target that cannot hand back a sampleable
-   * depth texture (the WebGL2 MSAA fallback path, tests on colour-only mocks).
+   * eye ⇒ no lens), or a backend that cannot hand back a sampleable depth
+   * texture for DOF_TARGET.
+   *
+   * No shipping backend lands in that last case. DOF_TARGET is declared
+   * single-sample, so WebGPU and WebGL2 both give it a depth TEXTURE whatever
+   * the scene / precomp targets' 4× MSAA — their depth is the unsampleable
+   * kind, which is why a DOF group is redirected here at all. Only a backend
+   * without `renderTargetDepthTexture` (or a colour-only test mock) returns
+   * null with DOF on, and there MESHES draw sharp: the mesh branch in
+   * render3DGroup has no per-layer blur to fall back on.
    */
   private dofGatherFor(ctx: RenderPassContext): { depthA: number; depthB: number } | null {
     const cam = ctx.scene.camera3d;
@@ -3279,6 +3316,15 @@ export class CompositionPass extends RenderPass {
       const uv = r.uvRect ?? { x: 0, y: 0, width: 1, height: 1 };
 
       if (r.extrudedMesh) {
+        // No per-layer DOF branch, on purpose: a mesh's defocus comes ONLY
+        // from the gather (the `dofSource` blur an extrusion carrier still
+        // carries was stripped above; glTF/primitive carriers never get one).
+        // With camera DOF on the gather is available on every shipped backend
+        // — DOF_TARGET is single-sample, so its depth is sampleable however
+        // multisampled `out` is (dofGatherMesh.test pins both halves). Only a
+        // backend with no sampleable depth at all reaches here ungathered; a
+        // blurred mesh there would need its own offscreen depth resolve, a pass
+        // no shipping configuration would ever run, so it draws sharp.
         this.emitExtrudedMesh(ctx, r, mvp, shadeFor(r), cmds, clampSampler);
         continue;
       }
@@ -3325,10 +3371,15 @@ export class CompositionPass extends RenderPass {
         emitSolid3D(cmds, mvp, tint, r.opacity, r.blend, toSolidShape(r.sdf), shade);
       } else if (isTextured && r.textureKey) {
         const tex = this.texFor(ctx, r.textureKey);
-        // Known limitation: no LUT variant in the 3D material set — a 3D layer
-        // carrying a colour LUT keeps its affine grade rows but skips the LUT
-        // remap inside a depth group (rare combination).
-        if (tex) emitTextured3D(cmds, mvp, tint, r.opacity, r.blend, tex.texture, clampSampler(), uv, r.colorMatrix, shade, true, !!tex.sampleLinear);
+        // A colour LUT (Levels / Curves / …) remaps after the affine rows on the
+        // `textured3d-lut` variant, as `lut-textured` does on the 2D path. A
+        // SOLID 3D quad needs no variant: its colour is uniform, so the adapter
+        // graded it through the same table on the CPU (gradedSolidColor).
+        // Still without one: a MASKED 3D quad — the same combination the 2D
+        // masked path does not remap either.
+        const lut = r.lutTextureKey ? services.textures.get(r.lutTextureKey) : undefined;
+        if (tex && lut) emitLutTextured3D(cmds, mvp, tint, r.opacity, r.blend, tex.texture, clampSampler(), lut.texture, uv, r.colorMatrix, shade, !!tex.sampleLinear);
+        else if (tex) emitTextured3D(cmds, mvp, tint, r.opacity, r.blend, tex.texture, clampSampler(), uv, r.colorMatrix, shade, true, !!tex.sampleLinear);
       }
     }
     flush();
@@ -3363,6 +3414,13 @@ export class CompositionPass extends RenderPass {
       { label: `ext-index:${r.id}`, sizeBytes: mesh.indices.byteLength, usage: ['index'], data: mesh.indices },
     );
     const tex = r.textureKey ? this.texFor(ctx, r.textureKey) : undefined;
+    // The layer's colour LUT strip (`lut:<id>`, Levels / Curves / …), for the
+    // ranges that SAMPLE a texture: its texels carry ungraded colour, so the
+    // `-lut` material remaps them after the affine rows, as the 2D quad path
+    // does. Flat ranges never take it — their colour was graded through the
+    // same table on the CPU (gradeFillByEffects) — and neither does the
+    // white-base PBR draw below, whose tint IS such a colour.
+    const lut = r.lutTextureKey ? ctx.services.textures.get(r.lutTextureKey)?.texture : undefined;
     /*
       The glTF map set, resolved once for the whole mesh.
 
@@ -3421,16 +3479,21 @@ export class CompositionPass extends RenderPass {
       if (range.textured && rangeTex) {
         const tint = ownTexture && !shade ? { r: range.gain, g: range.gain, b: range.gain, a: 1 } : Color.white();
         emitMesh3D(cmds, mvp, tint, r.opacity, r.blend, geometry, rangeShade,
-          { texture: rangeTex.texture, sampler: clampSampler(), uvRect: ownTexture ? undefined : r.uvRect, color: r.colorMatrix, sampleLinear: !!rangeTex.sampleLinear },
+          { texture: rangeTex.texture, sampler: clampSampler(), uvRect: ownTexture ? undefined : r.uvRect, color: r.colorMatrix, sampleLinear: !!rangeTex.sampleLinear, lut },
           pbrSet);
       } else if (range.textured && range.textureKey && !rangeTex) {
         // Plate not uploaded yet (first frame): the flat colour, never nothing.
         emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade);
       } else if (pbrSet && white) {
         // Untextured base colour with maps: white at slot 1, the material's
-        // colour through the tint.
+        // colour through the tint. An untextured range's colour arrives
+        // ALREADY graded on the CPU (snapshotToFrameScene grades solid ranges
+        // by the layer's colour effects), so the matrix rides along only for a
+        // textured range that landed here before its texture uploaded — its
+        // colour is raw. Passing it for both graded a mixed multi-material
+        // model's plain parts twice.
         emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade,
-          { texture: white.texture, sampler: clampSampler(), color: r.colorMatrix },
+          { texture: white.texture, sampler: clampSampler(), color: range.textured ? r.colorMatrix : undefined },
           pbrSet);
       } else {
         emitMesh3D(cmds, mvp, color, r.opacity, r.blend, geometry, rangeShade);
@@ -3462,6 +3525,11 @@ export class CompositionPass extends RenderPass {
     // guaranteed depth attachment — fall back to the CPU-affine path there
     // (the adapter routes 3D frames through the scene colour target anyway).
     const canDepthGroup = !!ctx.scene.camera3d && ctx.target(out) !== null;
+    // The same test render3DGroup uses to pick a shadow-mapped light, so a wash
+    // is hoisted exactly when a map would otherwise be split across runs.
+    const frameHasMapLight = !!ctx.scene.lights3d?.some(
+      (l) => l.shadowMap === true && l.type !== 'ambient' && l.gain > 0,
+    );
     const visible = ctx.viewport.visibleWorldRect;
     let i = 0;
     while (i < renderables.length) {
@@ -3470,16 +3538,37 @@ export class CompositionPass extends RenderPass {
         // Contiguous run of depth-eligible 3D renderables → one depth pass.
         // (2D layers, mattes, adjustments, effect layers break the run —
         // exactly the barriers buildSnapshot's painter sort respects.)
+        //
+        // In a frame with a shadow-MAPPED light, a light's WASH quad does
+        // not break it either. The wash sits at the light layer's stacking
+        // position, so a light between two 3D layers split them into
+        // separate depth groups — and the shadow map, built per group, then
+        // saw a caster with no receiver (or the reverse) and darkened
+        // nothing. The wash is a depthless screen-blend glow, so it hoists to
+        // just after the group.
+        //
+        // ONLY with a mapped light. Hoisting screens the glow over any later
+        // 3D layer it used to sit beneath; projected shadows are ordinary
+        // geometry in paint order and gain nothing from one run, so without
+        // a map the move is pure cost (`shadow-catcher`'s caster washed out).
         const group: Renderable[] = [];
-        while (i < renderables.length && depthEligible3D(renderables[i]!)) {
+        const hoistedWashes: Renderable[] = [];
+        while (i < renderables.length) {
           const g = renderables[i]!;
-          if (Rect.intersects(visible, g.bounds) && g.opacity > 0) group.push(g);
+          if (depthEligible3D(g)) {
+            if (Rect.intersects(visible, g.bounds) && g.opacity > 0) group.push(g);
+          } else if (g.lightWash && frameHasMapLight) {
+            hoistedWashes.push(g);
+          } else {
+            break;
+          }
           i += 1;
         }
         if (group.length > 0) {
           st.flushMain();
           this.render3DGroup(ctx, group, out, st.byId);
         }
+        for (const w of hoistedWashes) this.processRenderable(ctx, w, st);
         continue;
       }
       this.processRenderable(ctx, r, st);

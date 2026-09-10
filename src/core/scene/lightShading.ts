@@ -249,7 +249,13 @@ export function toShaderLights(lights: ReadonlyArray<SceneLight>): ShaderLight[]
       // Spread through only when ON, so a scene that never opts in packs an
       // undefined the renderer's `=== true` test reads as off — and every
       // existing golden keeps the shade tail it had.
-      ...(light.shadowMap === true
+      //
+      // Cast Shadows gates the map too. The inspector nests Shadow Map under
+      // Cast Shadows, so turning Cast Shadows off hid the map's checkbox while
+      // the map kept darkening the scene — a shadow with no visible switch.
+      // buildSnapshot's projected path already required both; this is the
+      // GPU half of the same rule.
+      ...(light.shadowMap === true && light.shadows
         ? {
           shadowMap: true,
           ...(light.shadowMapSize !== undefined ? { shadowMapSize: light.shadowMapSize } : {}),

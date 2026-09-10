@@ -270,6 +270,13 @@ const PACKERS: ReadonlyArray<{ shader: string; pack: () => Float32Array }> = [
   // `packTextured3D`, so a field added to the shared shade tail must land
   // between them on BOTH sides or every map parameter reads garbage.
   { shader: 'mesh3d-pbr', pack: () => packMesh3DPbr(MVP4, RECT, COLOR, 1) },
+  // The colour-LUT variants add a TEXTURE, not a field: each must still size
+  // exactly as its base does, which is what lets them reuse the base packers.
+  { shader: 'textured3d-lut', pack: () => packTextured3D(MVP4, RECT, COLOR, 1) },
+  { shader: 'textured3d-lut-linear', pack: () => packTextured3D(MVP4, RECT, COLOR, 1) },
+  { shader: 'mesh3d-textured-lut', pack: () => packTextured3D(MVP4, RECT, COLOR, 1) },
+  { shader: 'mesh3d-textured-lut-linear', pack: () => packTextured3D(MVP4, RECT, COLOR, 1) },
+  { shader: 'mesh3d-pbr-lut', pack: () => packMesh3DPbr(MVP4, RECT, COLOR, 1) },
   // The shadow-map caster pair. Their block is deliberately NOT the shade tail
   // — it carries the light's MVP, the caster's world matrix and the axis/origin
   // the receiver measures against — so it is its own row, and the two shaders

@@ -41,6 +41,7 @@ import {
   SRGB_TRANSFER_WGSL,
 } from './linearWorkingSpace';
 import { ENV_SPEC_LEVELS, ENV_SPEC_BAND_HEIGHT } from '../pipeline/uniforms';
+import { LUT3D_TEXTURE_BINDING } from '../gpu/types';
 
 /**
  * The environment atlas layout, as SHADER LITERALS.
@@ -6163,6 +6164,75 @@ void main() {
   },
 };
 
+// ── Colour-LUT variants of the lit-3d textured shaders ──────────────────────
+/*
+  Levels / Curves / Posterize / Exposure / Lumetri (everything `isLutEffect`
+  admits) on a TEXTURED 3D surface: a 3D quad in a depth group, an extrusion's
+  cap or gradient plate, an imported model's base colour. Untextured surfaces
+  never reach here — their colour is uniform, so the adapter grades it through
+  the same table on the CPU.
+
+  Derived from the three bases by substitution so they cannot drift from them:
+  every line of a variant is its base's line except the one LUT stage, and the
+  bases are untouched, so a draw without a LUT compiles exactly the shader —
+  and produces exactly the pixels — it did before these existed.
+
+  The stage is the 2D `lut-textured` lookup, moved to where a lit shader needs
+  it — after the affine grade, BEFORE the light:
+    encode   the tables are display-referred sRGB, so the clamped working
+             colour is encoded exactly as `lut-textured` encodes it;
+    lookup   per channel, U = value, V = 0.5, through the layer's own sampler
+             — the same strip, the same taps;
+    decode   ALWAYS back to working space. The 2D shader decodes only under
+             linear storage because its lookup IS the stored colour; here the
+             result is an albedo the light stage works on in working space,
+             and the base's own tail (`lit * c.a`, sRGB-encoded when storage is
+             not linear) does the write. Unlit, shade3d hands the albedo back
+             unchanged, so the pixel is the 2D path's.
+
+  Before the light, because a LUT is part of the LAYER's grade — the surface's
+  colour — exactly as the CPU side grades a flat wall before the shader lights
+  it (`gradeFillByEffects`). Grading the lit result instead would re-tone every
+  highlight and shadow the light put there, and a lit extrusion's cap would
+  stop matching its walls.
+
+  All three taps sit at top level, never in a branch: WGSL's uniformity rule
+  (wgslUniformControlFlow.test.ts).
+*/
+const WGSL_AFFINE_GRADE = 'let graded = vec3<f32>(dot(obj.cr0, v), dot(obj.cr1, v), dot(obj.cr2, v));';
+const GLSL_AFFINE_GRADE = 'vec3 graded = vec3(dot(cr0, v), dot(cr1, v), dot(cr2, v));';
+
+function withLutStage(base: ShaderSource, name: string): ShaderSource {
+  const where = `withLutStage(${base.name})`;
+  let wgsl = subOnce(
+    base.wgsl,
+    '@group(0) @binding(2) var smp : sampler;',
+    `@group(0) @binding(2) var smp : sampler;\n@group(0) @binding(${LUT3D_TEXTURE_BINDING}) var lutTex : texture_2d<f32>;`,
+    where,
+  );
+  wgsl = subOnce(wgsl, WGSL_AFFINE_GRADE, `let affine = vec3<f32>(dot(obj.cr0, v), dot(obj.cr1, v), dot(obj.cr2, v));
+  let lutIn = linearToSrgbRgb(clamp(affine, vec3<f32>(0.0), vec3<f32>(1.0)));
+  let lutR = textureSample(lutTex, smp, vec2<f32>(lutIn.r, 0.5)).r;
+  let lutG = textureSample(lutTex, smp, vec2<f32>(lutIn.g, 0.5)).g;
+  let lutB = textureSample(lutTex, smp, vec2<f32>(lutIn.b, 0.5)).b;
+  let graded = srgbToLinearRgb(vec3<f32>(lutR, lutG, lutB));`, where);
+  // Declared just above main(), i.e. AFTER the scene samplers the shade block
+  // declares — the fragment's declaration order then matches `glslSamplers`,
+  // which lists the strip last because QuadRenderer binds it last.
+  let fragment = subOnce(base.glsl.fragment, 'void main()', 'uniform sampler2D uLutTex;\nvoid main()', where);
+  fragment = subOnce(fragment, GLSL_AFFINE_GRADE, `vec3 affine = vec3(dot(cr0, v), dot(cr1, v), dot(cr2, v));
+  vec3 lutIn = linearToSrgbRgb(clamp(affine, 0.0, 1.0));
+  float lutR = texture(uLutTex, vec2(lutIn.r, 0.5)).r;
+  float lutG = texture(uLutTex, vec2(lutIn.g, 0.5)).g;
+  float lutB = texture(uLutTex, vec2(lutIn.b, 0.5)).b;
+  vec3 graded = srgbToLinearRgb(vec3(lutR, lutG, lutB));`, where);
+  return { name, wgsl, glsl: { vertex: base.glsl.vertex, fragment } };
+}
+
+const TEXTURED3D_LUT = withLutStage(TEXTURED3D, 'textured3d-lut');
+const MESH3D_TEXTURED_LUT = withLutStage(MESH3D_TEXTURED, 'mesh3d-textured-lut');
+const MESH3D_PBR_LUT = withLutStage(MESH3D_PBR, 'mesh3d-pbr-lut');
+
 const DEFORMED_MESH: ShaderSource = {
   name: 'deformed-mesh',
   wgsl: /* wgsl */ `
@@ -6476,7 +6546,11 @@ function unpremultiplyingSample(base: ShaderSource, src: 'srgb' | 'linear' = 'sr
       fragment = sub(fragment, 'graded = vec3(lr, lg, lb);', 'graded = srgbToLinearRgb(vec3(lr, lg, lb));', 'glsl lut decode');
     }
   } else if (!LINEAR_INTERMEDIATE_STORAGE) {
-    if (base.name === 'textured3d' || base.name === 'mesh3d-textured' || base.name === 'mesh3d-pbr') {
+    if (
+      base.name === 'textured3d' || base.name === 'mesh3d-textured' || base.name === 'mesh3d-pbr'
+      // The LUT variants end in the same `lit * c.a` tail as their bases.
+      || base.name === 'textured3d-lut' || base.name === 'mesh3d-textured-lut' || base.name === 'mesh3d-pbr-lut'
+    ) {
       wgsl = sub(wgsl, 'lit * c.a', 'linearToSrgbRgb(lit) * c.a', 'wgsl encode lit');
       fragment = sub(fragment, 'lit * c.a', 'linearToSrgbRgb(lit) * c.a', 'glsl encode lit');
     } else if (base.name === 'masked-textured3d') {
@@ -6764,6 +6838,13 @@ export const BUILTIN_SHADERS: readonly ShaderSource[] = [
   // be a shader nothing can select, and its emissive decode would have to be
   // stripped by a substitution site that has no other reason to exist.
   unpremultiplyingSample(MESH3D_PBR),
+  // The colour-LUT variants of those three (see `withLutStage`), with the same
+  // twins as their bases — so the PBR one, again, has none.
+  unpremultiplyingSample(TEXTURED3D_LUT),
+  unpremultiplyingSample(TEXTURED3D_LUT, 'linear'),
+  unpremultiplyingSample(MESH3D_TEXTURED_LUT),
+  unpremultiplyingSample(MESH3D_TEXTURED_LUT, 'linear'),
+  unpremultiplyingSample(MESH3D_PBR_LUT),
   TEXTURED_SILHOUETTE,
   SCENE_BLIT,
   SCENE_BLIT_LUT,

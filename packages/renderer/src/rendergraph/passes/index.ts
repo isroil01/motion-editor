@@ -151,14 +151,25 @@ export function buildDefaultGraph(): RenderGraph {
   // SINGLE-SAMPLE colour+depth pair for the per-pixel DOF gather: 3D groups
   // under an active camera DOF render here (the MSAA scene target's depth is
   // not sampleable), then `dof-gather` composites the defocused result into
-  // the real out target. depth:true with samples unset ⇒ both backends create
+  // the real out target. depth:true with single-sample ⇒ both backends create
   // a sampleable depth TEXTURE (renderTargetDepthTexture).
+  //
+  // `samples: 1` is spelled out, and pinned by dofGatherMesh.test, because the
+  // gather's availability rests on it: an extruded / primitive / glTF MESH has
+  // no per-layer DOF fallback (render3DGroup draws it straight off its buffers,
+  // and buildSnapshot keeps DOF off the mesh gate on the promise that the
+  // gather handles it). Declared single-sample, the gather is available on
+  // WebGPU and WebGL2 whatever the scene / precomp targets' MSAA — give this
+  // target MSAA_SAMPLES like its neighbours and every mesh would render sharp
+  // under a defocused camera with nothing failing. Same allocation as leaving
+  // `samples` unset (every backend reads absent as 1).
   graph.declareTarget(DOF_TARGET, (vp) => ({
     label: DOF_TARGET,
     width: vp.pixelSize.width,
     height: vp.pixelSize.height,
     format: 'rgba16float',
     depth: true,
+    samples: 1,
   }));
 
   // One isolated-precomp target per nesting depth (see CompositionPass).

@@ -15,7 +15,7 @@ import type {
   TextureFormat,
   VertexBufferLayout,
 } from '../gpu/types';
-import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING } from '../gpu/types';
+import { AO_SAMPLER_BINDING, AO_TEXTURE_BINDING, ENV_SAMPLER_BINDING, ENV_TEXTURE_BINDING, LUT3D_TEXTURE_BINDING, SHADOW2_SAMPLER_BINDING, SHADOW2_TEXTURE_BINDING, SHADOW_SAMPLER_BINDING, SHADOW_TEXTURE_BINDING } from '../gpu/types';
 import { makeKey } from '../utils/ids';
 import { QUAD_LAYOUT } from '../resources/Geometry';
 import type { ShaderCache } from './ShaderCache';
@@ -886,6 +886,39 @@ export const MESH3D_PBR_MATERIAL: MaterialDescriptor = {
   buffers: [MESH3D_LAYOUT],
   depth: { test: true, write: true },
 };
+
+/**
+ * The lit-3d LUT VARIANTS: a base material plus ONE texture — the layer's
+ * per-channel colour LUT strip (`lut:<id>`) at `LUT3D_TEXTURE_BINDING` — and a
+ * shader that remaps the graded colour through it before the light stage.
+ *
+ * Variants rather than a widened base, for the reason `MESH3D_PBR_MATERIAL`
+ * gives: a bind-group layout is part of the pipeline, so a LUT slot on the base
+ * would rebuild the pipeline every extrusion and 3D layer draws through and
+ * bind a stand-in strip on all of them. A draw without a LUT keeps the exact
+ * material — and so the exact pixels — it had before these existed.
+ *
+ * Derived from the base descriptors, so a slot added to a base cannot miss its
+ * variant; the strip is appended LAST in both the layout and the GLSL names,
+ * matching the order QuadRenderer pushes it.
+ */
+function withLutStrip(base: MaterialDescriptor, shader: string): MaterialDescriptor {
+  return {
+    ...base,
+    shader,
+    layout: [...base.layout, { binding: LUT3D_TEXTURE_BINDING, type: 'texture', stages: ['fragment'] }],
+    glslSamplers: [...(base.glslSamplers ?? []), 'uLutTex'],
+  };
+}
+
+/** 3D textured quad + colour LUT (a textured layer in a depth group). */
+export const TEXTURED3D_LUT_MATERIAL = withLutStrip(TEXTURED3D_MATERIAL, 'textured3d-lut');
+export const TEXTURED3D_LUT_LINEAR_MATERIAL = withLutStrip(TEXTURED3D_MATERIAL, 'textured3d-lut-linear');
+/** Textured mesh range + colour LUT (an extrusion cap / plate, a base-colour-only model). */
+export const MESH3D_TEXTURED_LUT_MATERIAL = withLutStrip(MESH3D_TEXTURED_MATERIAL, 'mesh3d-textured-lut');
+export const MESH3D_TEXTURED_LUT_LINEAR_MATERIAL = withLutStrip(MESH3D_TEXTURED_MATERIAL, 'mesh3d-textured-lut-linear');
+/** A glTF material with maps + colour LUT. No `-linear` twin, as its base has none. */
+export const MESH3D_PBR_LUT_MATERIAL = withLutStrip(MESH3D_PBR_MATERIAL, 'mesh3d-pbr-lut');
 
 export const DEFORMED_MESH_LINEAR_MATERIAL: MaterialDescriptor = {
   ...DEFORMED_MESH_MATERIAL,

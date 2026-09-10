@@ -765,15 +765,63 @@ export interface Renderable {
   matte?: { mode: 'alpha' | 'luma'; inverted: boolean; sourceId: string };
   matteSource?: boolean;
   /**
+   * A light's screen-blended glow quad (the 2D wash the adapter emits at the
+   * light layer's stacking position). It is the ONE 2D renderable that must
+   * not break a contiguous 3D depth run: the shadow map is built per run, so
+   * a light sitting between its caster and its receiver used to split them
+   * into groups that each lacked half the pair — the failure that reads as
+   * "shadows are not implemented". CompositionPass hoists it past the run.
+   */
+  lightWash?: boolean;
+  /**
    * Isolated precomp (nested composition): CompositionPass renders these child
    * renderables into an offscreen target, then composites that texture as ONE
    * unit with this renderable's opacity / blend / effects / mask / matte —
    * exactly like a single layer. Used when the container carries group opacity
-   * over multiple children, a mask/matte, a non-normal blend, or effects; the
-   * adapter keeps the cheap inline-collapse path otherwise. Children are in
-   * the container's local (comp) space with identity parent transform.
+   * over multiple children, a mask/matte, a non-normal blend, or effects (a
+   * sealed comp instance always carries its frame mask, and one with its own 3D
+   * frame is isolated regardless); the adapter keeps the cheap inline-collapse
+   * path otherwise.
+   *
+   * The offscreen target is VIEWPORT-sized and drawn with the host viewport's
+   * 2D camera, so children are in HOST comp space: a sealed comp instance's
+   * children flatten under the instance's placement (`precompChildParent`,
+   * inner comp px → host comp px), so their `modelMatrix` arrives translated /
+   * scaled.
+   *
+   * 3D inside. A plain Pre-compose group's children live in the host's 3D
+   * space and draw through whichever camera the precomp is drawn under. A
+   * SEALED comp instance is a frame of its own: when its composition has 3D
+   * content, `camera3d` (+ `lights3d` / `envMap`) carry the nested comp's OWN
+   * 3D frame, and CompositionPass swaps them in for the current scene's while
+   * it draws `renderables` — replacing all four 3D fields wholesale (SSAO
+   * included, which is therefore off inside), deriving a fresh context rather
+   * than mutating, so host lights / shadow-mapped lamps / env never reach in
+   * and the inner ones never reach out; nested instances swap in turn. The
+   * children keep `threeD` with the model in the INNER comp's world space, and
+   * `camera3d.projection` already has the instance placement lifted onto it
+   * (lift(placement) · P_inner), so `mvp3dFor(viewport, camera3d, model)` lands
+   * each draw exactly where the CPU-projected `modelMatrix` fallback puts it.
+   * `view`, `eye` and the projection's z row are the inner camera's untouched,
+   * so depth order, specular, shadow-map light space and DOF depth are exact.
+   * Depth groups, per-fragment lighting, shadow maps, env reflections and the
+   * light-wash hoist then just run against the inner frame.
+   *
+   * Approximate: no SSAO inside a sealed comp (the nested pass only sees the
+   * HOST's composition settings, so there is no inner switch to honour); a DOF
+   * CoC in px is the inner comp's px, not rescaled by the instance's scale on
+   * the host (the per-layer DOF fallback has always had the same limit).
+   * Absent `camera3d` — every 2D comp instance, every Pre-compose group —
+   * renders exactly as before. Composing the placement into the MODEL and
+   * drawing through the host camera instead would be the leak
+   * `buildSnapshotCollapseTransforms.test.ts` pins against.
    */
-  precomp?: { renderables: Renderable[] };
+  precomp?: {
+    renderables: Renderable[];
+    camera3d?: FrameScene['camera3d'];
+    lights3d?: FrameScene['lights3d'];
+    envMap?: FrameScene['envMap'];
+  };
   /** Dynamic CPU-skinned mesh geometry for puppet deformation. */
   deformedMesh?: {
     vertices: Float32Array;

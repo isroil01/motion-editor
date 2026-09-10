@@ -46,7 +46,7 @@ import { bumpScene } from '@stores/sceneStore';
 import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import { useUIStore } from '@stores/uiStore';
 import { notifyCameraTipIfMissing } from '@core/workspace/cameraNav';
-import { CAMERA_VIEW_LABEL } from '@layout/TopNav/ViewControls';
+import { cameraViewLabel, effectiveViewMode } from '@layout/TopNav/ViewControls';
 
 /**
  * The status badges that came off the deleted header bar.
@@ -63,8 +63,12 @@ import { CAMERA_VIEW_LABEL } from '@layout/TopNav/ViewControls';
  */
 function ViewportStatus(): JSX.Element | null {
   const isSoftware = useRenderBackendStore((s) => s.isSoftwareFallback);
-  const camera3dMode = useGuidesStore((s) => s.camera3dMode);
+  const storeMode = useGuidesStore((s) => s.camera3dMode);
   const setCamera3dMode = useGuidesStore((s) => s.setCamera3dMode);
+  // A camera view whose camera has gone renders as the Active Camera, so it
+  // raises no badge — one naming a camera that is not on screen would lie.
+  // The parent's scene subscription re-renders this when cameras change.
+  const camera3dMode = effectiveViewMode(storeMode);
 
   if (camera3dMode === 'active' && !isSoftware) return null;
 
@@ -76,11 +80,11 @@ function ViewportStatus(): JSX.Element | null {
         <button
           className={styles.headerBtn}
           onClick={() => setCamera3dMode('active')}
-          aria-label={`Viewing through ${CAMERA_VIEW_LABEL[camera3dMode]} — return to the Active Camera`}
+          aria-label={`Viewing through ${cameraViewLabel(camera3dMode)} — return to the Active Camera`}
           title="Viewing through a 3D view — click to return to Active Camera (1)"
         >
           <Icon name="camera" size="sm" />
-          <span className={styles.viewName}>{CAMERA_VIEW_LABEL[camera3dMode]}</span>
+          <span className={styles.viewName}>{cameraViewLabel(camera3dMode)}</span>
         </button>
       )}
 

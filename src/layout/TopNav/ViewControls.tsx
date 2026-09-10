@@ -11,14 +11,19 @@
  * `Workspace/ZoomField.tsx`, and Motion Paths / Auto-Keyframe are the buttons
  * that already existed in `ViewportTools`.
  *
- * What is left is what the display controls import: `PreviewMenu` and
- * `CAMERA_VIEW_LABEL`.
+ * What is left is what the display controls import: `PreviewMenu` and the
+ * 3D-view labels — `CAMERA_VIEW_LABEL`, `cameraViewLabel` and the per-comp
+ * camera-view list every view picker shares.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@components/Icon';
 import { useGuidesStore, type Camera3dMode } from '@stores/guidesStore';
 import { CUSTOM_VIEW_LABEL } from '@core/workspace/customViews';
+import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
+import { lookThroughCamera, lookThroughCameras } from '@core/scene/camera3d';
+import { cameraViewMode, cameraViewNodeId, isCameraViewMode, type CameraViewMode } from '@core/scene/cameraViewMode';
+import { useSceneRevision } from '@stores/sceneStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import {
   useRenderQualityStore,
@@ -34,12 +39,74 @@ import { cacheWorkAreaNow, installPreviewCacheCommands } from '@layout/Timeline/
 import { describePreviewCache, previewCacheStats } from '@layout/Timeline/previewCacheStats';
 import styles from './TopNav.module.css';
 
-/** Human labels for the 3D view modes. */
-export const CAMERA_VIEW_LABEL: Record<Camera3dMode, string> = {
+/**
+ * Human labels for the FIXED 3D view modes. A camera view has no fixed label —
+ * it is named after its camera layer — so it is not a key here; go through
+ * `cameraViewLabel`, which covers every mode.
+ */
+export const CAMERA_VIEW_LABEL: Record<Exclude<Camera3dMode, CameraViewMode>, string> = {
   active: 'Active Camera', front: 'Front', back: 'Back',
   left: 'Left', right: 'Right', top: 'Top', bottom: 'Bottom',
   ...CUSTOM_VIEW_LABEL,
 };
+
+/** A camera layer's name as a menu shows it — a blank name is still a row. */
+function cameraName(name: string | undefined): string {
+  return name && name.trim() ? name : 'Camera';
+}
+
+function compRootOr(rootId?: string): string {
+  return rootId ?? useCompositionStore.getState().id;
+}
+
+/**
+ * The mode a view is EFFECTIVELY in. A camera view whose camera can no longer
+ * be looked through renders as the Active Camera (`viewCameraNode`), so it is
+ * labelled and ticked as one too — a menu still ticking a deleted camera would
+ * claim a view the frame is not showing.
+ */
+export function effectiveViewMode(mode: Camera3dMode, rootId?: string): Camera3dMode {
+  if (!isCameraViewMode(mode)) return mode;
+  return lookThroughCamera(defaultSceneGraph, cameraViewNodeId(mode), compRootOr(rootId)) ? mode : 'active';
+}
+
+/** The label for ANY view mode — a camera view by its layer's name. */
+export function cameraViewLabel(mode: Camera3dMode, rootId?: string): string {
+  if (!isCameraViewMode(mode)) return CAMERA_VIEW_LABEL[mode];
+  const node = lookThroughCamera(defaultSceneGraph, cameraViewNodeId(mode), compRootOr(rootId));
+  return node ? cameraName(node.name) : CAMERA_VIEW_LABEL.active;
+}
+
+export interface CameraViewOption {
+  nodeId: string;
+  mode: CameraViewMode;
+  label: string;
+}
+
+/**
+ * The camera views a comp offers — one per enabled camera, topmost first, by
+ * layer name (AE's 3D View list) — re-listed only when that list changes.
+ *
+ * Subscribes to a SIGNATURE of the list rather than to the scene revision. The
+ * transport row hosts this, and a drag bumps the revision once per pointer
+ * event: re-rendering the whole row per bump to rebuild a list that almost
+ * never changes would be pure waste. The selector still runs per bump, but it
+ * is one walk of the comp and a string compare.
+ */
+export function useCompCameraViews(rootId: string): CameraViewOption[] {
+  const signature = useSceneRevision(() =>
+    JSON.stringify(lookThroughCameras(defaultSceneGraph, rootId).map((n) => [n.id, cameraName(n.name)])),
+  );
+  return useMemo(
+    () =>
+      (JSON.parse(signature) as Array<[string, string]>).map(([nodeId, label]) => ({
+        nodeId,
+        mode: cameraViewMode(nodeId),
+        label,
+      })),
+    [signature],
+  );
+}
 
 /**
  * Live cache coverage, as the Preview menu's header line.

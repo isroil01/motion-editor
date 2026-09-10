@@ -11,6 +11,7 @@ import {
   type CustomViewId,
   type CustomViewParams,
 } from '@core/workspace/customViews';
+import { isCameraViewMode, type CameraViewMode } from '@core/scene/cameraViewMode';
 
 /** Which channel the viewport shows. Non-'rgb' values isolate that channel as
  *  greyscale (alpha = matte/coverage; red/green/blue = that colour component). */
@@ -25,12 +26,18 @@ export type ViewChannel = 'rgb' | 'alpha' | 'red' | 'green' | 'blue';
  *                                       scene's Camera layer is ignored, so you
  *                                       inspect the scene from anywhere without
  *                                       moving the shot camera (AE parity).
+ *   camera:<nodeId> — perspective through ONE named Camera layer instead of
+ *                     the topmost (AE lists every camera by name under Active
+ *                     Camera). Renders like 'active' in every other respect,
+ *                     and falls back to 'active' when that camera is gone,
+ *                     disabled or in another comp — see `viewCameraNode`.
  * Front is the ordinary straight-on view; the side/top views show true depth.
  */
 export type Camera3dMode =
   | 'active'
   | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom'
-  | CustomViewId;
+  | CustomViewId
+  | CameraViewMode;
 
 /** How many viewport panes the workspace shows (AE's 1 View / 2 Views / 4 Views). */
 export type ViewLayout = '1' | '2' | '4';
@@ -49,6 +56,24 @@ export type QuadViewModes = [Camera3dMode, Camera3dMode, Camera3dMode, Camera3dM
 
 /** The orthographic views, in AE's menu order — for building the picker. */
 export const CAMERA_ORTHO_VIEWS = ['front', 'left', 'top', 'back', 'right', 'bottom'] as const;
+
+/**
+ * Whether an untrusted value is a view mode this build understands.
+ *
+ * Bookmarks are read back out of documents, and their mode used to be cast
+ * straight into the union — a mode from a newer or hand-edited file then
+ * reached every consumer that assumed "not active, not custom ⇒ an axis view".
+ * A `camera:<id>` mode is accepted whatever the id: whether that camera still
+ * exists is a question for render time, where it falls back to 'active'.
+ */
+export function isCamera3dMode(v: unknown): v is Camera3dMode {
+  return typeof v === 'string' && (
+    v === 'active'
+    || (CAMERA_ORTHO_VIEWS as readonly string[]).includes(v)
+    || isCustomViewId(v)
+    || isCameraViewMode(v)
+  );
+}
 
 /**
  * Region of Interest: a comp-space rectangle the preview restricts itself to.
@@ -330,7 +355,9 @@ function sanitizeBookmarks(raw: unknown): Record<string, CameraBookmark[]> {
       ok.push({
         slot: Math.round(bm.slot),
         name: typeof bm.name === 'string' ? bm.name : `Bookmark ${bm.slot}`,
-        mode: bm.mode as Camera3dMode,
+        // An unknown mode keeps its framing and name and opens as Active
+        // Camera, rather than dropping a bookmark someone saved.
+        mode: isCamera3dMode(bm.mode) ? bm.mode : 'active',
         framing: { center: { x: f.center.x, y: f.center.y }, zoom: f.zoom },
         ...(bm.customView ? { customView: bm.customView } : {}),
       });
