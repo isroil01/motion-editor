@@ -19,12 +19,17 @@ import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import {
   AUDIO_EFFECT_DEFS,
+  AUDIO_EFFECT_FLAGS,
   AUDIO_EFFECTS_PROP,
-  OSC_WAVES,
+  AUDIO_WAVEFORMS,
+  DISTORTION_CURVES,
   WAVE_EFFECTS,
+  hasFlag,
   readAudioEffects,
   type AudioEffect,
   type AudioEffectType,
+  type AudioWaveform,
+  type DistortionCurve,
 } from '@core/audio/audioEffects';
 import { shortId } from '@utils/lang';
 import styles from './ParentControl.module.css';
@@ -61,6 +66,21 @@ export function AudioEffectsSection({ nodeId }: { nodeId: string }): JSX.Element
     writeChain(nodeId, chain.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   const setParam = (id: string, key: string, v: number): void =>
     writeChain(nodeId, chain.map((e) => (e.id === id ? { ...e, params: { ...e.params, [key]: v } } : e)));
+  /**
+   * Set or clear a boolean option.
+   *
+   * Clearing REMOVES the key rather than storing `false`, so an effect nobody
+   * has ticked anything on carries no `flags` array at all and a document
+   * round-trips byte for byte — the same rule the pan prop follows.
+   */
+  const setFlag = (id: string, flag: string, on: boolean): void =>
+    writeChain(nodeId, chain.map((e) => {
+      if (e.id !== id) return e;
+      const next = (e.flags ?? []).filter((f) => f !== flag);
+      if (on) next.push(flag);
+      const { flags: _drop, ...rest } = e;
+      return next.length > 0 ? { ...rest, flags: next } : rest;
+    }));
   const remove = (id: string): void => writeChain(nodeId, chain.filter((e) => e.id !== id));
   const move = (id: string, delta: number): void => {
     // Order is audible: an EQ before a delay colours the echoes too, after it
@@ -151,15 +171,56 @@ export function AudioEffectsSection({ nodeId }: { nodeId: string }): JSX.Element
               <select
                 className={styles.select}
                 value={e.wave ?? 'sine'}
-                onChange={(ev) => update(e.id, { wave: ev.currentTarget.value as OscillatorType })}
+                onChange={(ev) => update(e.id, { wave: ev.currentTarget.value as AudioWaveform })}
                 aria-label={`${AUDIO_EFFECT_DEFS[e.type].label} waveform`}
               >
-                {OSC_WAVES.map((w) => (
-                  <option key={w} value={w}>{w[0]!.toUpperCase() + w.slice(1)}</option>
+                {AUDIO_WAVEFORMS
+                  // White Noise is a BUFFER, not an oscillator, so it is only
+                  // offered where something can play one. An LFO set to noise
+                  // would be a control that quietly fell back to a sine.
+                  .filter((w) => w.value !== 'white-noise' || e.type === 'tone')
+                  .map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Distortion's character. Discrete like Mode and Waveform, and for
+              the same reason: halfway between a tube and a fuzz is a third
+              curve, not a blend of two. */}
+          {e.type === 'distortion' && (
+            <div className={ta.paramRow}>
+              <div />
+              <span className={ta.paramLabel}>Type</span>
+              <select
+                className={styles.select}
+                value={e.curve ?? 'soft-clip'}
+                onChange={(ev) => update(e.id, { curve: ev.currentTarget.value as DistortionCurve })}
+                aria-label="Distortion type"
+              >
+                {DISTORTION_CURVES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
             </div>
           )}
+
+          {/*
+            Boolean options, rendered straight from `AUDIO_EFFECT_FLAGS` — the
+            SAME table the graph builder reads. A flag cannot appear here without
+            something consuming it, nor be consumed without appearing: the
+            dead-control shape this file's header warns about.
+          */}
+          {(AUDIO_EFFECT_FLAGS[e.type] ?? []).map((f) => (
+            <div className={ta.paramRow} key={f.key}>
+              <div />
+              <span className={ta.paramLabel} title={f.hint}>{f.label}</span>
+              <Switch
+                checked={hasFlag(e, f.key)}
+                onChange={(ev) => setFlag(e.id, f.key, ev.currentTarget.checked)}
+                aria-label={`${AUDIO_EFFECT_DEFS[e.type].label} ${f.label}`}
+              />
+            </div>
+          ))}
 
           {AUDIO_EFFECT_DEFS[e.type].params.map((p) => (
             <div className={ta.paramRow} key={p.key}>

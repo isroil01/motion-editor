@@ -220,6 +220,19 @@ export function getShortcutManager(): ShortcutManager {
   return shortcutInstance;
 }
 
+/**
+ * Install `s` as THE shortcut manager, detaching the one it replaces.
+ *
+ * Every manager attaches a window listener in its constructor, and there is
+ * more than one construction per session: `Application.boot` builds a fresh
+ * manager each time `Providers` mounts (twice under StrictMode, and again on
+ * every Dashboard → Editor entry), and any `getShortcutManager()` call before
+ * boot builds one too. Swapping only the pointer left the old listeners live,
+ * each with the bindings it had last rehydrated — so every chord ran its
+ * command once per leaked manager, and a TOGGLE (Shift+Esc between two comps)
+ * ran twice and landed back where it started.
+ */
 export function setShortcutManager(s: ShortcutManager): void {
+  if (shortcutInstance && shortcutInstance !== s) shortcutInstance.detach();
   shortcutInstance = s;
 }

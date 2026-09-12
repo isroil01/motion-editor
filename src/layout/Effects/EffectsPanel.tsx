@@ -21,6 +21,7 @@ import { BrowserRow, BrowserTag, BrowserEmpty } from '@components/BrowserTree';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useSceneRevision } from '@stores/sceneStore';
 import { useActiveWorkspace } from '@stores/projectStore';
+import { compToKeyframeTime } from '@core/timeline/TimelineController';
 import { useUIStore } from '@stores/uiStore';
 import { usePreferenceStore } from '@stores/preferenceStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
@@ -49,6 +50,7 @@ import {
 } from '@core/scene/pathOps';
 import {
   getNodeMask,
+  readNodeMaskAt,
   addMaskPath,
   updateMaskPath,
   setMaskPointFeather,
@@ -203,7 +205,11 @@ interface FxPreview {
 export function EffectsPanel(): JSX.Element {
   const primary = useSelectionStore((s) => s.primary);
   useSceneRevision((s) => s.rev);
-  const maskTime = useActiveWorkspace()?.time ?? 0;
+  // The playhead on the layer's KEYFRAME axis — where the renderer reads the
+  // mask, so the keyframe button and every mask edit below land where the shape
+  // actually changes. Raw comp time was wrong for a moved or trimmed layer.
+  const maskCompTime = useActiveWorkspace()?.time ?? 0;
+  const maskTime = primary ? compToKeyframeTime(primary, maskCompTime) : maskCompTime;
   const [effectQuery, setEffectQuery] = useState('');
   const [starredOnly, setStarredOnly] = useState(false);
   /*
@@ -278,7 +284,10 @@ export function EffectsPanel(): JSX.Element {
   const kind = node ? readNodeKind(node) : 'shape';
   const layerKind = kind === 'text' || kind === 'image' || kind === 'video' ? kind : 'shape';
   const { w: maskW, h: maskH } = SIZE[layerKind];
-  const masks = hasSelection ? getNodeMask(primary!).paths : [];
+  // The mask the renderer draws at the playhead — an animated mask's
+  // interpolated shape, whose values the edits below patch — not the static
+  // shape it stops reading once keyed (same read as the Layer panel).
+  const masks = node ? (readNodeMaskAt(node, maskTime) ?? getNodeMask(primary!)).paths : [];
   const shapeOps = kind === 'shape'
     ? PATH_OP_CATALOG.filter((op) => !q || op.label.toLowerCase().includes(q))
     : [];

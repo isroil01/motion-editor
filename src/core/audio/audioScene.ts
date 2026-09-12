@@ -31,12 +31,17 @@
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { flattenScene, readNodeKind } from '@core/scene/sceneDerive';
 import { compRootOf } from '@core/scene/parenting';
+import { readCompRef } from '@core/scene/compInstance';
+import { defaultAnimation } from '@motion/animation';
 import type { SceneNode } from '@core/types';
 import { assetUrl } from '@core/api/client';
 import { useAssetStore } from '@stores/assetStore';
-import { getTimelineController } from '@core/timeline/TimelineController';
+import { compToKeyframeTime, getTimelineController } from '@core/timeline/TimelineController';
 import type { AudioLayerState } from './AudioEngine';
-import { percentToDb, isLevelAnimated, AUDIO_LEVEL_DB_PROP } from './audioParams';
+import {
+  percentToDb, isLevelAnimated, AUDIO_LEVEL_DB_PROP,
+  isPanAnimated, AUDIO_PAN_PROP,
+} from './audioParams';
 import { readNodeLayerTime } from '@core/scene/layerTime';
 import { readAudioEffects } from './audioEffects';
 import { buildAudioRetimeSegments } from './audioRetimeSegments';
@@ -83,6 +88,29 @@ function staticLevelDb(props: Record<string, unknown>, dbKey: string, percentKey
   const pct = props[percentKey];
   if (typeof pct === 'number') return percentToDb(pct);
   return 0;
+}
+
+/**
+ * This node's stereo position, as the fields a voice carries.
+ *
+ * Returned as a partial rather than a bare number so a centred, unanimated
+ * layer contributes NO keys at all — `voicePanner` then builds no panner, and
+ * a project that never touched pan keeps byte-for-byte the audio graph it had.
+ *
+ * The pan prop lives wherever the level does: on the Audio component for an
+ * audio layer, on the Transform for a video layer. `readNodeKind` is not
+ * consulted — whichever component carries a number wins, which is also what
+ * makes this correct for both layer kinds without a branch.
+ */
+function panOf(node: SceneNode): { pan?: number; panAnimated?: boolean } {
+  const animated = isPanAnimated(node.id);
+  let pan: number | undefined;
+  for (const c of node.components) {
+    const v = (c.props as Record<string, unknown> | undefined)?.[AUDIO_PAN_PROP];
+    if (typeof v === 'number') { pan = v; break; }
+  }
+  if (!animated && (pan === undefined || pan === 0)) return {};
+  return { ...(pan !== undefined ? { pan } : {}), ...(animated ? { panAnimated: true } : {}) };
 }
 
 /** Resolve an audio node's asset + gain, or null when it lacks a usable src. */
@@ -163,6 +191,7 @@ export function readAudioVoices(node: SceneNode): AudioLayerState[] {
   const base = {
     nodeId: node.id, assetId: s.assetId, src: s.src,
     levelDb: s.levelDb, levelAnimated: isLevelAnimated(node.id),
+    ...panOf(node),
     source: 'audio' as const,
     // On the BASE, so every voice of a node shares one chain. Splitting a clip
     // makes two voices of one layer; they must sound alike, and effects stored
@@ -300,6 +329,7 @@ export function readVideoAudioVoices(node: SceneNode): AudioLayerState[] {
   const base = {
     nodeId: node.id, assetId: s.assetId, src: s.src,
     levelDb: s.levelDb, levelAnimated: isLevelAnimated(node.id),
+    ...panOf(node),
     source: 'video' as const,
   };
 
@@ -376,21 +406,194 @@ export function readAudioLayers(scopeRootId?: string): AudioLayerState[] {
   // comp B's picture (the picture was rootId-scoped; the sound was not), and
   // multi-comp projects heard every comp at once during playback.
   const all = flattenScene(defaultSceneGraph);
-  const nodes = scopeRootId
-    ? all.filter((n) => n.id !== scopeRootId && compRootOf(n.id) === scopeRootId)
-    : all;
-  const anySolo = nodes.some((n) => n.solo === true);
+  if (!scopeRootId) return voicesOf(all);
+  return compVoices(all, scopeRootId, [scopeRootId]);
+}
 
+/** Nesting depth past which a placed comp's audio is not followed. */
+const MAX_NESTED_AUDIO_DEPTH = 8;
+
+/**
+ * The voices of `nodes`, solo applied across them. `nested` supplies the
+ * voices of a layer that is neither audio nor video — a placed composition.
+ */
+function voicesOf(nodes: SceneNode[], nested?: (node: SceneNode) => AudioLayerState[]): AudioLayerState[] {
+  const anySolo = nodes.some((n) => n.solo === true);
   const out: AudioLayerState[] = [];
   for (const node of nodes) {
     const kind = readNodeKind(node);
     const voices =
-      kind === 'audio' ? readAudioVoices(node) : kind === 'video' ? readVideoAudioVoices(node) : [];
+      kind === 'audio' ? readAudioVoices(node)
+        : kind === 'video' ? readVideoAudioVoices(node)
+          : nested ? nested(node) : [];
     if (voices.length === 0) continue;
     // Soloing silences rather than drops: the voice stays in the list so the
     // waveform, the decode cache and the inspector still see it.
     const soloed = !anySolo || node.solo === true;
     for (const v of voices) out.push(soloed ? v : { ...v, muted: true });
+  }
+  return out;
+}
+
+/**
+ * Every voice one composition makes — its own audio and video layers, AND the
+ * audio of every composition placed in it, on this comp's clock.
+ *
+ * Scoping to the comp's own nodes (above) was right and dropped one thing: a
+ * placed composition's layers belong to ANOTHER root, so its sound never
+ * reached the comp it was placed in. After Effects plays nested audio, and
+ * without it pre-composing a clip — the commonest Pre-compose there is —
+ * silenced it. `stack` is the chain of comps being read, so A ⊂ B ⊂ A stops.
+ */
+function compVoices(all: SceneNode[], rootId: string, stack: string[]): AudioLayerState[] {
+  const nodes = all.filter((n) => n.id !== rootId && compRootOf(n.id) === rootId);
+  return voicesOf(nodes, (node) => {
+    const ref = readCompRef(node);
+    if (!ref || stack.includes(ref) || stack.length >= MAX_NESTED_AUDIO_DEPTH) return [];
+    return placeNestedVoices(node, compVoices(all, ref, [...stack, ref]));
+  });
+}
+
+/** A stretch of an instance's bar over which inner time runs at one rate. */
+interface InnerSegment {
+  /** Host time where it begins, and its host length. */
+  startSec: number;
+  durationSec: number;
+  /** Inner-comp time at its start (the HIGHER end when reversed). */
+  innerStart: number;
+  /** Inner seconds per host second (> 0). */
+  rate: number;
+  reverse: boolean;
+}
+
+const SEG_RATE_EPS = 0.02;
+
+/**
+ * Sample the inner time a RETIMED instance shows across one of its bars — the
+ * renderer's own mapping (`precompSourceTime`: its time remap, then its clip
+ * retime and stretch through `compToKeyframeTime`) — and split it into
+ * constant-rate stretches, as `buildAudioRetimeSegments` does for footage.
+ * Holds (a freeze in the remap) come out as gaps: a held picture has no
+ * continuous sound.
+ */
+function innerSegments(instance: SceneNode, span: AudioClipTiming, fps: number): InnerSegment[] {
+  const innerAt = (host: number): number => {
+    const remapped = defaultAnimation.sample(instance.id, 'timeRemap', host)
+      ?? defaultAnimation.sample(instance.id, 'precompTime', host);
+    return compToKeyframeTime(instance.id, typeof remapped === 'number' ? remapped : host);
+  };
+  const t0 = span.startSec;
+  const t1 = span.startSec + (span.outSec - span.inSec);
+  if (!(t1 > t0) || !Number.isFinite(t1)) return [];
+  const step = 1 / Math.max(1, fps);
+  const out: InnerSegment[] = [];
+  let a = { t: t0, s: innerAt(t0) };
+  for (let t = t0 + step; a.t < t1 - 1e-9; t += step) {
+    const bt = Math.min(t, t1);
+    const b = { t: bt, s: innerAt(bt) };
+    const dt = b.t - a.t;
+    const signed = dt > 1e-9 ? (b.s - a.s) / dt : 0;
+    if (Math.abs(signed) >= SEG_RATE_EPS) {
+      const reverse = signed < 0;
+      const rate = Math.abs(signed);
+      const last = out[out.length - 1];
+      if (
+        last && last.reverse === reverse && Math.abs(last.rate - rate) < SEG_RATE_EPS
+        && Math.abs(last.startSec + last.durationSec - a.t) < 1e-6
+      ) {
+        last.durationSec += dt;
+      } else {
+        out.push({ startSec: a.t, durationSec: dt, innerStart: a.s, rate, reverse });
+      }
+    }
+    a = b;
+  }
+  return out;
+}
+
+/**
+ * Move a placed composition's voices onto the host's clock.
+ *
+ * The instance's bar is the window. For a plain instance host time `t` shows
+ * inner time `inSec + (t − startSec)` of the referenced comp (the renderer's
+ * clip retime), so an inner voice starting at inner time τ starts in the host
+ * at `startSec + (τ − inSec)` — cut to the part the bar actually shows. A
+ * TIME-REMAPPED or stretched instance goes through `innerSegments`: each
+ * constant-rate stretch plays the inner voices it covers at that rate
+ * (varispeed, pitch following, as footage remaps do), backwards where the remap
+ * runs backwards. One voice per inner voice per bar (per stretch).
+ *
+ * Head trims advance the buffer by the voice's own playback rate: by the
+ * voice convention `outSec − inSec` is WALL time, and the buffer runs at
+ * `playbackRate` per wall second.
+ *
+ * A level curve is sampled by node on the clock it is heard on, which is not
+ * the inner comp's, so nested voices use their static level.
+ */
+function placeNestedVoices(instance: SceneNode, inner: AudioLayerState[]): AudioLayerState[] {
+  if (inner.length === 0) return [];
+  const retimed = defaultAnimation.isAnimated(instance.id, 'timeRemap')
+    || defaultAnimation.isAnimated(instance.id, 'precompTime')
+    || readNodeLayerTime(instance) !== undefined;
+  const t = instance.components.find((c) => c.type === 'Transform')?.props as Record<string, unknown> | undefined;
+  const instanceMuted = instance.visible === false || t?.[VIDEO_AUDIO_MUTED_PROP] === true;
+  const timings = readAudioClipTimings(instance.id);
+  const spans = timings.length > 0
+    ? timings
+    : [{ id: instance.id, enabled: true, startSec: 0, inSec: 0, outSec: Number.POSITIVE_INFINITY }];
+  const fps = getTimelineController().fpsForNode(instance.id) || 30;
+
+  const out: AudioLayerState[] = [];
+  for (const span of spans) {
+    const muted = !span.enabled || instanceMuted;
+    if (!retimed) {
+      const winStart = span.startSec;
+      const winEnd = span.startSec + (span.outSec - span.inSec);
+      for (const v of inner) {
+        const hostStart = span.startSec + (v.startSec - span.inSec);
+        const start = Math.max(hostStart, winStart);
+        const end = Math.min(hostStart + (v.outSec - v.inSec), winEnd);
+        if (!(end > start)) continue;
+        const inSec = v.inSec + (start - hostStart) * (v.playbackRate ?? 1);
+        out.push({
+          ...v,
+          id: `${instance.id}::${span.id}::${v.id ?? v.nodeId}`,
+          startSec: start,
+          inSec,
+          outSec: inSec + (end - start),
+          levelAnimated: false,
+          muted: v.muted || muted,
+        });
+      }
+      continue;
+    }
+    innerSegments(instance, span, fps).forEach((seg, k) => {
+      // The inner interval this stretch shows, low → high.
+      const lo = seg.reverse ? seg.innerStart - seg.durationSec * seg.rate : seg.innerStart;
+      const hi = lo + seg.durationSec * seg.rate;
+      for (const v of inner) {
+        const p = v.playbackRate ?? 1;
+        const vEnd = v.startSec + (v.outSec - v.inSec);
+        const a = Math.max(lo, v.startSec);
+        const b = Math.min(hi, vEnd);
+        if (!(b > a)) continue;
+        const hostDur = (b - a) / seg.rate;
+        // Forward: the stretch reaches `a` first; reversed: it reaches `b` first.
+        const hostStart = seg.startSec + (seg.reverse ? hi - b : a - lo) / seg.rate;
+        const inSec = v.inSec + (a - v.startSec) * p;
+        out.push({
+          ...v,
+          id: `${instance.id}::${span.id}::s${k}::${v.id ?? v.nodeId}`,
+          startSec: hostStart,
+          inSec,
+          outSec: inSec + hostDur,
+          playbackRate: p * seg.rate,
+          retimeReverse: seg.reverse ? !v.retimeReverse : v.retimeReverse,
+          levelAnimated: false,
+          muted: v.muted || muted,
+        });
+      }
+    });
   }
   return out;
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Icon } from '@components/Icon';
+import { Button } from '@components/Button';
 import { Logo } from '@components/Logo';
 import { AppMenuBar } from '@layout/Menu';
 import { IconButton } from '@components/IconButton';
@@ -140,24 +141,27 @@ export function TitleBar(): JSX.Element | null {
               <Icon name="settings" size="md" />
             </IconButton>
             <span className={styles.menuDivider} aria-hidden />
-            <button
-              type="button"
-              className={styles.previewBtn}
+            <Button
+              size="sm"
+              variant="secondary"
+              className={styles.titleBarBtn}
+              leftIcon={<Icon name="play" size="sm" weight="fill" />}
               title="Preview presentation (Fullscreen)"
               onClick={() => enterPresentation()}
             >
-              <Icon name="play" size="sm" weight="fill" />
-              <span>Preview</span>
-            </button>
-            <button
-              type="button"
-              className={styles.exportBtn}
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              className={styles.titleBarBtn}
+              leftIcon={<Icon name="export" size="sm" weight="bold" />}
               title="Export composition…"
+              data-tour="export"
               onClick={() => openExportDialog(compDuration, compFps)}
             >
-              <Icon name="export" size="sm" weight="bold" />
-              <span>Export</span>
-            </button>
+              Export
+            </Button>
           </div>
         )}
         <div className={styles.windowActions}>

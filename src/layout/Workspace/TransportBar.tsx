@@ -49,6 +49,7 @@ import { useWorkspaceStore } from '@stores/projectStore';
 import { useCurrentTime } from '@stores/playbackClockStore';
 import { useCompositionStore } from '@stores/compositionStore';
 import { useSelectionStore } from '@stores/selectionStore';
+import { usePreferenceStore } from '@stores/preferenceStore';
 import { displayLevelFor, isDemoted, type TransportGroup } from './transportOverflow';
 import { useTransportDemote } from './useTransportDemote';
 import {
@@ -105,6 +106,11 @@ export function TransportBar(): JSX.Element {
     ctrl.addMarkerAtPlayhead();
   };
 
+  const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
+  const toggleAutoKeyframe = (): void => {
+    usePreferenceStore.getState().set('timelineAutoKeyframe', !autoKeyframe);
+  };
+
   // Everything the row has shed, as rows of the bar's own `⋯` menu, in row
   // order: the clip edits, loop and marker, the display controls, the zoom.
   // Built here because these are the handlers' home.
@@ -123,6 +129,7 @@ export function TransportBar(): JSX.Element {
       items.push(
         { type: 'checkbox', id: 'tb-loop', label: 'Loop Playback', checked: looping, onChange: toggleLoop },
         { type: 'item', id: 'tb-marker', label: selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker', icon: 'marker', onSelect: addMarker },
+        { type: 'checkbox', id: 'tb-autokey', label: 'Auto-Keyframe Mode', checked: autoKeyframe, onChange: toggleAutoKeyframe },
       );
     }
     if (displayItems.length > 0) {
@@ -135,7 +142,7 @@ export function TransportBar(): JSX.Element {
     }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, looping, selectedIds, zoom, displayItems]);
+  }, [level, looping, selectedIds, zoom, displayItems, autoKeyframe]);
 
   return (
     <div
@@ -158,51 +165,104 @@ export function TransportBar(): JSX.Element {
         kept roughly even.
       */}
       <div className={styles.sideLeft}>
-      {/* Layer clip operations. First to leave the row when it runs short:
-          three buttons is the widest group here, and each has a shortcut. */}
-      {!shed('clipEdits') && (
-        <>
-          <div className={styles.cluster}>
-            <button
-              type="button"
-              className={styles.btn}
-              title="Split Layer at Playhead (Ctrl+Shift+D)"
-              aria-label="Split Layer at Playhead"
-              onClick={splitAtPlayhead}
-            >
-              <Icon name="scissors" size="sm" />
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              title="Trim In-Point to Playhead (Alt+[)"
-              aria-label="Trim In-Point to Playhead"
-              onClick={trimInToPlayhead}
-            >
-              <Icon name="trim-in" size="sm" />
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              title="Trim Out-Point to Playhead (Alt+])"
-              aria-label="Trim Out-Point to Playhead"
-              onClick={trimOutToPlayhead}
-            >
-              <Icon name="trim-out" size="sm" />
-            </button>
-          </div>
+        {/* Viewport layout dropdown */}
+        <div className={styles.cluster}>
+          <ViewportDisplayControlsView model={display} level={displayLevel} overflow="host" section="layout" />
+        </div>
 
-          <div className={styles.divider} />
-        </>
-      )}
+        {!shed('clipEdits') && (
+          <>
+            <div className={styles.divider} />
 
-      <div
-        className={styles.timecode}
-        title={`Current time — minutes : seconds : frames @ ${fps} fps`}
-      >
-        {framesToTimecode(time, fps, startFrame)}
-        <span className={styles.timecodeTotal}>/ {framesToTimecode(duration, fps, startFrame)}</span>
-      </div>
+            {/* Layer clip operations: Split, Trim In, Trim Out */}
+            <div className={styles.cluster}>
+              <button
+                type="button"
+                className={styles.btn}
+                title="Split Layer at Playhead (Ctrl+Shift+D)"
+                aria-label="Split Layer at Playhead"
+                onClick={splitAtPlayhead}
+              >
+                <Icon name="scissors" size="sm" />
+              </button>
+              <button
+                type="button"
+                className={styles.btn}
+                title="Trim In-Point to Playhead (Alt+[)"
+                aria-label="Trim In-Point to Playhead"
+                onClick={trimInToPlayhead}
+              >
+                <Icon name="trim-in" size="sm" />
+              </button>
+              <button
+                type="button"
+                className={styles.btn}
+                title="Trim Out-Point to Playhead (Alt+])"
+                aria-label="Trim Out-Point to Playhead"
+                onClick={trimOutToPlayhead}
+              >
+                <Icon name="trim-out" size="sm" />
+              </button>
+            </div>
+          </>
+        )}
+
+        <div className={styles.divider} />
+
+        <div
+          className={styles.timecode}
+          title={`Current time — minutes : seconds : frames @ ${fps} fps`}
+        >
+          {framesToTimecode(time, fps, startFrame)}
+          <span className={styles.timecodeTotal}>/ {framesToTimecode(duration, fps, startFrame)}</span>
+        </div>
+
+        <div className={styles.divider} />
+
+        {/* Snapshot & compare controls */}
+        <div className={styles.cluster}>
+          <ViewportDisplayControlsView model={display} level={displayLevel} overflow="host" section="compare" />
+        </div>
+
+        {!shed('loopMarker') && (
+          <>
+            <div className={styles.divider} />
+
+            {/* Playback modes & recording: Loop, Marker, Auto-Keyframe */}
+            <div className={styles.cluster}>
+              <button
+                type="button"
+                className={cn(styles.btn, looping && styles.btnActive)}
+                title={looping ? 'Loop Playback: ON' : 'Loop Playback: OFF'}
+                aria-label="Loop Playback"
+                aria-pressed={looping}
+                onClick={toggleLoop}
+              >
+                <Icon name="loop" size="sm" />
+              </button>
+              <button
+                type="button"
+                className={styles.btn}
+                title={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
+                aria-label={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
+                onClick={addMarker}
+              >
+                <Icon name="marker" size="sm" />
+              </button>
+              <button
+                type="button"
+                className={cn(styles.btn, autoKeyframe && styles.btnActive, autoKeyframe && styles.autoKeyBtnActive)}
+                onClick={toggleAutoKeyframe}
+                aria-label="Auto-Keyframe mode"
+                aria-pressed={autoKeyframe}
+                title={autoKeyframe ? 'Auto-Keyframe Mode is ON (Click to turn OFF)' : 'Auto-Keyframe Mode is OFF (Click to turn ON)'}
+              >
+                <Icon name="stopwatch" size="sm" />
+                {autoKeyframe && <span className={styles.recLabel}>REC</span>}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* The centre column: go-to-start · prev · PLAY · next · go-to-end.
@@ -261,75 +321,37 @@ export function TransportBar(): JSX.Element {
       </div>
 
       <div className={styles.sideRight}>
-      {/* Loop and marker. Not transport controls — one is a playback mode, the
-          other writes to the composition — so they sit just outside the five,
-          on the side the scene tools are on. */}
-      {!shed('loopMarker') && (
-        <>
-          <div className={styles.cluster}>
-            <button
-              type="button"
-              className={cn(styles.btn, looping && styles.btnActive)}
-              title={looping ? 'Loop Playback: ON' : 'Loop Playback: OFF'}
-              aria-label="Loop Playback"
-              aria-pressed={looping}
-              onClick={toggleLoop}
-            >
-              <Icon name="loop" size="sm" />
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              title={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
-              aria-label={selectedIds.length === 1 ? 'Add Layer Marker' : 'Add Composition Marker'}
-              onClick={addMarker}
-            >
-              <Icon name="marker" size="sm" />
-            </button>
-          </div>
-
-          <div className={styles.divider} />
-        </>
-      )}
-
-      {/* Motion path, the 3D switch, auto-keyframe and the two status badges
-          — the controls that act on the SCENE. */}
-      <div className={styles.cluster}>
+        {/* Contextual motion path, 3D switch, and status badges */}
         <ViewportTools />
-      </div>
 
-      {/* How the frame is SHOWN — layout, channel, resolution, preview, LUT,
-          overlays, snapshot + compare, display mode, bookmarks, pop out.
-          First to leave when the row runs short, one at a time from the
-          right, into the `⋯` below (`overflow="host"`: the group renders no
-          trigger of its own). */}
-      <div className={styles.cluster}>
-        <ViewportDisplayControlsView model={display} level={displayLevel} overflow="host" />
-      </div>
+        {/* Display controls: Overlays, display mode, channel, resolution, preview, LUT, bookmarks, pop out */}
+        <div className={styles.cluster}>
+          <ViewportDisplayControlsView model={display} level={displayLevel} overflow="host" section="right" />
+        </div>
 
-      {/* Last to go: the wheel and the +/- keys still reach the viewport's
-          zoom, and the `⋯` menu lists the presets while it is shed. */}
-      {!shed('zoom') && (
-        <>
-          <div className={styles.divider} />
+        {/* Last to go: the wheel and the +/- keys still reach the viewport's
+            zoom, and the `⋯` menu lists the presets while it is shed. */}
+        {!shed('zoom') && (
+          <>
+            <div className={styles.divider} />
 
-          <div className={styles.cluster}>
-            <ZoomField />
-          </div>
-        </>
-      )}
+            <div className={styles.cluster}>
+              <ZoomField />
+            </div>
+          </>
+        )}
 
-      {overflowItems.length > 0 && (
-        <Dropdown
-          placement="top-end"
-          trigger={
-            <button type="button" className={styles.btn} title="More transport controls" aria-label={`More transport controls (${overflowItems.length})`}>
-              <Icon name="more-horizontal" size="sm" />
-            </button>
-          }
-          items={overflowItems}
-        />
-      )}
+        {overflowItems.length > 0 && (
+          <Dropdown
+            placement="top-end"
+            trigger={
+              <button type="button" className={styles.btn} title="More transport controls" aria-label={`More transport controls (${overflowItems.length})`}>
+                <Icon name="more-horizontal" size="sm" />
+              </button>
+            }
+            items={overflowItems}
+          />
+        )}
       </div>
     </div>
   );

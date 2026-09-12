@@ -179,14 +179,15 @@ const createPrecomp: AiTool['handler'] = (input, ctx) => {
   const id = ctx.scene.precompose(i.nodeIds, i.name);
   if (!id) {
     return fail(
-      `Precompose produced no group. The selected layers may already share a precomp parent, or ` +
-      `include the composition root — precompose ordinary content layers instead.`,
+      `Precompose produced nothing. The layers must belong to the composition in view, and must ` +
+      `not include the composition root — precompose ordinary content layers instead.`,
     );
   }
   bindAlias(ctx, i.id, id);
   return ok(
-    `Precomposed ${i.nodeIds.length} layer(s) into '${id}' ("${i.name}"). ` +
-    `Transform, opacity, effects and masks on '${id}' now apply to the whole group as one unit, ` +
+    `Precomposed ${i.nodeIds.length} layer(s) into a new composition "${i.name}", placed here as ` +
+    `the composition layer '${id}'. The layers keep their ids but now live in that composition, ` +
+    `not in this one. Transform, opacity, effects and masks on '${id}' apply to the whole unit, ` +
     `and set_time_remap on it retimes everything inside.`,
     { id },
   );
@@ -202,9 +203,10 @@ const setTimeRemap: AiTool['handler'] = (input, ctx) => {
   if (!ctx.scene.has(i.nodeId)) return fail(unknownNode(ctx, i.nodeId));
 
   const kind = ctx.scene.get(i.nodeId)?.kind;
-  if (kind !== 'group') {
+  // A composition layer (what create_precomp makes) or a group/precomp.
+  if (kind !== 'group' && kind !== 'comp') {
     return fail(
-      `Time remap only works on a group/precomp layer, and '${i.nodeId}' is a ${kind}. ` +
+      `Time remap only works on a composition or group/precomp layer, and '${i.nodeId}' is a ${kind}. ` +
       `Call create_precomp on the layers you want to retime first, then remap the result.`,
     );
   }

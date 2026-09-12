@@ -24,7 +24,8 @@ import { addPathOp, defaultPathOp } from '@core/scene/pathOps';
 import { addMaskPath, rectangleMask, ellipseMask } from '@core/effects/mask';
 import { addTextAnimator } from '@core/text/textAnimators';
 import type { SceneNode } from '@core/types';
-import { buildStaticPropertyTree, groupForProp, MASK_ANIM_PROP } from './propertyTree';
+import { buildStaticPropertyTree, groupForProp, MASK_ANIM_PROP, AUDIO_WAVEFORM_ROW } from './propertyTree';
+import { AUDIO_LEVEL_DB_PROP, AUDIO_PAN_PROP } from '@core/audio/audioParams';
 
 function node(id: string, kind = 'shape', extra: Record<string, unknown> = {}): SceneNode {
   return {
@@ -166,6 +167,29 @@ describe('a row only promises what the engine keeps', () => {
     expect(rows.find((r) => r.group === 'audio')?.members).toEqual(['audioLevelDb']);
     expect(rows.some((r) => r.group === 'transform')).toBe(false);
   });
+
+  it('gives it a waveform row that promises no keyframes', () => {
+    defaultSceneGraph.addNode(node('snd2', 'audio'));
+    const audio = buildStaticPropertyTree('snd2').filter((r) => r.group === 'audio');
+    expect(audio.map((r) => r.prop)).toEqual([AUDIO_LEVEL_DB_PROP, AUDIO_PAN_PROP, AUDIO_WAVEFORM_ROW]);
+    const wave = audio.find((r) => r.prop === AUDIO_WAVEFORM_ROW)!;
+    expect(wave.label).toBe('Waveform');
+    // Empty members is what withholds the stopwatch — a waveform is a picture
+    // of the source, not a property, and keying it would key nothing.
+    expect(wave.members).toEqual([]);
+    expect(wave.valueProps).toEqual([]);
+  });
+
+  it('gives a video layer the same two audio rows', () => {
+    defaultSceneGraph.addNode(node('vid', 'video'));
+    const audio = buildStaticPropertyTree('vid').filter((r) => r.group === 'audio');
+    expect(audio.map((r) => r.prop)).toEqual([AUDIO_LEVEL_DB_PROP, AUDIO_PAN_PROP, AUDIO_WAVEFORM_ROW]);
+  });
+
+  it('gives a shape layer no audio rows at all', () => {
+    defaultSceneGraph.addNode(node('sq', 'shape'));
+    expect(buildStaticPropertyTree('sq').some((r) => r.group === 'audio')).toBe(false);
+  });
 });
 
 describe('groupForProp places what the tree did not describe', () => {
@@ -179,6 +203,7 @@ describe('groupForProp places what the tree did not describe', () => {
     expect(groupForProp('ta.0.blur')).toBe('text');
     expect(groupForProp(MASK_ANIM_PROP)).toBe('masks');
     expect(groupForProp('audioLevelDb')).toBe('audio');
+    expect(groupForProp('audioPan')).toBe('audio');
     // A text animator's Blur and a Gaussian Blur's radius no longer land in one
     // bucket, which is what the label-substring guess did.
     expect(groupForProp('x')).toBe('transform');

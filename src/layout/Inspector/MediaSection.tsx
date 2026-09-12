@@ -23,7 +23,10 @@ import { useNodeComponentProp } from '@hooks/useNodeComponentProp';
 import { getNodeHasSequence, getNodeSequenceLoop, setSequenceLoop } from '@core/scene/imageSequence';
 import { audioEngine } from '@core/audio/AudioEngine';
 import { readVideoAudioVoices, videoHasAudioTrack, speedAltersAudio, VIDEO_AUDIO_LEVEL_PROP, VIDEO_AUDIO_MUTED_PROP } from '@core/audio/audioScene';
-import { AUDIO_LEVEL_DB_PROP, MIN_LEVEL_DB, MAX_LEVEL_DB, percentToDb } from '@core/audio/audioParams';
+import {
+  AUDIO_LEVEL_DB_PROP, MIN_LEVEL_DB, MAX_LEVEL_DB, percentToDb,
+  AUDIO_PAN_PROP, MIN_PAN, MAX_PAN,
+} from '@core/audio/audioParams';
 import { KeyframeRow } from './KeyframeRow';
 import { TimeRemapRow } from './PrecompControl';
 import { ProxyRow } from './ProxyRow';
@@ -72,6 +75,7 @@ export function MediaSection({ nodeId }: { nodeId: string }): JSX.Element | null
   const [audioLevelDb, setAudioLevelDb] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, AUDIO_LEVEL_DB_PROP);
   const [legacyPercent] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, VIDEO_AUDIO_LEVEL_PROP);
   const [audioMuted, setAudioMuted] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, VIDEO_AUDIO_MUTED_PROP);
+  const [audioPan, setAudioPan] = useNodeComponentProp(defaultSceneGraph, nodeId, tComp?.id, AUDIO_PAN_PROP);
 
   // Kick the decode so the section can report whether this file has sound at
   // all, and re-render when the engine settles.
@@ -229,6 +233,16 @@ export function MediaSection({ nodeId }: { nodeId: string }): JSX.Element | null
                     max={MAX_LEVEL_DB}
                     precision={1}
                     onStatic={(v) => setAudioLevelDb(v)}
+                  />
+                  <KeyframeRow
+                    nodeId={nodeId}
+                    prop={AUDIO_PAN_PROP}
+                    label="Pan"
+                    value={typeof audioPan === 'number' ? audioPan : 0}
+                    unit="%"
+                    min={MIN_PAN}
+                    max={MAX_PAN}
+                    onStatic={(v) => setAudioPan(v === 0 ? undefined : v)}
                   />
                   <InspectorRow label="Mute" align="center">
                     <Switch

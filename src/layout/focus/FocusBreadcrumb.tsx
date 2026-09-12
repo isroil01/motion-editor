@@ -21,6 +21,10 @@ export function FocusBreadcrumb(): JSX.Element | null {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return;
+      // Shift+Esc is AE's "previous composition" (comp.openPrevious), not a
+      // step out of Focus Mode — both listen on window, so without this one
+      // key press did both.
+      if (e.shiftKey) return;
       const s = useFocusStore.getState();
       if (!isFocusActive(s)) return;
       const t = e.target as HTMLElement | null;

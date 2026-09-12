@@ -108,6 +108,13 @@ export interface MotionSample {
    * sample without its own matrix renders identically to every other sample.
    */
   matrix?: readonly [number, number, number, number, number, number];
+  /**
+   * 3D COMPOSITION CARD only: the card's four corners (TL,TR,BR,BL) projected
+   * at this sub-frame time. A card is drawn through a perspective homography,
+   * so its shutter samples need quads too — smearing it along an affine path
+   * would straighten the trapezoid it actually is. See `quad3d`.
+   */
+  quad?: readonly [number, number, number, number, number, number, number, number];
 }
 
 export interface RenderLayer {
@@ -240,6 +247,14 @@ export interface RenderLayer {
    *  non-identity, convex pin — the affine path is unchanged otherwise. Applied
    *  as a separate render stage on the mvp; `matrix` stays affine. */
   cornerPin?: readonly [number, number, number, number, number, number, number, number];
+  /**
+   * A 3D COMPOSITION LAYER's card: its four corners (TL,TR,BR,BL) projected
+   * through the host camera, in comp px. The container's comp renders FLAT at
+   * its own size and is drawn onto this quad through a perspective homography
+   * (see `precompToRenderable`). `matrix` carries the projected affine for the
+   * depth sort and the affine fallbacks.
+   */
+  quad3d?: readonly [number, number, number, number, number, number, number, number];
   /** Center position in composition space. */
   x: number;
   y: number;

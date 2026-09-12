@@ -2359,13 +2359,37 @@ export class CompositionPass extends RenderPass {
    * from whatever scope it is drawn in, so each level "restores" its parent's
    * by construction.
    */
-  private static precompScope(ctx: RenderPassContext, pre: NonNullable<Renderable['precomp']>): RenderPassContext {
+  /**
+   * The scope a precomp subtree draws under: a sealed comp's own camera, lights
+   * and environment in place of the host's.
+   *
+   * `placement` is the map from the comp's OWN pixels to wherever its content is
+   * being drawn — the whole offscreen, for a flat 3D card. The inner camera's
+   * P·V outputs homogeneous INNER comp px, so lifting an affine placement onto
+   * the projection (lift · P) moves x/y without touching z or w: depth order,
+   * the DOF depth row and the perspective divide stay the inner camera's. The
+   * adapter does this for a screen-space placement (`precompCamera3d`); a card's
+   * placement is not known until the viewport is, so it is done here.
+   */
+  private static precompScope(
+    ctx: RenderPassContext,
+    pre: NonNullable<Renderable['precomp']>,
+    placement?: Mat3,
+  ): RenderPassContext {
     if (!pre.camera3d) return ctx;
     const { camera3d: _cam, lights3d: _lights, envMap: _env, ssao: _ssao, ...base } = ctx.scene;
     void _cam; void _lights; void _env; void _ssao;
+    const camera3d = placement
+      ? {
+          ...pre.camera3d,
+          projection: Array.from(
+            Mat4.multiply(Mat4.fromMat3(placement), Mat4.fromArray(pre.camera3d.projection)),
+          ),
+        }
+      : pre.camera3d;
     const scene: RenderPassContext['scene'] = {
       ...base,
-      camera3d: pre.camera3d,
+      camera3d,
       ...(pre.lights3d && pre.lights3d.length > 0 ? { lights3d: pre.lights3d } : {}),
       ...(pre.envMap ? { envMap: pre.envMap } : {}),
     };
@@ -2380,24 +2404,75 @@ export class CompositionPass extends RenderPass {
     inlineFallback: boolean,
   ): Renderable | null {
     const { services } = ctx;
+    // A 3D composition CARD (`precomp.flat`): its children were built FLAT, in
+    // the comp's own pixels. Map them onto the whole offscreen — card space
+    // [0,W]×[0,H] → the visible world rect, which the target covers — and the
+    // composite below then draws that target through the card's perspective
+    // model. Everything else renders in SCREEN space, as it always has.
+    //
+    // A nested precomp that is itself `flat` keeps its children in ITS card
+    // space (its own call maps them), so only its placement is re-parented.
+    const flat = r.precomp!.flat;
+    const fullModel = modelFromRect(ctx.viewport.visibleWorldRect);
+    const cardToUnit = flat
+      ? Mat3.scaling(1 / Math.max(1, flat.width), 1 / Math.max(1, flat.height))
+      : null;
     // The subtree draws under its OWN scope (a sealed comp's camera/lights);
     // everything after the subtree — mask bake, composite — stays in `ctx`.
-    const scope = CompositionPass.precompScope(ctx, r.precomp!);
+    // A card's inner camera is lifted onto the offscreen the children go to.
+    const scopeFor = (placement?: Mat3): RenderPassContext =>
+      CompositionPass.precompScope(ctx, r.precomp!, placement);
+    const scope = scopeFor(cardToUnit ? Mat3.multiply(fullModel, cardToUnit) : undefined);
+    const reparent = (list: readonly Renderable[], P: Mat3): Renderable[] => list.map((c) => {
+      const m = Mat3.multiply(P, c.modelMatrix);
+      const b = c.bounds;
+      const pts = [
+        Mat3.transformPoint(P, { x: b.x, y: b.y }),
+        Mat3.transformPoint(P, { x: b.x + b.width, y: b.y }),
+        Mat3.transformPoint(P, { x: b.x, y: b.y + b.height }),
+        Mat3.transformPoint(P, { x: b.x + b.width, y: b.y + b.height }),
+      ];
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      return {
+        ...c,
+        modelMatrix: m,
+        bounds: { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY },
+        ...(c.motionSamples
+          ? { motionSamples: c.motionSamples.map((s) => ({ ...s, modelMatrix: Mat3.multiply(P, s.modelMatrix) })) }
+          : {}),
+        ...(c.precomp && !c.precomp.flat
+          ? { precomp: { ...c.precomp, renderables: reparent(c.precomp.renderables, P) } }
+          : {}),
+      };
+    });
     if (slot >= PRECOMP_TARGETS.length) {
       if (!inlineFallback) return null;
       st.flushMain();
-      const folded = r.precomp!.renderables.map((c) => ({ ...c, opacity: c.opacity * r.opacity }));
-      this.renderList(scope, folded, st.out, st.depth);
+      // Out of offscreens: draw the children straight through the card's own
+      // model (perspective included) rather than in its flat card space.
+      const cardDirect = flat && cardToUnit ? Mat3.multiply(r.modelMatrix, cardToUnit) : null;
+      const direct = cardDirect ? reparent(r.precomp!.renderables, cardDirect) : r.precomp!.renderables;
+      const folded = direct.map((c) => ({ ...c, opacity: c.opacity * r.opacity }));
+      // The inner camera follows the children to wherever they landed. Only the
+      // affine part of a perspective card survives the lift, which is the
+      // approximation this out-of-offscreens fallback already is.
+      this.renderList(cardDirect ? scopeFor(cardDirect) : scope, folded, st.out, st.depth);
       return null;
     }
     st.flushMain();
     const targetName = PRECOMP_TARGETS[slot]!;
     const targetUv = targetSampleUv(ctx);
     const clampSampler = () => services.resources.sampler('linear-clamp', { min: 'linear', mag: 'linear', addressU: 'clamp', addressV: 'clamp' });
+    const children = flat && cardToUnit
+      ? reparent(r.precomp!.renderables, Mat3.multiply(fullModel, cardToUnit))
+      : r.precomp!.renderables;
 
     // Clear, then render the subtree (nested precomps recurse into deeper slots).
     beginViewportPass(ctx, 'precomp-clear', writeAttachment(ctx, targetName, Color.transparent())).end();
-    this.renderList(scope, r.precomp!.renderables, targetName, slot + 1);
+    this.renderList(scope, children, targetName, slot + 1);
     let tex = ctx.services.backend.renderTargetTexture(ctx.target(targetName)!);
     if (!tex) return null;
 
@@ -2409,7 +2484,9 @@ export class CompositionPass extends RenderPass {
       const maskRes = services.textures.get(r.maskTextureKey);
       if (maskRes) {
         const maskCmds = new CommandBuffer();
-        emitTextured(maskCmds, mvpFor(ctx.viewport, r.modelMatrix), Color.white(), 1, 'normal', maskRes.texture, clampSampler());
+        // A flat card's mask is in its own space too: over the whole target,
+        // exactly where its flat content went.
+        emitTextured(maskCmds, mvpFor(ctx.viewport, flat ? fullModel : r.modelMatrix), Color.white(), 1, 'normal', maskRes.texture, clampSampler());
         const encM = beginViewportPass(ctx, 'precomp-mask', writeAttachment(ctx, BLUR_TARGET1, Color.transparent()));
         services.quad.execute(encM, maskCmds);
         encM.end();
@@ -2438,17 +2515,40 @@ export class CompositionPass extends RenderPass {
 
     // The offscreen holds the subtree in SCREEN space (rendered with this
     // viewport's camera), so the composite quad covers the visible world rect
-    // and samples the whole target with the backend-correct UV.
-    const fullModel = modelFromRect(ctx.viewport.visibleWorldRect);
-    const { maskTextureKey: _mask, precomp: _pre, sdf: _sdf, deformedMesh: _mesh, ...rest } = r;
-    void _mask; void _pre; void _sdf; void _mesh;
+    // and samples the whole target with the backend-correct UV. A flat 3D card
+    // holds its comp over the WHOLE target instead, and is drawn through its
+    // own perspective model (see `flat` above).
+    const { maskTextureKey: _mask, precomp: _pre, sdf: _sdf, deformedMesh: _mesh, motionSamples: _motion, ...rest } = r;
+    void _mask; void _pre; void _sdf; void _mesh; void _motion;
+    // A motion-blurred comp layer: the offscreen holds the card at its CURRENT
+    // pose, and each shutter sample must draw that same image displaced by how
+    // far the card moved at that sub-frame — Mᵢ · M_now⁻¹ · fullModel. Handing
+    // the samples through untouched would squeeze the whole screen-space
+    // texture into the card's box once per sample. The mask was baked at the
+    // current pose, so it travels with the card, as it should.
+    // A 3D CARD's samples are its own sub-frame perspective quads, each already
+    // the whole model for the flat offscreen — they pass through as they are.
+    const hasSamples = !!(r.motionSamples && r.motionSamples.length > 1);
+    const inv = !flat && hasSamples ? Mat3.invert(r.modelMatrix) : null;
+    const motionSamples = inv
+      ? r.motionSamples!.map((s) => ({ modelMatrix: Mat3.multiply(s.modelMatrix, Mat3.multiply(inv, fullModel)), opacity: s.opacity }))
+      : flat && hasSamples
+        ? r.motionSamples!.map((s) => ({ modelMatrix: s.modelMatrix, opacity: s.opacity }))
+        : undefined;
     return {
       ...rest,
       kind: 'image',
-      modelMatrix: fullModel,
-      bounds: ctx.viewport.visibleWorldRect,
+      modelMatrix: flat ? r.modelMatrix : fullModel,
+      bounds: flat ? r.bounds : ctx.viewport.visibleWorldRect,
       uvRect: targetUv,
-      color: Color.white(),
+      // The container's TINT, not a hard white: a lit 3D comp card carries its
+      // Lambert gain here, and a comp layer's projected shadow copy carries the
+      // black that makes it a silhouette. Forcing white dropped both on the
+      // floor — the adapter set them and the composite threw them away.
+      // Ordinary precomps are white anyway (`precompToRenderable`), so nothing
+      // else moves.
+      color: r.color ?? Color.white(),
+      ...(motionSamples ? { motionSamples } : {}),
     };
   }
 

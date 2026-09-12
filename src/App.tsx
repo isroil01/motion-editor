@@ -26,7 +26,6 @@ import { createViewportDiskCache } from '@core/rendering/frameDiskCache';
 import { useKeyframeSelectionStore } from '@stores/keyframeSelectionStore';
 import { useSceneRevision, bumpScene } from '@stores/sceneStore';
 import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
-import { VIDEO_AUDIO_MUTED_PROP } from '@core/audio/audioScene';
 import { useProjectStore } from '@stores/projectStore';
 import { getTime as playheadNow } from '@stores/playbackClockStore';
 import { usePlaybackClock } from '@layout/Timeline/usePlaybackClock';
@@ -92,8 +91,11 @@ import {
   getTimelineEditMode,
 } from '@layout/Timeline/timelineEditMode';
 import { useCompositionStore } from '@stores/compositionStore';
-import { readNodeKind } from '@core/scene/sceneDerive';
-import { readCompRef } from '@core/scene/compInstance';
+import { readNodeKind, flattenScene } from '@core/scene/sceneDerive';
+import { toggleLayerAudioMute } from '@core/audio/audioLayerSwitches';
+import { AUDIO_WAVEFORM_ROW } from '@core/timeline/propertyTree';
+import { AUDIO_LEVEL_DB_PROP, AUDIO_PAN_PROP } from '@core/audio/audioParams';
+import { openLayerOnDoubleClick } from '@layout/LayerViewer/openLayer';
 import { setNodeBlend } from '@core/effects/blendMode';
 import { setNodeMatte } from '@core/effects/matte';
 import { readNodeFxEnabled, setNodeFxEnabled } from '@core/effects/effects';
@@ -364,9 +366,28 @@ function EditorShellInner(): JSX.Element {
       bumpScene();
     });
   };
-  const toggleTrackSolo = (trackId: string): void => {
+  /**
+   * Toggle a layer's solo. `exclusive` is AE's Alt+click — "turn off all other
+   * solo switches", which leaves this layer the only one soloed. Solo covers
+   * picture AND sound in AE, and `voicesOf` in audioScene already silences
+   * non-soloed voices, so this one flag drives both.
+   */
+  const toggleTrackSolo = (trackId: string, exclusive = false): void => {
     const node = defaultSceneGraph.getNode(trackId);
     if (!node) return;
+    if (exclusive) {
+      // Alt+click a lit switch clears everything (nothing soloed); Alt+click an
+      // unlit one isolates it. Either way every OTHER switch goes dark.
+      const only = !node.solo;
+      runDocumentEdit(only ? 'Solo only this layer' : 'Clear all solos', () => {
+        for (const n of flattenScene(defaultSceneGraph)) {
+          if (n.solo) n.solo = false;
+        }
+        if (only) node.solo = true;
+        bumpScene();
+      });
+      return;
+    }
     runDocumentEdit(node.solo ? 'Unsolo layer' : 'Solo layer', () => {
       node.solo = !node.solo;
       bumpScene();
@@ -418,8 +439,19 @@ function EditorShellInner(): JSX.Element {
       t: ['opacity', '__static:opacity'],
       m: ['mask'],
       a: ['anchorX', 'anchorY', '__static:anchor'],
-      l: ['audio'],
+      // AE's L = "show only Audio Levels". This named the GROUP key ('audio'),
+      // but the filter matches on a row's `prop` — so L expanded the layer and
+      // then hid every row, which looked like the layer had no audio at all.
+      // Both the dB track and the legacy video-layer percent are listed, so a
+      // project saved before the dB migration still reveals its level.
+      l: [AUDIO_LEVEL_DB_PROP, AUDIO_PAN_PROP, 'audioLevel'],
     };
+
+    // AE's LL — a second L within the double-tap window swaps the Audio group
+    // for the waveform alone. Handled here rather than in ShortcutManager's
+    // UU path because single L never was a command: it is this listener.
+    const DOUBLE_TAP_MS = 400;
+    let lastL = 0;
 
     // AE's Alt+Shift+<prop> — add a keyframe for that property on every
     // selected layer at the playhead, enabling animation if needed. The engine
@@ -480,7 +512,19 @@ function EditorShellInner(): JSX.Element {
       const sel = useSelectionStore.getState().ids;
       if (sel.length === 0) return;
       e.preventDefault();
-      setRevealFilter(REVEAL[key]!);
+      let rows = REVEAL[key]!;
+      if (key === 'l') {
+        const now = Date.now();
+        // LL shows only the waveform; a third L within the window falls back to
+        // the group, so the pair toggles rather than sticking on the waveform.
+        if (now - lastL < DOUBLE_TAP_MS) {
+          rows = [AUDIO_WAVEFORM_ROW];
+          lastL = 0;
+        } else {
+          lastL = now;
+        }
+      }
+      setRevealFilter(rows);
       setExpandedIds((cur) => {
         const set = new Set(cur);
         for (const id of sel) set.add(id);
@@ -695,16 +739,10 @@ function EditorShellInner(): JSX.Element {
    * of one piece of state, not a second piece of state.
    */
   const handleClipMuteToggle = (nodeId: string): void => {
-    const node = defaultSceneGraph.getNode(nodeId);
-    if (!node) return;
-    const kind = readNodeKind(node);
-    const componentType = kind === 'audio' ? 'Audio' : 'Transform';
-    const prop = kind === 'audio' ? '__muted' : VIDEO_AUDIO_MUTED_PROP;
-    const comp = node.components.find((c) => c.type === componentType);
-    if (!comp) return;
-    const muted = (comp.props as Record<string, unknown>)?.[prop] === true;
-    runDocumentEdit(muted ? 'Unmute layer audio' : 'Mute layer audio', () => {
-      defaultSceneGraph.writeProp(nodeId, comp.id, prop, muted ? undefined : true);
+    const edit = toggleLayerAudioMute(nodeId);
+    if (!edit) return;
+    runDocumentEdit(edit.label, () => {
+      edit.apply();
       bumpScene();
     });
   };
@@ -712,24 +750,16 @@ function EditorShellInner(): JSX.Element {
   const handleTrackActivate = (trackId: string): void => {
     const node = defaultSceneGraph.getNode(trackId);
     if (!node) return;
-    const kind = readNodeKind(node);
-    // Double-clicking a comp INSTANCE opens the source composition for editing
-    // (AE behaviour) — its own subtree is empty; the content lives in the ref.
-    if (kind === 'comp') {
-      const ref = readCompRef(node);
-      const refNode = ref ? defaultSceneGraph.getNode(ref) : null;
-      if (ref && refNode) {
-        useProjectStore.getState().actions.openTab(ref, undefined, refNode.name ?? ref);
-      }
-      return;
-    }
-    if (kind === 'group') {
-      const ws = useProjectStore.getState();
-      ws.actions.openTab(trackId, undefined, node.name ?? trackId);
-    } else {
-      focusIsolate(trackId);
-      setSelected([trackId]);
-    }
+    // AE: double-clicking a layer opens it — a comp instance its source comp
+    // (with the navigator trail and the playhead carried across), a group its
+    // own subtree, footage and solids the Layer panel — per the two "Opening
+    // Layers with Double-click" preferences. See openLayer.ts.
+    if (openLayerOnDoubleClick(trackId)) return;
+    // A comp instance whose source is gone opens nothing; isolating its empty
+    // card would read as a bug.
+    if (readNodeKind(node) === 'comp') return;
+    focusIsolate(trackId);
+    setSelected([trackId]);
   };
 
   // Drag a track row to a new position (AE-style layer reorder).

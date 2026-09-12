@@ -41,6 +41,13 @@ import {
 import { useUIStore } from '@stores/uiStore';
 import { waveformPath } from '@core/audio/waveform';
 import { InspectorRow } from '@components/Inspector';
+import { KeyframeRow } from './KeyframeRow';
+import {
+  AUDIO_LEVEL_DB_PROP, MIN_LEVEL_DB, MAX_LEVEL_DB, percentToDb,
+  AUDIO_PAN_PROP, MIN_PAN, MAX_PAN,
+} from '@core/audio/audioParams';
+import { applyFade, DEFAULT_FADE_SEC, type FadeSide } from '@core/audio/audioFades';
+import { runAnimEdit } from '@core/animation/animationCommands';
 // Importing the command module registers "Remove Silence…" and "Duck Under
 // Voice…"; importing the dialogs is what tells those commands how to open. The
 // three are pulled in together here so the menu entries cannot exist without a
@@ -48,6 +55,7 @@ import { InspectorRow } from '@components/Inspector';
 import '@core/audio/audioCommands';
 import { openSilenceRemovalDialog } from './SilenceRemovalDialog';
 import { openDuckingDialog } from './DuckingDialog';
+import { openGateDialog } from './GateDialog';
 import styles from './AudioControls.module.css';
 import toolStyles from './AudioToolDialog.module.css';
 
@@ -99,7 +107,14 @@ export function AudioControls({ nodeId }: { nodeId: string }): JSX.Element | nul
 
   const p = comp.props;
   const duration = num(p.__duration, 0);
-  const level = num(p.__level, 100);
+  // dB is the stored form; the percent is the legacy fallback (see the
+  // KeyframeRow below and `staticLevelDb` in audioScene).
+  const levelDb =
+    typeof p[AUDIO_LEVEL_DB_PROP] === 'number'
+      ? (p[AUDIO_LEVEL_DB_PROP] as number)
+      : percentToDb(num(p.__level, 100));
+  // Centred is the absence of the prop, not a stored 0 — see `panOf`.
+  const pan = typeof p[AUDIO_PAN_PROP] === 'number' ? (p[AUDIO_PAN_PROP] as number) : 0;
   const muted = p.__muted === true;
 
   const active = clipTimings[activeIndex];
@@ -115,6 +130,13 @@ export function AudioControls({ nodeId }: { nodeId: string }): JSX.Element | nul
   const write = (key: string, value: unknown): void => {
     defaultSceneGraph.writeProp(nodeId, comp.id, key, value);
     bumpScene();
+  };
+
+  const fadeHere = (side: FadeSide): void => {
+    runAnimEdit(side === 'in' ? 'Fade Audio In' : 'Fade Audio Out', () => {
+      applyFade(nodeId, side);
+      bumpScene();
+    });
   };
 
   // ── Timing writers ───────────────────────────────────────────────
@@ -180,12 +202,33 @@ export function AudioControls({ nodeId }: { nodeId: string }): JSX.Element | nul
         )}
       </div>
 
-      <InspectorRow label="Level" align="center">
-        <div className={styles.levelRow}>
-          <Slider value={level} min={0} max={200} onChange={(v) => write('__level', v)} aria-label="Audio level" />
-          <span className={styles.levelVal}>{Math.round(level)}%</span>
-        </div>
-      </InspectorRow>
+      {/* Level is `audioLevelDb`, keyed through the same KeyframeRow a video
+          layer's track uses — one control, one prop, one stopwatch for every
+          layer that makes a sound. The legacy `__level` percent is only read
+          (via `percentToDb`) so an older project opens at the gain it had; the
+          first edit writes dB and the percent stops being consulted. */}
+      <KeyframeRow
+        nodeId={nodeId}
+        prop={AUDIO_LEVEL_DB_PROP}
+        label="Level"
+        value={levelDb}
+        unit="dB"
+        min={MIN_LEVEL_DB}
+        max={MAX_LEVEL_DB}
+        precision={1}
+        onStatic={(v) => write(AUDIO_LEVEL_DB_PROP, v)}
+      />
+
+      <KeyframeRow
+        nodeId={nodeId}
+        prop={AUDIO_PAN_PROP}
+        label="Pan"
+        value={pan}
+        unit="%"
+        min={MIN_PAN}
+        max={MAX_PAN}
+        onStatic={(v) => write(AUDIO_PAN_PROP, v === 0 ? undefined : v)}
+      />
 
       <InspectorRow label="Mute" align="center">
         <Switch checked={muted} onChange={(e) => write('__muted', e.currentTarget.checked)} aria-label="Mute audio" />
@@ -245,6 +288,26 @@ export function AudioControls({ nodeId }: { nodeId: string }): JSX.Element | nul
         <span className={styles.hint}>cuts and levels</span>
       </div>
       <div className={toolStyles.toolButtons}>
+        {/* The fades write ordinary level keyframes (see `audioFades`), so they
+            are reshapeable in the graph editor afterwards and compose with a
+            duck rather than replacing it. Wrapped in a history entry here
+            because the command path is not the only way in. */}
+        <button
+          type="button"
+          className={toolStyles.toolButton}
+          title={`Ramp up from silence over ${DEFAULT_FADE_SEC}s from where this layer's bar starts`}
+          onClick={() => fadeHere('in')}
+        >
+          Fade in
+        </button>
+        <button
+          type="button"
+          className={toolStyles.toolButton}
+          title={`Ramp down to silence over the last ${DEFAULT_FADE_SEC}s of this layer's bar`}
+          onClick={() => fadeHere('out')}
+        >
+          Fade out
+        </button>
         <button
           type="button"
           className={toolStyles.toolButton}
@@ -260,6 +323,14 @@ export function AudioControls({ nodeId }: { nodeId: string }): JSX.Element | nul
           onClick={() => openDuckingDialog(nodeId)}
         >
           Duck under voice…
+        </button>
+        <button
+          type="button"
+          className={toolStyles.toolButton}
+          title="Pull this layer down wherever it is below a threshold — room tone, hiss"
+          onClick={() => openGateDialog(nodeId)}
+        >
+          Noise gate…
         </button>
       </div>
 

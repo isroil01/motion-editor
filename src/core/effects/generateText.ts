@@ -8,6 +8,8 @@
  * value that should be an integer).
  */
 
+import { layoutViz, bandColor, type VizLayoutOptions } from './audioVizLayout';
+
 /** Where a flare's ghosts sit, as a fraction of the centre→origin vector. */
 const GHOST_POSITIONS: readonly number[] = [-0.35, 0.25, 0.55, 0.8, 1.15, 1.45, 1.9];
 const GHOST_SIZES: readonly number[] = [0.09, 0.05, 0.13, 0.07, 0.045, 0.1, 0.06];
@@ -191,6 +193,13 @@ export function drawAudioSpectrum(
     mode: 'bars' | 'line' | 'mirrored';
     insideColor: string;
     outsideColor: string;
+  } & VizLayoutOptions & {
+    /** 0 = Side A, 1 = Side B, 2 = both. AE's Side Options. */
+    side?: number;
+    /** Feather on the bars, 0..100. */
+    softness?: number;
+    /** Degrees of hue rotation across the displayed range. */
+    hueInterpolation?: number;
   },
 ): void {
   const n = magnitudes.length;
@@ -199,9 +208,40 @@ export function drawAudioSpectrum(
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  const baseY = opts.mode === 'mirrored' ? h / 2 : h;
-  const step = w / n;
-  const barW = Math.max(1, Math.min(step * 0.9, opts.thickness));
+  /*
+    LAYOUT FIRST, drawing second.
+
+    Every bar knows where it stands and which way it grows (see
+    `audioVizLayout`), so the three layouts — a straight run, a ring, a mask
+    path — share one drawing loop instead of being three kernels. Before this
+    the spectrum could only run left-to-right across the layer, which is why
+    the ring-around-a-logo look was unreachable.
+  */
+  const samples = layoutViz(w, h, n, opts);
+  if (samples.length === 0) {
+    ctx.restore();
+    return;
+  }
+
+  // `mirrored` was the old spelling of "both sides"; it still means that.
+  const side = opts.mode === 'mirrored' ? 2 : (opts.side ?? 2);
+  const softness = Math.max(0, Math.min(100, opts.softness ?? 0));
+  const hue = opts.hueInterpolation ?? 0;
+  if (softness > 0) {
+    // Feather via shadow blur: it follows the drawn shape, unlike a filter, so
+    // it works for a bar on a circle as readily as an upright one.
+    ctx.shadowBlur = (softness / 100) * Math.max(2, opts.thickness * 2);
+  }
+
+  /*
+    Bar width from the SPACING between neighbours, not from the layer width
+    over n: on a ring or a path those are different numbers, and using the
+    layer width would leave a small circle's bars overlapping into a disc.
+  */
+  const spacing = samples.length > 1
+    ? Math.hypot(samples[1]!.x - samples[0]!.x, samples[1]!.y - samples[0]!.y)
+    : opts.thickness;
+  const barW = Math.max(1, Math.min(Math.max(1, spacing * 0.9), opts.thickness));
 
   if (opts.mode === 'line') {
     ctx.strokeStyle = opts.insideColor;
@@ -209,31 +249,47 @@ export function drawAudioSpectrum(
     ctx.lineJoin = 'round';
     ctx.beginPath();
     for (let i = 0; i < n; i++) {
-      const x = i * step + step / 2;
-      const y = baseY - magnitudes[i]! * opts.maxHeight;
+      const sp = samples[i]!;
+      const m = magnitudes[i]! * opts.maxHeight;
+      const x = sp.x + sp.nx * m;
+      const y = sp.y + sp.ny * m;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
+    // A ring's trace has to close, or it reads as a broken hoop.
+    if (opts.usePolarPath) ctx.closePath();
     ctx.stroke();
     ctx.restore();
     return;
   }
 
   for (let i = 0; i < n; i++) {
-    const m = magnitudes[i]!;
-    const x = i * step + (step - barW) / 2;
-    const barH = Math.max(0, m * opts.maxHeight);
+    const sp = samples[i]!;
+    const barH = Math.max(0, magnitudes[i]! * opts.maxHeight);
     if (barH <= 0) continue;
 
-    const g = ctx.createLinearGradient(0, baseY, 0, baseY - barH);
-    g.addColorStop(0, opts.insideColor);
-    g.addColorStop(1, opts.outsideColor);
-    ctx.fillStyle = g;
+    const near = bandColor(i, n, opts.insideColor, opts.insideColor, hue);
+    const far = bandColor(i, n, opts.outsideColor, opts.outsideColor, hue);
 
-    ctx.fillRect(x, baseY - barH, barW, barH);
-    // Mirrored draws the same bar downward from the centre line, which is the
-    // look people mean by "audio spectrum" more often than the grounded form.
-    if (opts.mode === 'mirrored') ctx.fillRect(x, baseY, barW, barH);
+    /*
+      Each bar is drawn in its OWN rotated frame, so one rectangle serves a
+      vertical bar, a radial spoke and a bar standing off a curve. Four rotated
+      corner points per bar would also have to re-derive the gradient's ends.
+    */
+    ctx.save();
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate(Math.atan2(sp.ny, sp.nx) - Math.PI / 2);
+
+    const g = ctx.createLinearGradient(0, 0, 0, -barH);
+    g.addColorStop(0, near);
+    g.addColorStop(1, far);
+    ctx.fillStyle = g;
+    if (softness > 0) ctx.shadowColor = near;
+
+    // In this frame the normal points along −y, so Side A is up.
+    if (side === 0 || side === 2) ctx.fillRect(-barW / 2, -barH, barW, barH);
+    if (side === 1 || side === 2) ctx.fillRect(-barW / 2, 0, barW, barH);
+    ctx.restore();
   }
   ctx.restore();
 }

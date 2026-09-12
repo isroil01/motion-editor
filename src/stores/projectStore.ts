@@ -13,7 +13,22 @@ import type { EnvironmentPresetId } from '@core/scene/environmentLight';
 export interface TabInfo {
   id: string; // The UI tab ID
   compositionId: string; // The root SceneNode ID for this tab
-  breadcrumbPath: string[]; // E.g. ['comp_main', 'comp_lower_third']
+  /**
+   * The Composition Navigator trail (AE): the flow path of recently active
+   * comps, downstream (containing) first — e.g. ['comp_main', 'comp_lower_third'].
+   * `compositionId` sits somewhere IN it, not necessarily last: stepping back
+   * up to a parent keeps the comps you came from on the right, so they stay
+   * one click away. See `core/composition/compNavigation`.
+   */
+  breadcrumbPath: string[];
+  /**
+   * The LAYERS the trail was walked through: `breadcrumbVia[i]` is the layer in
+   * `breadcrumbPath[i]` whose content is `breadcrumbPath[i + 1]`. Needed to map
+   * the playhead between the two comps (a precomp placed at 2s shows its own
+   * frame 0 at the parent's 2s). Absent on tabs from older documents and on
+   * tabs opened from a list, which have no layer to map through.
+   */
+  breadcrumbVia?: string[];
   /**
    * AUTHORITATIVE COPY of the playhead, refreshed only at coarse moments
    * (paused seeks, ≤4Hz during playback, pause, tab switch). The LIVE playhead
@@ -273,6 +288,12 @@ export interface ProjectStoreShape {
     // Breadcrumb drill-down
     pushBreadcrumb: (nodeId: string) => void;
     jumpToBreadcrumb: (index: number) => void;
+    /**
+     * Replace one tab's Composition Navigator trail (and the layers it was
+     * walked through). `openTab` re-activates an existing tab untouched, so
+     * navigation writes the trail it actually walked through this.
+     */
+    setBreadcrumb: (tabId: string, path: string[], via: string[]) => void;
 
     // Composition management
     updateComp: (id: string, patch: Partial<CompositionSettings>) => void;
@@ -311,7 +332,7 @@ export interface ProjectStoreShape {
 export interface SerializedWorkspaceTabs {
   tabOrder: string[];
   activeTabId: string | null;
-  tabs: Record<string, Pick<TabInfo, 'id' | 'compositionId' | 'breadcrumbPath' | 'title' | 'time' | 'frame'>>;
+  tabs: Record<string, Pick<TabInfo, 'id' | 'compositionId' | 'breadcrumbPath' | 'breadcrumbVia' | 'title' | 'time' | 'frame'>>;
 }
 
 export const DEFAULT_COMP_SETTINGS: Omit<CompositionSettings, 'id' | 'name'> = {
@@ -488,6 +509,14 @@ export const useProjectStore = create<ProjectStoreShape>()(
             }
           });
         },
+        setBreadcrumb: (tabId, path, via) => {
+          set((s) => {
+            const tab = s.tabs[tabId];
+            if (!tab) return;
+            tab.breadcrumbPath = [...path];
+            tab.breadcrumbVia = via.slice(0, Math.max(0, path.length - 1));
+          });
+        },
         updateComp: (id, patch) => {
           set((s) => {
             // Auto-create rather than drop the edit. Comp tabs are opened with a
@@ -571,6 +600,7 @@ export const useProjectStore = create<ProjectStoreShape>()(
               id: t.id,
               compositionId: t.compositionId,
               breadcrumbPath: t.breadcrumbPath.length > 0 ? [...t.breadcrumbPath] : [t.compositionId],
+              ...(t.breadcrumbVia && t.breadcrumbVia.length > 0 ? { breadcrumbVia: [...t.breadcrumbVia] } : {}),
               title: t.title,
               time: t.time,
               frame: t.frame,

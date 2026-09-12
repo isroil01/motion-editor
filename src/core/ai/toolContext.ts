@@ -35,6 +35,7 @@ import { setEntranceSeed } from './archetypes';
 import { defaultAnimation, upsertDataKeyframe, type EasingKind } from '@motion/animation';
 import { compToKeyframeTime, keyframeToCompTime } from '@core/timeline/TimelineController';
 import { flattenScene, readNodeKind } from '@core/scene/sceneDerive';
+import { readCompRef } from '@core/scene/compInstance';
 import { SCENE_KIND_PROP } from '@core/scene/seedDefaultScene';
 import { reparentNode } from '@core/scene/parenting';
 import { insertCamera, insertLight, insertAdjustmentLayer, insertParticle } from '@core/scene/sceneInsert';
@@ -43,7 +44,7 @@ import { useCompositionStore } from '@stores/compositionStore';
 import { useProjectStore } from '@stores/projectStore';
 import { updateUiComponentSvg } from '@core/library/uiKitLibrary';
 import { addEffect, updateEffect, updateEffectParam, removeEffect, getNodeEffects } from '@core/effects/effects';
-import { precomposeSelected } from '@core/scene/sceneInsert';
+import { defaultPrecompName, precomposeNow } from '@core/composition/precompose';
 import { setPrecomp } from '@core/scene/precomp';
 import { useMotionBlurStore } from '@stores/motionBlurStore';
 import type { EffectType } from '@core/effects/effects';
@@ -348,27 +349,30 @@ export function createSceneFacade(): SceneFacade {
     listEffects: (nodeId) => getNodeEffects(nodeId).map((e) => ({ id: e.id, type: e.type })),
     removeEffect: (nodeId, effectId) => removeEffect(nodeId, effectId),
 
-    // Precompose runs off the SELECTION (it is a user command), so the facade
-    // sets the selection, invokes it, and reads the resulting node back — the
-    // same shape createSceneFacade already uses for camera/light/adjustment.
+    // The same Pre-compose the user gets (Layer ▸ Pre-compose, "Move all
+    // attributes"): a REAL, reusable composition holding the layers, and a
+    // composition layer in their place. It used to build the older in-place
+    // precomp GROUP, which made the assistant's precomps a different kind of
+    // thing from everyone else's — not listed as a comp, not placeable twice.
+    // The returned id is the composition LAYER, which carries the precomp flag
+    // `set_time_remap` needs and the transform/effects/masks that apply to the
+    // whole unit.
     precompose: (nodeIds, name) => {
-      const before = new Set(flattenScene(defaultSceneGraph).map((n) => n.id));
-      useSelectionStore.getState().set([...nodeIds] as ID[]);
-      precomposeSelected();
-      const created = flattenScene(defaultSceneGraph).find(
-        (n) => !before.has(n.id) && readNodeKind(n) === 'group',
-      );
-      // `name` has a real setter on the node wrapper that writes through to the
-      // engine node (SceneGraph.ts:83). Unlike `components.push()`, this is not
-      // a discarded live-view write.
-      if (created && name) created.name = name;
-      bumpScene();
-      return created?.id ?? '';
+      const result = precomposeNow([...nodeIds], {
+        name: name || defaultPrecompName(),
+        mode: 'move',
+        adjustDuration: false,
+        openNew: false,
+      });
+      return result?.instanceId ?? '';
     },
 
     setTimeRemapEnabled: (nodeId, enabled) => {
       const node = defaultSceneGraph.getNode(nodeId as ID);
       if (!node) return false;
+      // A composition LAYER is always a precomp — its flag is what makes it
+      // render its comp at all, so it is never cleared here.
+      if (readCompRef(node)) return true;
       // `precomp` is the flag buildSnapshot checks before it will sample
       // timeRemap at all (buildSnapshot.ts:393). Without it the track exists and
       // is never read — the silent-no-op class of bug this facade exists to

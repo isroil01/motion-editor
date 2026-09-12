@@ -1391,6 +1391,57 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'displayMode', label: 'Display Mode', type: 'number', min: 0, max: 2, precision: 0, default: 0 },
       { key: 'insideColor', label: 'Inside Colour', type: 'color', default: '#00e5ff' },
       { key: 'outsideColor', label: 'Outside Colour', type: 'color', default: '#0066ff' },
+      /*
+        ── Layout ──────────────────────────────────────────────────────
+        The spectrum no longer has to run left-to-right across the layer.
+
+        POLAR is the one that matters: a spectrum wrapped around a circle,
+        radiating outward, is the single most-asked-for audio visual in motion
+        design — the ring around a logo — and until now it could not be made
+        here at all. `usePolarPath` is deliberately independent of `pathMaskId`
+        so the circle needs no mask drawn first; with a path assigned as well,
+        the path wins and polar reduces to "radiate from the path's centroid".
+      */
+      { key: 'usePolarPath', label: 'Use Polar Path', type: 'checkbox', default: false },
+      { key: 'polarRadius', label: 'Polar Radius', type: 'number', unit: 'px', min: 0, max: 4000, default: 200 },
+      { key: 'startAngle', label: 'Start Angle', type: 'number', unit: '°', min: -360, max: 360, default: -90 },
+      // The mask path to run along, resolved into `pathPoints` by buildSnapshot
+      // — the same hand-off Vegas and Write-on use.
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
+      // Start / End Point place the line when there is no path (AE's own
+      // fallback). Offsets from the layer centre, as every other generate
+      // effect here measures — absolute coordinates would default to the
+      // top-left and put the spectrum half off its own layer on the first add.
+      { key: 'startX', label: 'Start Point X', type: 'number', unit: 'px', min: -4000, max: 4000, default: -400 },
+      { key: 'startY', label: 'Start Point Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'endX', label: 'End Point X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 400 },
+      { key: 'endY', label: 'End Point Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      /*
+        ── Look ────────────────────────────────────────────────────────
+        Side Options is AE's A / B / both: which side of the path the bars
+        stand on. It subsumes the old `displayMode: 2` (mirrored), which is
+        kept working — see the kernel.
+      */
+      { key: 'side', label: 'Side Options', type: 'enum', default: 2,
+        options: [
+          { value: 0, label: 'Side A' },
+          { value: 1, label: 'Side B' },
+          { value: 2, label: 'Both Sides' },
+        ] },
+      { key: 'softness', label: 'Softness', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      // Rotate the hue across the displayed range. At 0 the two colours are
+      // interpolated as before, so an existing project is untouched.
+      { key: 'hueInterpolation', label: 'Hue Interpolation', type: 'number', unit: '°', min: 0, max: 360, default: 0 },
+      /*
+        ── Analysis window ─────────────────────────────────────────────
+        Duration is how much audio each frame looks at; a longer window is
+        steadier and less responsive. Offset shifts WHICH audio, which is how
+        you make the bars lead the picture slightly — the trick that stops a
+        visualiser feeling a frame behind the beat.
+      */
+      { key: 'audioDuration', label: 'Audio Duration', type: 'number', unit: 'ms', min: 1, max: 500, default: 43 },
+      { key: 'audioOffset', label: 'Audio Offset', type: 'number', unit: 'ms', min: -2000, max: 2000, default: 0 },
       /**
        * RESOLVED, not authored. `buildSnapshot` writes the analysed band
        * magnitudes here (see core/audio/audioSpectrum.ts) so the drawing kernel
@@ -2791,6 +2842,39 @@ export const EFFECT_DEFS: EffectDef[] = [
       { key: 'thickness', label: 'Thickness', type: 'number', unit: 'px', min: 1, max: 200, default: 3 },
       { key: 'insideColor', label: 'Inside Colour', type: 'color', default: '#7dd3fc' },
       { key: 'outsideColor', label: 'Outside Colour', type: 'color', default: '#1d4ed8' },
+      // The same layout set as Audio Spectrum, and deliberately the same KEYS:
+      // the two effects answer one question ("where does this run and how does
+      // it look"), and a user who learns it on one should not have to relearn
+      // it on the other.
+      { key: 'usePolarPath', label: 'Use Polar Path', type: 'checkbox', default: false },
+      { key: 'polarRadius', label: 'Polar Radius', type: 'number', unit: 'px', min: 0, max: 4000, default: 200 },
+      { key: 'startAngle', label: 'Start Angle', type: 'number', unit: '°', min: -360, max: 360, default: -90 },
+      { key: 'pathMaskId', label: 'Path', type: 'maskPath', default: '' },
+      { key: 'pathPoints', label: 'Path (resolved)', type: 'resolved', default: [] },
+      { key: 'startX', label: 'Start Point X', type: 'number', unit: 'px', min: -4000, max: 4000, default: -400 },
+      { key: 'startY', label: 'Start Point Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'endX', label: 'End Point X', type: 'number', unit: 'px', min: -4000, max: 4000, default: 400 },
+      { key: 'endY', label: 'End Point Y', type: 'number', unit: 'px', min: -4000, max: 4000, default: 0 },
+      { key: 'side', label: 'Side Options', type: 'enum', default: 2,
+        options: [
+          { value: 0, label: 'Side A' },
+          { value: 1, label: 'Side B' },
+          { value: 2, label: 'Both Sides' },
+        ] },
+      { key: 'softness', label: 'Softness', type: 'number', unit: '%', min: 0, max: 100, default: 0 },
+      { key: 'hueInterpolation', label: 'Hue Interpolation', type: 'number', unit: '°', min: 0, max: 360, default: 0 },
+      // How many points are drawn. AE calls it Displayed Samples; fewer reads
+      // as a chunky digital meter, more as a continuous trace.
+      { key: 'displayedSamples', label: 'Displayed Samples', type: 'number', min: 2, max: 512, precision: 0, default: 128 },
+      // Which channel is drawn. Mono sums the pair, as AE's Waveform Options do.
+      { key: 'channel', label: 'Waveform Options', type: 'enum', default: 0,
+        options: [
+          { value: 0, label: 'Mono' },
+          { value: 1, label: 'Left' },
+          { value: 2, label: 'Right' },
+        ] },
+      { key: 'audioDuration', label: 'Audio Duration', type: 'number', unit: 'ms', min: 1, max: 500, default: 43 },
+      { key: 'audioOffset', label: 'Audio Offset', type: 'number', unit: 'ms', min: -2000, max: 2000, default: 0 },
       { key: 'opacity', label: 'Opacity', type: 'number', unit: '%', min: 0, max: 100, default: 100 },
       { key: 'composite', label: 'Composite', type: 'number', min: 0, max: 4, precision: 0, default: 0 },
       // RESOLVED, like Audio Spectrum's `magnitudes`: written by `buildSnapshot`

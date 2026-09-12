@@ -137,60 +137,8 @@
   color: var(--color-primary-hover) !important;
 }
 
-.previewBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control-height-row);
-  padding: 0 12px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-2);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  transition: all var(--motion-duration-fast) var(--motion-ease-standard);
+.titleBarBtn {
   -webkit-app-region: no-drag;
-}
-
-.previewBtn:hover {
-  background: var(--color-surface-3);
-  border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
-}
-
-.previewBtn:active {
-  transform: scale(0.97);
-  background: var(--color-surface-1);
-}
-
-.exportBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control-height-row);
-  padding: 0 12px;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: var(--color-primary-foreground);
-  border: 1px solid transparent;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  transition: all var(--motion-duration-fast) var(--motion-ease-standard);
-  -webkit-app-region: no-drag;
-}
-
-.exportBtn:hover {
-  background: var(--color-primary-hover);
-}
-
-.exportBtn:active {
-  transform: scale(0.97);
-  background: var(--color-primary-active);
 }
 
 .appMenuBarWrapper {

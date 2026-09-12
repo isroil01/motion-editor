@@ -1,0 +1,87 @@
+/* AE's Composition Navigator: a bar along the top edge of the viewer. Pinned
+   to the top-left rather than centred so it never sits under Focus Mode's
+   breadcrumb pill, which owns the top centre. */
+.bar {
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(100% - 2 * var(--space-4));
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.bar::-webkit-scrollbar {
+  display: none;
+}
+
+.crumbWrap {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+/* The pixel-flow arrow between two comps. */
+.flow {
+  color: var(--color-text-muted);
+  margin: 0 1px;
+}
+
+.crumb {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard),
+    color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.crumb:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+.crumb:focus-visible {
+  outline: 2px solid var(--color-focus-ring, var(--color-selection));
+  outline-offset: -2px;
+}
+
+/* The arrow that opens the Composition Mini-Flowchart. */
+.flowchartBtn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-left: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.flowchartBtn:hover {
+  background: var(--color-hover);
+  color: var(--color-text-primary);
+}
+
+/* Downstream comps are dim in AE: none of their content is in this viewer. */
+.downstream {
+  color: var(--color-text-muted);
+}
+
+.current {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  cursor: default;
+}

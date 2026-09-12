@@ -46,6 +46,7 @@ export const TrackHeader = memo(function TrackHeader({
   onToggleVisible,
   onToggleLock,
   onToggleSolo,
+  onToggleAudio,
   onBlendModeChange,
   onMatteChange,
   onParentChange,
@@ -81,7 +82,10 @@ export const TrackHeader = memo(function TrackHeader({
   onClick: (additive: boolean) => void;
   onToggleVisible: () => void;
   onToggleLock: () => void;
-  onToggleSolo: () => void;
+  /** `exclusive` is Alt+click: AE's "turn off all other solo switches". */
+  onToggleSolo: (exclusive: boolean) => void;
+  /** Toggle this layer's AUDIO. Absent = no speaker switch. */
+  onToggleAudio?: () => void;
   onBlendModeChange?: (mode: LayerBlendMode) => void;
   onMatteChange?: (matte: any) => void;
   /** `options.preserveWorld: false` is the Alt variant — link without compensating. */
@@ -103,6 +107,7 @@ export const TrackHeader = memo(function TrackHeader({
   const hidden = track.muted === true;
   const locked = track.locked === true;
   const solo = track.solo === true;
+  const audioMuted = track.audioMuted === true;
 
   /**
    * The LAYER's span, for the In / Out / Duration columns: first clip start to
@@ -207,14 +212,34 @@ export const TrackHeader = memo(function TrackHeader({
         >
           <Icon name={hidden ? 'eye-off' : 'eye'} size="sm" />
         </button>
+        {/* AE's A/V Features column puts the speaker next to the eye. The clip
+            bar has the same glyph; both write the one prop, so a layer scrolled
+            past its bar still has a reachable audio switch. Layers that make no
+            sound get a spacer instead, so the column stays aligned. */}
+        {track.hasAudio && onToggleAudio ? (
+          <button
+            type="button"
+            className={styles.trackAction}
+            data-kind="audio"
+            data-on={!audioMuted || undefined}
+            aria-label={audioMuted ? 'Unmute layer audio' : 'Mute layer audio'}
+            aria-pressed={audioMuted}
+            title={audioMuted ? 'Unmute audio' : 'Mute audio'}
+            onClick={(e) => { e.stopPropagation(); onToggleAudio(); }}
+          >
+            <Icon name={audioMuted ? 'audio-off' : 'audio'} size="sm" />
+          </button>
+        ) : (
+          <span className={styles.trackAction} data-kind="audio" data-spacer="" aria-hidden="true" />
+        )}
         <button
           type="button"
           className={styles.trackAction}
           data-kind="solo"
           data-on={solo || undefined}
           aria-label={solo ? 'Unsolo track' : 'Solo track'}
-          title={solo ? 'Unsolo' : 'Solo'}
-          onClick={(e) => { e.stopPropagation(); onToggleSolo(); }}
+          title={solo ? 'Unsolo' : 'Alt-click to solo only this layer'}
+          onClick={(e) => { e.stopPropagation(); onToggleSolo(e.altKey); }}
         >
           <Icon name="circle" size="sm" />
         </button>

@@ -136,7 +136,8 @@ import { PresentationMode } from '@layout/Presentation/PresentationMode';
 import { openPalette } from '@stores/commandPaletteStore';
 import { focusNavigationClaimedNow } from '@core/commands/focusContext';
 import { isNativeMenuActionId } from '@layout/Menu/nativeMenuTemplate';
-import { insertAdjustmentLayer, precomposeSelected, insertPrimitive, insertSolid, deleteSelectedLayers, duplicateSelectedLayers, insert3DPrimitive } from '@core/scene/sceneInsert';
+import { insertAdjustmentLayer, insertPrimitive, insertSolid, deleteSelectedLayers, duplicateSelectedLayers, insert3DPrimitive } from '@core/scene/sceneInsert';
+import { openPrecomposeDialog } from '@layout/Composition/PrecomposeDialog';
 import { openCameraDialog, openLightDialog } from '@layout/Workspace/SceneInsertDialogs';
 import { runSceneEditDetection, type SceneEditMode } from '@core/tracking/sceneEditCommand';
 import { getWorkspaceManager } from '@core/layout/workspaceManager';
@@ -152,6 +153,8 @@ import { addEffect } from '@core/effects/effects';
 import { openCompositionSettings } from '@layout/Composition/CompositionSettingsDialog';
 import { openNewCompositionDialog } from '@layout/Composition/NewCompositionDialog';
 import { deleteComposition } from '@core/composition/compositionOps';
+import { canOpenPreviousComposition, openPreviousComposition } from '@core/composition/compNavigation';
+import { useMiniFlowchartStore } from '@stores/miniFlowchartStore';
 
 interface ProvidersProps {
   children: ReactNode;
@@ -747,7 +750,9 @@ function buildBuiltinCommands(): ReadonlyArray<Command> {
       id: BuiltinCommands.FocusWorkspace,
       label: 'Focus Workspace',
       icon: 'crosshair',
-      shortcut: { key: '`' },
+      // No default key: ` is the focus-mode chord now (below). It moved there
+      // from Tab when Tab became AE's Composition Mini-Flowchart, and ` is the
+      // key AE itself uses to maximize a panel. Rebindable in Customize.
       enabled: () => true,
       execute: () => {
         document.querySelector<HTMLElement>('[data-workspace-viewport]')?.focus();
@@ -755,20 +760,22 @@ function buildBuiltinCommands(): ReadonlyArray<Command> {
     },
     {
       /**
-       * One-key focus modes. `Tab` folds the UI down to viewport + timeline,
-       * `Shift+Tab` to the viewport alone; the same key again puts the panels
-       * back exactly as they were (`layoutStore.setFocusMode`).
+       * One-key focus modes. `` ` `` folds the UI down to viewport + timeline,
+       * `` Shift+` `` to the viewport alone; the same key again puts the panels
+       * back exactly as they were (`layoutStore.setFocusMode`). ` is AE's own
+       * maximize-panel key; these lived on Tab until Tab became AE's
+       * Composition Mini-Flowchart (`comp.miniFlowchart`).
        *
-       * `enabled` is the whole safety story: Tab moves focus inside a text
-       * field, a dialog and a menu, and the global dispatcher wins every race
-       * with a panel listener (repo rule). A DISABLED command falls through,
-       * so reporting false here is what hands Tab back to the browser there.
+       * `enabled` is the whole safety story: a text field, a dialog and a menu
+       * keep their keys, and the global dispatcher wins every race with a
+       * panel listener (repo rule). A DISABLED command falls through, so
+       * reporting false here is what hands the key back there.
        */
       id: asCommandId('view.focusMode.viewportTimeline'),
       label: 'Focus: Viewport + Timeline',
       description: 'Collapse both sidebars; press again to restore',
       icon: 'panel-bottom',
-      shortcut: { key: 'Tab' },
+      shortcut: { key: '`' },
       enabled: () => !focusNavigationClaimedNow(),
       isChecked: () => useLayoutStore.getState().focusMode === 'viewport-timeline',
       execute: () => useLayoutStore.getState().setFocusMode('viewport-timeline'),
@@ -778,7 +785,7 @@ function buildBuiltinCommands(): ReadonlyArray<Command> {
       label: 'Focus: Viewport Only',
       description: 'Collapse sidebars and timeline; press again to restore',
       icon: 'maximize',
-      shortcut: { key: 'Tab', shift: true },
+      shortcut: { key: '`', shift: true },
       enabled: () => !focusNavigationClaimedNow(),
       isChecked: () => useLayoutStore.getState().focusMode === 'viewport',
       execute: () => useLayoutStore.getState().setFocusMode('viewport'),
@@ -1443,6 +1450,30 @@ function buildProjectCommands(): ReadonlyArray<Command> {
       },
     },
     {
+      // AE's Shift+Esc: "open the most recently active composition in the same
+      // composition network" — back out of a precomp you double-clicked into,
+      // and back in again. Disabled (so the chord falls through) when there is
+      // nowhere to go.
+      id: asCommandId('comp.openPrevious'),
+      label: 'Open Previous Composition',
+      icon: 'arrow-left',
+      shortcut: { key: 'Escape', shift: true },
+      enabled: () => canOpenPreviousComposition(),
+      execute: () => { openPreviousComposition(); },
+    },
+    {
+      // AE's Tab: the Composition Mini-Flowchart — the comps just upstream and
+      // downstream of this one, to jump between. Yields Tab to text fields,
+      // dialogs and menus (a disabled command falls through); while it is
+      // open the popup claims Tab itself, so Tab again closes it.
+      id: asCommandId('comp.miniFlowchart'),
+      label: 'Composition Mini-Flowchart',
+      icon: 'layers',
+      shortcut: { key: 'Tab' },
+      enabled: () => !focusNavigationClaimedNow(),
+      execute: () => useMiniFlowchartStore.getState().toggle(),
+    },
+    {
       // AE: select a composition in the Project panel and press Delete.
       // Menu home for the same op when the Assets bin isn't focused.
       id: asCommandId('comp.delete'),
@@ -1643,7 +1674,8 @@ function buildProjectCommands(): ReadonlyArray<Command> {
       label: 'Pre-compose…',
       shortcut: { key: 'c', meta: true, shift: true },
       enabled: () => useSelectionStore.getState().count() > 0,
-      execute: () => precomposeSelected(),
+      // AE's dialog: name, Leave / Move all attributes, trim to span, open.
+      execute: () => openPrecomposeDialog(),
     },
     // ── Fit (AE's Layer ▸ Transform submenu) ──────────────────────────
     // One-shot commands that COMPUTE a size and write it, rather than a stored
@@ -2522,6 +2554,15 @@ export function Providers({ children }: ProvidersProps): JSX.Element {
             id: asCommandId('view.history'), label: 'History', icon: 'history',
             enabled: () => true,
             execute: () => useLayoutStore.getState().openPanel('history'),
+          });
+          // AE's Ctrl+4. The panel is permanent rather than on-demand, so this
+          // is a "bring it to the front" rather than a "create it" — which is
+          // also what AE's chord does to an already-docked Audio panel.
+          registry.register({
+            id: asCommandId('view.audio'), label: 'Audio', icon: 'audio',
+            shortcut: { key: '4', ctrl: true },
+            enabled: () => true,
+            execute: () => useLayoutStore.getState().openPanel('audio'),
           });
           registry.register({
             id: asCommandId('help.tour'), label: 'Take a Tour', icon: 'tour',

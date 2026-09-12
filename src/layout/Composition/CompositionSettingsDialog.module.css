@@ -1,3 +1,8 @@
+.dialogWindow {
+  width: 820px !important;
+  max-width: calc(100vw - 32px) !important;
+}
+
 .root {
   display: flex;
   flex-direction: column;
@@ -6,11 +11,11 @@
   box-sizing: border-box;
 }
 
-/* ── Top Navigation Tabs (General / Background / Grid & Guides) ─ */
+/* ── Top Navigation Tabs ─────────────────────────────────────── */
 .navTabs {
   display: flex;
   align-items: center;
-  background: color-mix(in srgb, var(--color-surface-2) 90%, #000 10%);
+  background: var(--color-surface-0);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-surface);
   padding: 3px;
@@ -23,20 +28,20 @@
   flex: 1 1 0px;
   width: 100%;
   min-width: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   height: 32px;
   padding: 0 8px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-xs);
   font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
@@ -46,35 +51,227 @@
 
 .navTab:hover:not(.navTabActive) {
   color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-surface-1);
+}
+
+.navTab:active {
+  transform: scale(0.98);
 }
 
 .navTabActive {
-  background: var(--color-primary) !important;
-  border-color: var(--color-primary) !important;
-  color: var(--color-text-on-accent) !important;
+  background: var(--color-surface-2) !important;
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent) !important;
+  color: var(--color-text-primary) !important;
   font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .tabBody {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-height: 240px;
+  min-height: 280px;
   width: 100%;
   box-sizing: border-box;
 }
 
-.section {
+/* ── 2-Column Responsive Layout (General Tab) ─────────────────── */
+.columns {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  gap: 14px;
+  width: 100%;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.leftCol {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: color-mix(in srgb, var(--color-surface-1) 70%, transparent);
+  min-width: 0;
+}
+
+.rightCol {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* ── Live Visual Preview Card ─────────────────────────────────── */
+.previewCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface-0);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-surface);
   padding: 12px 14px;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 200px;
+}
+
+.previewViewport {
+  width: 100%;
+  flex: 1;
+  min-height: 125px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.previewCanvasFrame {
+  max-width: 210px;
+  max-height: 120px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.checkerboard {
+  background-image: linear-gradient(45deg, #222228 25%, transparent 25%),
+    linear-gradient(-45deg, #222228 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #222228 75%),
+    linear-gradient(-45deg, transparent 75%, #222228 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0px;
+  background-color: #131316;
+}
+
+/* Viewfinder corner guides */
+.viewfinderGuide {
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  opacity: 0.65;
+}
+
+.viewfinderGuide::before,
+.viewfinderGuide::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+}
+
+.viewfinderGuide::before {
+  top: 0;
+  left: 0;
+  border-top: 1.5px solid rgba(255, 255, 255, 0.5);
+  border-left: 1.5px solid rgba(255, 255, 255, 0.5);
+}
+
+.viewfinderGuide::after {
+  bottom: 0;
+  right: 0;
+  border-bottom: 1.5px solid rgba(255, 255, 255, 0.5);
+  border-right: 1.5px solid rgba(255, 255, 255, 0.5);
+}
+
+.previewCenterCross {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  opacity: 0.4;
+}
+
+.previewCenterCross::before {
+  content: '';
+  position: absolute;
+  top: 3.5px;
+  left: 0;
+  width: 8px;
+  height: 1px;
+  background: #fff;
+}
+
+.previewCenterCross::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 3.5px;
+  width: 1px;
+  height: 8px;
+  background: #fff;
+}
+
+.previewMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border-subtle) 80%, transparent);
+}
+
+.previewMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.metaBadge {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-micro);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* ── Section Containers ───────────────────────────────────────── */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: color-mix(in srgb, var(--color-surface-1) 75%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-surface);
+  padding: 11px 13px;
   width: 100%;
   box-sizing: border-box;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
 .label {
@@ -83,8 +280,12 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
+/* ── Grids & Fields ───────────────────────────────────────────── */
 .row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -106,6 +307,7 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1;
 }
 
 .fieldLabel {
@@ -114,48 +316,65 @@
   color: var(--color-text-muted);
 }
 
+/* ── Dimension Controls Row (Width, Lock, Height, Swap) ───────── */
+.dimensionControlsRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.timingRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+
+/* ── Chips ────────────────────────────────────────────────────── */
 .chips {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
   margin-top: 4px;
 }
 
 .chip {
-  padding: 5px 12px;
-  border-radius: var(--radius-lg);
+  padding: 3px 9px;
+  border-radius: var(--radius-md);
   background: var(--color-surface-1);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
   color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-micro);
   font-family: var(--font-family-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: all 120ms ease;
   box-sizing: border-box;
 }
 
 .chip:hover {
   border-color: rgba(255, 255, 255, 0.22);
-  color: var(--color-text-on-accent);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
 }
 
-.chipOn {
+.chipOn,
+.chipActive {
   border-color: var(--color-primary) !important;
   color: var(--color-text-on-accent) !important;
   background: var(--color-primary) !important;
   font-weight: 600;
 }
 
-/* ── Segmented Control Tabs (Solid / Linear / Radial) ─ */
+/* ── Segmented Control ────────────────────────────────────────── */
 .segmentedControl {
   display: flex;
   background: var(--color-surface-0);
   padding: 3px;
   border-radius: var(--radius-surface);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
   gap: 3px;
   width: 100%;
   box-sizing: border-box;
@@ -168,7 +387,7 @@
   min-width: 0;
   height: 30px;
   padding: 0 8px;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-text-secondary);
@@ -176,11 +395,11 @@
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   text-align: center;
   white-space: nowrap;
   user-select: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
@@ -188,15 +407,20 @@
 }
 
 .segmentBtn:hover:not(:disabled):not(.segmentBtnActive) {
-  color: var(--color-text-on-accent);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  background: var(--color-surface-1);
+}
+
+.segmentBtn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .segmentBtnActive {
   background: var(--color-surface-2) !important;
   border-color: color-mix(in srgb, var(--color-primary) 50%, transparent) !important;
-  color: var(--color-primary-hover) !important;
+  color: var(--color-text-primary) !important;
   font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .segmentBtn:disabled {
@@ -204,16 +428,16 @@
   cursor: not-allowed;
 }
 
-/* ── Custom Select ── */
+/* ── Select Input ─────────────────────────────────────────────── */
 .selectInput {
   width: 100%;
   background: var(--color-surface-1);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
   color: var(--color-text-primary);
   font-size: var(--font-size-xs);
   font-weight: 500;
-  padding: 5px 8px;
-  border-radius: var(--radius-lg);
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   outline: none;
   transition: var(--motion-hover-transition);
@@ -228,16 +452,16 @@
   border-color: var(--color-primary);
 }
 
-/* ── Color Selector Card Rows ────────────────────────────────── */
+/* ── Color Card & Swatches ────────────────────────────────────── */
 .colorCardRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--color-surface-1);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: var(--radius-lg);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   width: 100%;
   box-sizing: border-box;
 }
@@ -248,16 +472,52 @@
   color: var(--color-text-secondary);
 }
 
+.swatchRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.colorSwatch {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: transform 100ms ease, border-color 100ms ease, box-shadow 100ms ease;
+  padding: 0;
+  position: relative;
+  outline: none;
+}
+
+.colorSwatch:hover {
+  transform: scale(1.1);
+  border-color: #fff;
+}
+
+.colorSwatchActive {
+  box-shadow: 0 0 0 2px var(--color-primary);
+  border-color: #fff !important;
+}
+
 .stopsContainer {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  background: var(--color-surface-1);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: var(--radius-lg);
+  background: var(--color-surface-0);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   width: 100%;
   box-sizing: border-box;
+}
+
+.gradientTrackPreview {
+  width: 100%;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .stopRow {
@@ -280,25 +540,45 @@
   min-width: 0;
 }
 
+/* ── Format Alpha Guide Callout ────────────────────────────────── */
+.formatCalloutCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--color-surface-0) 80%, transparent);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.formatCalloutItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.formatTagPreserved {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+/* ── Typography Helpers ───────────────────────────────────────── */
 .hint {
   margin: 0;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
-/* Responsive Time (M7) */
-.hint {
-  margin: 6px 0 10px;
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  color: var(--color-text-tertiary);
-}
 .readout {
   font-family: var(--font-family-mono);
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
-  padding: 5px 0;
+  padding: 4px 0;
 }
+
 
 

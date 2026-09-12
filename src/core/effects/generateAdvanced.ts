@@ -21,6 +21,7 @@
  * leaking it would silently change how every LATER effect in the stack draws.
  */
 
+import { layoutViz, bandColor, type VizLayoutOptions } from './audioVizLayout';
 import { clamp01 } from './colorSpace';
 
 /** `#rrggbb` → `rgba(r,g,b,a)`, so callers can set alpha without string maths. */
@@ -531,6 +532,7 @@ export function drawAudioWaveform(
   outsideColor: string,
   opacity: number,
   composite: number,
+  layout: VizLayoutOptions & { side?: number; softness?: number; hueInterpolation?: number } = {},
 ): void {
   const a = clamp01(opacity / 100);
   if (a <= 0) return;
@@ -540,45 +542,89 @@ export function drawAudioWaveform(
   // is the first thing anyone debugging this needs to see.
   if (n < 2) return;
 
-  const mid = h / 2;
   const amp = maxHeight / 2;
   const mode = Math.round(displayMode);
+  const side = layout.side ?? 2;
+  const softness = Math.max(0, Math.min(100, layout.softness ?? 0));
+  const hue = layout.hueInterpolation ?? 0;
+
+  /*
+    The SAME layout the spectrum uses, so the two effects answer "where does
+    this run" identically — a user who learns Polar Path on one does not have
+    to relearn it on the other. What differs is that a waveform is SIGNED:
+    samples swing to both sides of the path, where spectrum magnitudes only
+    ever grow outward.
+  */
+  const places = layoutViz(w, h, n, layout);
+  if (places.length === 0) return;
+
+  /*
+    Side A / B CLAMP a signed sample rather than rectifying it. AE's option
+    picks which half of the trace is drawn; folding the other half up would
+    invent a shape the audio never had.
+  */
+  const signed = (v: number): number =>
+    side === 0 ? Math.max(0, v) : side === 1 ? Math.min(0, v) : v;
 
   withComposite(oc, composite, () => {
     oc.save();
-    const g = oc.createLinearGradient(0, mid - amp, 0, mid + amp);
-    g.addColorStop(0, rgba(outsideColor, a));
-    g.addColorStop(0.5, rgba(insideColor, a));
-    g.addColorStop(1, rgba(outsideColor, a));
+    if (softness > 0) oc.shadowBlur = (softness / 100) * Math.max(2, thickness * 2);
 
     if (mode === 1) {
-      oc.fillStyle = g;
-      const bw = w / n;
+      // Digital: one stroke per sample, out from the path to the value — the
+      // look of a hardware meter, which is what AE calls Digital.
+      const spacing = places.length > 1
+        ? Math.hypot(places[1]!.x - places[0]!.x, places[1]!.y - places[0]!.y)
+        : thickness;
+      oc.lineWidth = Math.max(1, Math.min(Math.max(1, spacing * 0.8), Math.max(1, thickness)));
+      oc.lineCap = 'butt';
       for (let i = 0; i < n; i++) {
-        const v = Math.abs(samples[i] ?? 0);
-        const bh = v * amp;
-        oc.fillRect(i * bw, mid - bh, Math.max(1, bw * 0.8), bh * 2);
+        const sp = places[i]!;
+        const m = signed(samples[i] ?? 0) * amp;
+        if (m === 0) continue;
+        const color = rgba(bandColor(i, n, insideColor, outsideColor, hue), a);
+        oc.strokeStyle = color;
+        if (softness > 0) oc.shadowColor = color;
+        oc.beginPath();
+        oc.moveTo(sp.x, sp.y);
+        oc.lineTo(sp.x + sp.nx * m, sp.y + sp.ny * m);
+        oc.stroke();
       }
     } else if (mode === 2) {
-      oc.fillStyle = g;
+      // Filled envelope: out along one side, back along the other, so the
+      // shape closes as an envelope rather than as a wedge to the baseline.
+      oc.fillStyle = rgba(bandColor(0, 1, insideColor, outsideColor, hue), a);
+      if (softness > 0) oc.shadowColor = rgba(insideColor, a);
       oc.beginPath();
-      oc.moveTo(0, mid);
-      for (let i = 0; i < n; i++) oc.lineTo((i / (n - 1)) * w, mid - (samples[i] ?? 0) * amp);
-      // Back along the mirrored side, so the shape closes as an envelope
-      // rather than as a wedge down to the baseline.
-      for (let i = n - 1; i >= 0; i--) oc.lineTo((i / (n - 1)) * w, mid + (samples[i] ?? 0) * amp);
+      for (let i = 0; i < n; i++) {
+        const sp = places[i]!;
+        const m = signed(samples[i] ?? 0) * amp;
+        const x = sp.x + sp.nx * m;
+        const y = sp.y + sp.ny * m;
+        if (i === 0) oc.moveTo(x, y); else oc.lineTo(x, y);
+      }
+      for (let i = n - 1; i >= 0; i--) {
+        const sp = places[i]!;
+        const m = -signed(samples[i] ?? 0) * amp;
+        oc.lineTo(sp.x + sp.nx * m, sp.y + sp.ny * m);
+      }
       oc.closePath();
       oc.fill();
     } else {
-      oc.strokeStyle = g;
+      oc.strokeStyle = rgba(bandColor(0, 1, insideColor, outsideColor, hue), a);
+      if (softness > 0) oc.shadowColor = rgba(insideColor, a);
       oc.lineWidth = Math.max(0.5, thickness);
       oc.lineJoin = 'round';
       oc.beginPath();
       for (let i = 0; i < n; i++) {
-        const x = (i / (n - 1)) * w;
-        const y = mid - (samples[i] ?? 0) * amp;
+        const sp = places[i]!;
+        const m = signed(samples[i] ?? 0) * amp;
+        const x = sp.x + sp.nx * m;
+        const y = sp.y + sp.ny * m;
         if (i === 0) oc.moveTo(x, y); else oc.lineTo(x, y);
       }
+      // A ring's trace has to close, or it reads as a broken hoop.
+      if (layout.usePolarPath) oc.closePath();
       oc.stroke();
     }
     oc.restore();

@@ -360,6 +360,22 @@
   opacity: 0.35;
 }
 
+/* AE's LL row. Full-height and untinted, unlike the bar's own waveform: this
+   one is for reading transients, so it gets contrast rather than decoration. */
+.waveformLane {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--color-primary);
+}
+
+.waveformLaneSvg {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  opacity: 0.55;
+}
+
 .clipSelected::before {
   background: var(--color-selection);
   opacity: 1;
@@ -1491,6 +1507,28 @@
 .trackAction[data-kind="visible"][data-on] {
   color: var(--color-text-muted);
   opacity: 0.8;
+}
+
+/* Speaker. Audible is the resting state of nearly every layer, so `on` stays as
+   quiet as the eye; the MUTED state is the one worth noticing, because a silent
+   layer reads as a bug until you spot the switch that did it. */
+.trackAction[data-kind="audio"][data-on] {
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.trackAction[data-kind="audio"]:not([data-on]):not([data-spacer]) {
+  color: var(--color-warning);
+  opacity: 1;
+}
+
+/* Layers that make no sound hold the column's alignment without offering a
+   switch that would toggle nothing. */
+.trackAction[data-spacer] {
+  background: none;
+  border-color: transparent;
+  cursor: default;
+  pointer-events: none;
 }
 
 /* FX button on = blue italic, off = desaturated. */

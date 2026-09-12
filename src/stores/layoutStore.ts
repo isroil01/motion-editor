@@ -191,7 +191,7 @@ interface LayoutActions {
   setRightInspectorPosition(pos: 'left' | 'right'): void;
   setTimelinePosition(pos: 'bottom' | 'top'): void;
   /**
-   * One-key focus modes (`Tab` / `Shift+Tab`).
+   * One-key focus modes (`` ` `` / `` Shift+` ``).
    *
    * Entering a mode snapshots which regions were collapsed and collapses the
    * ones the mode hides; toggling the SAME mode again restores that snapshot;

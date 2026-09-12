@@ -20,6 +20,7 @@ import { getEventBus } from '@core/events/EventBus';
 import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
 import { getTimelineController } from '@core/timeline/TimelineController';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
+import { toggleLayerAudioMute } from '@core/audio/audioLayerSwitches';
 import { runDocumentEdit } from '@core/commands/documentEdit';
 import { useFocusContext } from '@layout/focus/useFocusContext';
 import { setNodeLabelColor } from '@core/scene/labelColor';
@@ -136,6 +137,17 @@ export function PopoutTimeline(): JSX.Element {
     });
   }, []);
 
+  // The speaker switch, shared with the docked timeline so the pop-out is not a
+  // second implementation of one prop.
+  const toggleAudioMute = useCallback((trackId: string): void => {
+    const edit = toggleLayerAudioMute(trackId);
+    if (!edit) return;
+    runDocumentEdit(edit.label, () => {
+      edit.apply();
+      bumpScene();
+    });
+  }, []);
+
   return (
     /*
       The transport rides along in this window.
@@ -164,6 +176,7 @@ export function PopoutTimeline(): JSX.Element {
       onTrackToggleVisible={(id) => toggleFlag(id, 'visible')}
       onTrackToggleLock={(id) => toggleFlag(id, 'locked')}
       onTrackToggleSolo={(id) => toggleFlag(id, 'solo')}
+      onClipMuteToggle={toggleAudioMute}
       selectedTrackIds={selectedIds}
       expandedTrackIds={expandedIds}
       onTrackToggleExpand={(id) => {

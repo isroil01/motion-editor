@@ -162,6 +162,25 @@ describe('flange and chorus', () => {
 });
 
 describe('tone', () => {
+  /**
+   * Follow a node's output chain to the end.
+   *
+   * Walking rather than indexing (`osc.out[0].out`) because the depth of this
+   * chain is an implementation detail that has already changed once: adding
+   * the five-tone support inserted a per-voice share gain between the
+   * oscillator and the level, and every test that hard-coded the depth broke
+   * without anything being wrong.
+   */
+  const tail = (from: FakeNode): FakeNode => {
+    let n = from;
+    const seen = new Set<FakeNode>([n]);
+    while (n.out[0] && !seen.has(n.out[0] as FakeNode)) {
+      n = n.out[0] as FakeNode;
+      seen.add(n);
+    }
+    return n;
+  };
+
   it('SUMS a generator in rather than filtering what arrives', () => {
     const { ctx, created } = fakeAudioContext();
     const input = fakeSource();
@@ -173,19 +192,59 @@ describe('tone', () => {
     // The input still reaches the output — a generator must not replace the
     // layer's own audio — and the oscillator joins it at the same node.
     expect(input.out).toContain(chain.node);
-    expect((osc.out[0] as FakeNode).out).toContain(chain.node);
+    expect(tail(osc)).toBe(chain.node);
   });
 
   it('converts its Level from dB, so -6 dB is about half amplitude', () => {
     const { ctx, created } = fakeAudioContext();
     connectAudioEffects(ctx, fakeSource() as unknown as AudioNode, [fx('tone', { level: -6 })]);
     const osc = created.find((n) => n.kind === 'osc')!;
-    expect(paramValue(osc.out[0] as FakeNode, 'gain')).toBeCloseTo(0.501, 3);
+    // The LEVEL gain is the last node before the summing node, whatever
+    // per-voice scaling sits between it and the oscillator.
+    expect(paramValue(ampFeeding(osc), 'gain')).toBeCloseTo(0.501, 3);
   });
+
+  /** The gain immediately before the summing node — Tone's Level. */
+  function ampFeeding(osc: FakeNode): FakeNode {
+    let n = osc;
+    let prev = osc;
+    const seen = new Set<FakeNode>([n]);
+    while (n.out[0] && !seen.has(n.out[0] as FakeNode)) {
+      prev = n;
+      n = n.out[0] as FakeNode;
+      seen.add(n);
+    }
+    return prev;
+  }
 
   it('is scheduled by the caller, not started inside the builder', () => {
     const { ctx } = fakeAudioContext();
     const chain = connectAudioEffects(ctx, fakeSource() as unknown as AudioNode, [fx('tone', {})]);
+    expect(chain.sources).toHaveLength(1);
+  });
+
+  /**
+   * Five tones make a chord, and a tone at 0 Hz is OFF — AE's own convention.
+   * The count matters beyond taste: each voice is scaled by 1/n so that adding
+   * a tone cannot silently push the layer into clipping.
+   */
+  it('builds one oscillator per sounding tone and none for the silent ones', () => {
+    const { ctx, created } = fakeAudioContext();
+    connectAudioEffects(ctx, fakeSource() as unknown as AudioNode, [
+      fx('tone', { frequency: 220, frequency2: 330, frequency3: 0, frequency4: 0, frequency5: 0 }),
+    ]);
+    expect(created.filter((n) => n.kind === 'osc')).toHaveLength(2);
+  });
+
+  it('plays a buffer, not an oscillator, for White Noise', () => {
+    const { ctx, created } = fakeAudioContext();
+    const chain = connectAudioEffects(ctx, fakeSource() as unknown as AudioNode, [
+      { ...fx('tone', { frequency: 440 }), wave: 'white-noise' as const },
+    ]);
+    expect(created.filter((n) => n.kind === 'osc')).toHaveLength(0);
+    // Still a scheduled source, so the caller starts and stops it exactly as
+    // it does an oscillator — an unstarted source renders silence into an
+    // export while the preview plays it.
     expect(chain.sources).toHaveLength(1);
   });
 });
@@ -436,6 +495,8 @@ describe('every effect is declared as well as built', () => {
   const ALL: AudioEffect['type'][] = [
     'parametric-eq', 'bass-treble', 'high-low-pass', 'delay',
     'reverb', 'flange-chorus', 'tone', 'modulator', 'stereo-mixer', 'backwards',
+    // AE 26.3's additions.
+    'compressor', 'distortion', 'de-esser',
   ];
 
   it('has a definition for every type the union allows', () => {

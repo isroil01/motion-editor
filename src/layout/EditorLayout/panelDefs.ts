@@ -124,6 +124,15 @@ export const PANEL_DEFS: readonly PanelDef[] = [
   // know about — the same argument that made `marketplace` permanent.
   { id: 'swatches',    title: 'Swatches',  icon: 'palette',     region: 'rightInspector', weight: 4.55, closable: false },
   { id: 'info',        title: 'Info & Audio', icon: 'info',     region: 'rightInspector', weight: 4.5, closable: false },
+  /**
+   * AE's Audio panel (Ctrl+4). Distinct from `info`, which MONITORS the master
+   * bus and edits nothing: this one's faders write the selected layer's level
+   * and pan, so the meter and the control that answers it finally live
+   * together. NOT `onDemand` — a mixer the user has to already know about is a
+   * mixer nobody balances against, the same argument that keeps `scopes` and
+   * `swatches` permanent.
+   */
+  { id: 'audio',       title: 'Audio',     icon: 'audio',       region: 'rightInspector', weight: 4.48, closable: false },
   // Video scopes: waveform, RGB parade, vectorscope, histogram. NOT `onDemand`
   // — an on-demand panel needs something that opens it (see
   // `onDemandPanelsReachable.test.ts`), and a measurement surface you have to

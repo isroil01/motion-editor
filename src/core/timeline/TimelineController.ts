@@ -482,6 +482,23 @@ export class TimelineController {
     return timeline.getTrack(trackId)?.layers ?? [];
   }
 
+  /**
+   * A SPECIFIC composition's timeline and its track, built on first touch —
+   * for operations on a comp the user is not looking at (Pre-compose times the
+   * new comp's clips and the instance's bar in the host). `timeline` resolves
+   * only the ACTIVE comp. Null when the comp has no settings record to build
+   * one from.
+   */
+  timelineForComp(compId: string): { timeline: Timeline; trackId: string } | null {
+    if (!this.registries.has(compId)) {
+      if (!useWorkspaceStore.getState().comps[compId]) return null;
+      this.initTimeline(compId);
+    }
+    const timeline = this.registries.get(compId);
+    const trackId = this.compositionTrackIds.get(compId);
+    return timeline && trackId ? { timeline, trackId } : null;
+  }
+
   getLayersForNode(nodeId: string): Layer[] {
     const reg = this.registryForNode(nodeId);
     if (!reg) return [];

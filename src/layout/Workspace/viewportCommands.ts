@@ -56,6 +56,8 @@ import {
   saveCameraBookmark,
 } from '@core/workspace/cameraBookmarks';
 import { useCompareStore, canCompare, COMPARE_MODE_LABEL, type CompareMode } from '@stores/compareStore';
+import { usePreviewBehaviorStore } from '@stores/previewBehaviorStore';
+import { getTimelineController } from '@core/timeline/TimelineController';
 import { useGuidesStore } from '@stores/guidesStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useUIStore } from '@stores/uiStore';
@@ -74,6 +76,10 @@ export const VIEWPORT_COMMAND_IDS = {
   goToOut: 'transport.goToOut',
   clearInOut: 'transport.clearInOut',
   audioScrub: 'transport.audioScrub',
+  previewAudioOnly: 'transport.previewAudioOnly',
+  previewAudioOnlyWorkArea: 'transport.previewAudioOnlyWorkArea',
+  includeVideo: 'transport.includeVideo',
+  includeAudio: 'transport.includeAudio',
   snapshot: 'view.snapshot',
   compareToggle: 'view.compareToggle',
   compareFlip: 'view.compareFlip',
@@ -118,6 +124,51 @@ export function transportStopChordActive(): boolean {
   if (typeof document === 'undefined') return false;
   const el = document.activeElement;
   return !!el && viewportHasFocus(el);
+}
+
+/**
+ * Start an audio-only preview, and put the picture back when it ends.
+ *
+ * The restore is the fiddly half. `includeVideo: false` is a transient mode,
+ * not a preference — leaving it set after the transport stops would freeze the
+ * viewport with no visible cause, which is the single worst way this feature
+ * could fail. So the flag is cleared on the first tick where the transport is
+ * no longer playing, however it stopped: the user hit space, the playhead ran
+ * off the end, or another command paused it. Polling rather than subscribing
+ * because the controller exposes no play-state event; the poll lives only for
+ * the duration of the preview and stops itself.
+ */
+function playAudioOnly(workAreaOnly: boolean): void {
+  const c = getTimelineController();
+  const behavior = usePreviewBehaviorStore.getState().actions;
+
+  if (workAreaOnly) {
+    const wa = c.getWorkArea();
+    if (wa) c.seekSeconds(wa.start);
+  }
+
+  behavior.setAudioOnly();
+  c.play();
+
+  const restore = (): void => {
+    behavior.reset();
+    getWorkspaceController().requestRender();
+  };
+
+  // Belt and braces: if the transport never actually started (no comp, zero
+  // duration), do not leave the viewport dark waiting for a stop that will
+  // never come.
+  if (!c.isPlaying) {
+    restore();
+    return;
+  }
+
+  const POLL_MS = 120;
+  const timer = setInterval(() => {
+    if (c.isPlaying) return;
+    clearInterval(timer);
+    restore();
+  }, POLL_MS);
 }
 
 function viewportHasFocus(el: Element): boolean {
@@ -193,6 +244,56 @@ export function buildViewportCommands(): ReadonlyArray<Command> {
       label: 'Clear In and Out',
       enabled: hasInOut,
       execute: () => clearInOut(),
+    },
+    /**
+     * AE's Numpad `.` and Alt+Numpad `.` — preview ONLY the audio.
+     *
+     * The picture is switched off for the duration (see
+     * `previewBehaviorStore`), which is what makes this useful: nothing is
+     * rendered, so nothing can fall behind, and a long comp auditions at true
+     * speed even when a frame takes half a second to draw. Stopping restores
+     * the picture, so the flag can never be left on by accident — the state
+     * that would look like a broken viewport.
+     */
+    {
+      id: asCommandId(VIEWPORT_COMMAND_IDS.previewAudioOnly),
+      label: 'Preview Only Audio',
+      description: 'Play the sound from the playhead in real time, without drawing the picture.',
+      icon: 'audio',
+      shortcut: { key: 'Numpad.' },
+      enabled: () => true,
+      execute: () => playAudioOnly(false),
+    },
+    {
+      id: asCommandId(VIEWPORT_COMMAND_IDS.previewAudioOnlyWorkArea),
+      label: 'Preview Only Audio in Work Area',
+      description: 'Play the work area’s sound in real time, without drawing the picture.',
+      icon: 'audio',
+      shortcut: { key: 'Numpad.', alt: true },
+      enabled: () => true,
+      execute: () => playAudioOnly(true),
+    },
+    {
+      id: asCommandId(VIEWPORT_COMMAND_IDS.includeVideo),
+      label: 'Include Video in Preview',
+      description: 'Draw the picture while previewing. Off is an audio-only preview.',
+      enabled: () => true,
+      isChecked: () => usePreviewBehaviorStore.getState().includeVideo,
+      execute: () => {
+        const a = usePreviewBehaviorStore.getState();
+        a.actions.setIncludeVideo(!a.includeVideo);
+      },
+    },
+    {
+      id: asCommandId(VIEWPORT_COMMAND_IDS.includeAudio),
+      label: 'Include Audio in Preview',
+      description: 'Play the composition’s sound while previewing.',
+      enabled: () => true,
+      isChecked: () => usePreviewBehaviorStore.getState().includeAudio,
+      execute: () => {
+        const a = usePreviewBehaviorStore.getState();
+        a.actions.setIncludeAudio(!a.includeAudio);
+      },
     },
     {
       id: asCommandId(VIEWPORT_COMMAND_IDS.audioScrub),

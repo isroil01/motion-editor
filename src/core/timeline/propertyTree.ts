@@ -64,7 +64,7 @@ import {
   type AnimatorParam,
   type SelectorParam,
 } from '@core/text/textAnimators';
-import { AUDIO_LEVEL_DB_PROP } from '@core/audio/audioParams';
+import { AUDIO_LEVEL_DB_PROP, AUDIO_PAN_PROP } from '@core/audio/audioParams';
 
 /**
  * The sections a layer's properties fall into, in AE's own twirl order.
@@ -162,7 +162,7 @@ export function groupForProp(prop: string, nodeId?: string): TimelineGroupKey {
   if (prop === MASK_ANIM_PROP || prop.startsWith('mask.')) return 'masks';
   if (prop.startsWith(GROUP_PLACEHOLDER_PREFIX) || prop === POSITION_PSEUDO_PROP) return 'transform';
   if (MATERIAL_PROPS.has(prop)) return 'material';
-  if (prop === AUDIO_LEVEL_DB_PROP || prop === 'audioLevel') return 'audio';
+  if (prop === AUDIO_LEVEL_DB_PROP || prop === AUDIO_PAN_PROP || prop === 'audioLevel') return 'audio';
   if (prop.startsWith('effect.')) {
     const id = prop.slice('effect.'.length).split('.')[0] ?? '';
     return styleKeyFromEffectId(id) ? 'styles' : 'effects';
@@ -489,12 +489,30 @@ function textAnimatorRows(node: SceneNode, nodeId: string): StaticPropertyRow[] 
 
 // ── Audio ───────────────────────────────────────────────────────────
 
-/** Audio Levels, for anything that makes a sound: an audio layer, or a video
- *  layer carrying its own track. */
+/**
+ * The WAVEFORM row under the Audio group — AE's `LL`.
+ *
+ * A pseudo-row, like `POSITION_PSEUDO_PROP`: it has no keyframes and no
+ * stopwatch, because a waveform is not a property, it is a picture of the
+ * source. It exists so the timeline has somewhere to draw the peaks at the
+ * layer's own time, under the level it belongs to — the clip bar can show them
+ * too, but the bar is also the drag target and cannot be made taller just to
+ * read the sound.
+ */
+export const AUDIO_WAVEFORM_ROW = '__audioWaveform';
+
+/** Audio Levels + Waveform, for anything that makes a sound: an audio layer, or
+ *  a video layer carrying its own track. */
 function audioRows(node: SceneNode, nodeId: string): StaticPropertyRow[] {
   const kind = readNodeKind(node);
   if (kind !== 'audio' && kind !== 'video') return [];
-  return [row(AUDIO_LEVEL_DB_PROP, 'audio', [AUDIO_LEVEL_DB_PROP], { nodeId })];
+  return [
+    row(AUDIO_LEVEL_DB_PROP, 'audio', [AUDIO_LEVEL_DB_PROP], { nodeId }),
+    row(AUDIO_PAN_PROP, 'audio', [AUDIO_PAN_PROP], { nodeId }),
+    // Empty `members` is what marks a row unkeyable — the stopwatch is drawn
+    // only for rows that name a real animation path, and a waveform names none.
+    row(AUDIO_WAVEFORM_ROW, 'audio', [], { nodeId, label: 'Waveform' }),
+  ];
 }
 
 // ── The tree ────────────────────────────────────────────────────────

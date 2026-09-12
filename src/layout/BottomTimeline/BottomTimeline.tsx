@@ -464,6 +464,10 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
                   const openCompTabMenu = (e: React.MouseEvent): void => {
                     e.preventDefault();
                     const compId = tab.compositionId;
+                    // A group opened in its own tab is a LAYER of another comp,
+                    // not a composition: duplicating or deleting "it" here
+                    // would act on the group inside its parent.
+                    const isGroupTab = !!defaultSceneGraph.getNode(compId)?.parent;
                     openContextMenu(e.clientX, e.clientY, [
                       {
                         id: 'settings',
@@ -474,12 +478,13 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
                           openCompositionSettings();
                         },
                       },
-                      { id: 'duplicate', label: 'Duplicate', icon: 'copy', onSelect: () => duplicateComposition(compId) },
+                      ...(isGroupTab ? [] : [
+                      { id: 'duplicate', label: 'Duplicate', icon: 'copy' as const, onSelect: () => duplicateComposition(compId) },
                       { id: 'sep', separator: true },
                       {
                         id: 'delete',
                         label: 'Delete Composition',
-                        icon: 'trash',
+                        icon: 'trash' as const,
                         danger: true,
                         onSelect: async () => {
                           const layers = Math.max(0, flattenComposition(defaultSceneGraph, compId).length - 1);
@@ -491,6 +496,7 @@ export function BottomTimeline(props: BottomTimelineProps): JSX.Element {
                           }
                         },
                       },
+                      ]),
                     ]);
                   };
                   return (

@@ -43,7 +43,6 @@ import {
   toggleSelectedSolo,
   groupSelectedLayers,
   ungroupSelected,
-  precomposeSelected,
   duplicateSelectedLayers,
   deleteSelectedLayers,
   toggleNodeVisible,
@@ -54,6 +53,8 @@ import { rigLogoForAnimation } from '@core/scene/rigLogo';
 import { reparentNode, moveNodeAdjacent, canReparent, arrangeNodes } from '@core/scene/parenting';
 import { LABEL_COLORS, readNodeLabelColor, setNodeLabelColor, nodesWithLabelColor } from '@core/scene/labelColor';
 import { deleteComposition, duplicateComposition } from '@core/composition/compositionOps';
+import { isRealComposition } from '@core/composition/compNavigation';
+import { openPrecomposeDialog } from '@layout/Composition/PrecomposeDialog';
 import { openCompositionSettings } from '@layout/Composition/CompositionSettingsDialog';
 import { openNewCompositionDialog } from '@layout/Composition/NewCompositionDialog';
 import { svgContextMenuItems } from '@layout/Inspector/svgLayerActions';
@@ -338,7 +339,9 @@ export function ScenePanel(): JSX.Element {
   const openTab = useProjectStore((s) => s.actions.openTab);
   const setActiveTab = useProjectStore((s) => s.actions.setActiveTab);
   const listedComps = useMemo(
-    () => Object.values(comps).filter((c) => !c.pristine),
+    // Scene roots only — a group opened in its own tab carries a settings
+    // record too, and would otherwise be listed here as a composition.
+    () => Object.values(comps).filter((c) => !c.pristine && isRealComposition(c.id)),
     [comps],
   );
   const activeCompId = activeTabId ? projectTabs[activeTabId]?.compositionId : undefined;
@@ -582,7 +585,7 @@ export function ScenePanel(): JSX.Element {
       { id: 'sep2', separator: true },
       { id: 'group', label: 'Group Selection', onSelect: () => groupSelectedLayers() },
       ...(isGroup ? [{ id: 'ungroup', label: 'Ungroup', onSelect: () => ungroupSelected() }] : []),
-      { id: 'precompose', label: 'Pre-compose…', onSelect: () => precomposeSelected() },
+      { id: 'precompose', label: 'Pre-compose…', onSelect: () => openPrecomposeDialog() },
       { id: 'rig-logo', label: 'Rig Logo for Animation', onSelect: () => { void rigLogoForAnimation(); } },
       ...svgContextMenuItems(id),
       ...(useSelectionStore.getState().ids.length >= 2

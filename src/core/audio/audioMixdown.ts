@@ -15,7 +15,7 @@
 import { audioEngine } from './AudioEngine';
 import { readAudioLayers } from './audioScene';
 import type { AudioLayerState } from './AudioEngine';
-import { buildParamRamp, applyRamp } from './audioParams';
+import { buildParamRamp, buildPanRamp, applyRamp, voicePanner } from './audioParams';
 import { connectAudioEffects, hasBackwards, reverseBuffer, backwardsOffset } from './audioEffects';
 
 /** Standard export sample rate — 48 kHz is what AAC/most containers expect. */
@@ -186,7 +186,12 @@ export async function mixdownBuffer(startSec: number, endSec: number, scopeRootI
       durationSec: wallDur,
       whenCtx: win.when,
     });
-    chain.node.connect(gain).connect(ctx.destination);
+    // The SAME panner decision the live engine makes (`voicePanner`), so a
+    // voice cannot pan in the preview and render centred — a divergence that
+    // would survive every visual check and only surface on headphones.
+    const panner = voicePanner(ctx, l);
+    if (panner) chain.node.connect(gain).connect(panner).connect(ctx.destination);
+    else chain.node.connect(gain).connect(ctx.destination);
 
     // The SAME curve builder the live engine uses, scheduled on the offline
     // context's clock. This is the seam where preview and export could drift
@@ -200,6 +205,13 @@ export async function mixdownBuffer(startSec: number, endSec: number, scopeRootI
       animated: l.levelAnimated === true,
     });
     applyRamp(gain.gain, ramp, win.when);
+    if (panner) {
+      applyRamp(
+        panner.pan,
+        buildPanRamp(l.nodeId, l.pan ?? 0, compStart, wallDur, { animated: l.panAnimated === true }),
+        win.when,
+      );
+    }
 
     try {
       // Mirrored when the buffer is reversed — see `backwardsOffset` for the

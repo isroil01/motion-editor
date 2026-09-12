@@ -2826,6 +2826,13 @@ export function precompNeedsIsolation(layer: RenderLayer): boolean {
   // Normally already isolated by its frame mask; this covers an instance whose
   // referenced size is unknown (no `compSizeOf`, so no frame and no mask).
   if (layer.precompScene3d) return true;
+  // A motion-blurred comp layer composites its shutter samples as ONE card —
+  // inline collapse would hand each child the container's single pose and
+  // drop the samples.
+  if (layer.motionSamples && layer.motionSamples.length > 1) return true;
+  // A 3D comp card renders its comp flat and is drawn through a perspective
+  // quad — only the isolated path has a flat offscreen to draw it from.
+  if (layer.quad3d) return true;
   if (layer.blend && layer.blend !== 'normal') return true;
   if (layer.mask && layer.mask.paths.length > 0) return true;
   if (readMatte(layer.matte) && layer.matteSourceId) return true;
@@ -2869,34 +2876,91 @@ function precompToRenderable(
   // instance has a real position, size and rotation, and the isolated path threw
   // all three away — so the moment a precomp got a blend mode, a mask, a matte
   // or an effect (the things that force isolation) it jumped back to the origin.
-  const childParent = precompChildParent(layer, parentMatrix);
+  // A 3D comp CARD (`quad3d`): its comp is drawn FLAT, in its own pixels, and
+  // the card is drawn through a perspective homography onto the projected
+  // corners (comp px) — `precomp.flat` tells CompositionPass to map the flat
+  // children onto the whole offscreen first. A degenerate quad falls back to
+  // the ordinary screen-space container.
+  const q = layer.quad3d ?? null;
+  const cardModel = q
+    ? squareToQuad([{ x: q[0], y: q[1] }, { x: q[2], y: q[3] }, { x: q[4], y: q[5] }, { x: q[6], y: q[7] }])
+    : null;
+  const childParent = cardModel ? Mat3.create() : precompChildParent(layer, parentMatrix);
   // A sealed comp with its own 3D frame: its children's 3D is in the INNER
   // world and draws through the inner camera, which carries `childParent` (see
-  // `precompCamera3d`). Anything else inherits the camera it is drawn under.
+  // `precompCamera3d`). Anything else inherits the camera it is drawn under —
+  // except a flat card's children, which are drawn in the card, not the scene.
+  // On a CARD that placement is the identity: the card offscreen holds the comp
+  // in its own pixels, and CompositionPass lifts the inner projection onto the
+  // offscreen itself — the one map that is not known until the viewport is.
   const own = layer.precompScene3d;
-  const inner = flattenLayers(layer.precompLayers!, childParent, 1, [], own ? childParent : placement3d);
+  const inner = flattenLayers(layer.precompLayers!, childParent, 1, [], own ? childParent : cardModel ? undefined : placement3d);
   const local = centerModel(layer);
-  const model = Mat3.multiply(parentMatrix, local);
+  const model = cardModel ? Mat3.multiply(parentMatrix, cardModel) : Mat3.multiply(parentMatrix, local);
+  const cardBounds = cardModel && q
+    ? (() => {
+        const pts = [0, 2, 4, 6].map((i) => Mat3.transformPoint(parentMatrix, { x: q[i]!, y: q[i + 1]! }));
+        const xs = pts.map((p) => p.x);
+        const ys = pts.map((p) => p.y);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+      })()
+    : null;
   const advBlend = advancedBlendId(layer.blend);
   return {
     id: layer.id,
     kind: 'image',
     modelMatrix: model,
-    bounds: boundsOf(model),
+    bounds: cardBounds ?? boundsOf(model),
     opacity: parentOpacity * layer.opacity,
     blend: advBlend > 0 ? 'normal' : layerBlendToGpu(layer.blend),
     ...(advBlend > 0 ? { advancedBlend: advBlend } : {}),
     ...(layer.preserveTransparency ? { preserveTransparency: true } : {}),
     ...(layer.backdropBlur && layer.backdropBlur > 0 ? { backdropBlur: layer.backdropBlur } : {}),
     ...(layer.glass ? { glass: toRenderableGlass(layer.glass) } : {}),
-    color: Color.white(),
+    color: layer.lighting
+      ? { r: layer.lighting[0], g: layer.lighting[1], b: layer.lighting[2], a: 1 }
+      : Color.white(),
     textureKey: `precomp:${layer.id}`,
     ...(layer.mask && layer.mask.paths.length > 0 ? { maskTextureKey: `mask:${layer.id}` } : {}),
     ...(matteOf(layer) ? { matte: matteOf(layer)! } : {}),
     ...(layer.isMatteSource ? { matteSource: true } : {}),
     colorMatrix: texturedColorMatrix(layer),
     effects: extractSpatialEffects(layer),
-    precomp: { renderables: inner, ...(own ? precompCamera3d(own, childParent) : {}) },
+    precomp: {
+      renderables: inner,
+      ...(own ? precompCamera3d(own, childParent) : {}),
+      ...(cardModel ? { flat: { width: layer.width, height: layer.height } } : {}),
+    },
+    // A motion-blurred comp layer: one model per shutter sample, built exactly
+    // like the still model above (`centerModel`) from the sampled world pose.
+    // CompositionPass re-expresses them against the isolated offscreen (see
+    // `prepareIsolatedPrecomp`), so each sample shifts the same card.
+    //
+    // A 3D CARD's samples are quads instead — the sub-frame perspective, built
+    // the same way its still model is. They are already the card's whole model,
+    // so CompositionPass hands them through untouched.
+    ...(layer.motionSamples && layer.motionSamples.length > 1
+      ? {
+          motionSamples: layer.motionSamples.map((s) => {
+            if (cardModel && s.quad) {
+              const sq = squareToQuad([
+                { x: s.quad[0], y: s.quad[1] }, { x: s.quad[2], y: s.quad[3] },
+                { x: s.quad[4], y: s.quad[5] }, { x: s.quad[6], y: s.quad[7] },
+              ]);
+              if (sq) return { modelMatrix: Mat3.multiply(parentMatrix, sq), opacity: parentOpacity * s.opacity };
+            }
+            const pad = rasterPadding(layer);
+            const so = quadOrigin(layer, pad);
+            const rad = (s.rotation * Math.PI) / 180;
+            const w = (layer.width + 2 * pad) * affineScale(s.scaleX);
+            const h = (layer.height + 2 * pad) * affineScale(s.scaleY);
+            const m = Mat3.multiply(Mat3.compose(s.x, s.y, rad, w, h), Mat3.translation(so.x, so.y));
+            return { modelMatrix: Mat3.multiply(parentMatrix, m), opacity: parentOpacity * s.opacity };
+          }),
+        }
+      : {}),
   };
 }
 

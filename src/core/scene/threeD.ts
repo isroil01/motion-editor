@@ -108,7 +108,18 @@ const THREE_D_CAPABLE_KINDS = new Set(['shape', 'text', 'image', 'video', 'null'
  */
 export function canBe3D(node: SceneNode): boolean {
   if (!node.components.some((c) => c.type === 'Transform')) return false;
-  return THREE_D_CAPABLE_KINDS.has(readNodeKind(node));
+  const kind = readNodeKind(node);
+  if (kind === 'comp') {
+    // A composition LAYER (AE): a SEALED one is a card — its comp renders flat
+    // and the card sits in 3D (buildPrecompContainer). A COLLAPSED one is not
+    // a layer that draws at all (its layers splice into the host), so it stays
+    // off. Read straight off the fx component (`COMP_REF_PROP` /
+    // `COMP_COLLAPSE_PROP` in compInstance.ts) to keep this module free of the
+    // compInstance import chain.
+    const fx = node.components.find((c) => c.type === 'fx')?.props as Record<string, unknown> | undefined;
+    return typeof fx?.__compRef === 'string' && fx.__compRef !== '' && fx.collapseTransforms !== true;
+  }
+  return THREE_D_CAPABLE_KINDS.has(kind);
 }
 
 /** True when the layer carries the 3D depth props (i.e. is a 3D layer). */

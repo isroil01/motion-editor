@@ -93,11 +93,13 @@ export const createPrecompDef: AiToolDef = {
   name: 'create_precomp',
   kind: 'write',
   description:
-    'Wrap layers into a nested composition and return the new precomp layer id. ' +
+    'Pre-compose layers (After Effects "Move all attributes"): they move into a NEW, reusable ' +
+    'composition, and a composition layer showing it takes their place here. Returns that ' +
+    'composition layer\'s id. The moved layers keep their ids but now live in the new composition. ' +
     'Nesting is how a piece gets complex without the tool-call count exploding: one transform on ' +
-    'the precomp moves everything inside, one opacity fades the whole group, and set_time_remap on ' +
-    'it retimes the entire subtree. Reach for this whenever you are about to apply the same ' +
-    'transform to four sibling layers.',
+    'the composition layer moves everything inside, one opacity fades the whole unit, and ' +
+    'set_time_remap on it retimes the entire composition. Reach for this whenever you are about ' +
+    'to apply the same transform to four sibling layers.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -114,10 +116,10 @@ export const setTimeRemapDef: AiToolDef = {
   name: 'set_time_remap',
   kind: 'write',
   description:
-    'Remap a precomp/group\'s internal time — speed ramps, freeze frames, reverse, stutter. ' +
-    'Each key maps a COMPOSITION time to a SOURCE time inside the layer. ' +
+    'Remap a composition layer\'s (or precomp group\'s) internal time — speed ramps, freeze frames, ' +
+    'reverse, stutter. Each key maps a COMPOSITION time to a SOURCE time inside the layer. ' +
     'Equal deltas = normal speed; a flat run = a freeze frame; decreasing source time = reverse. ' +
-    'Only valid on group/precomp layers (use create_precomp first).',
+    'Only valid on composition layers and group/precomp layers (use create_precomp first).',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

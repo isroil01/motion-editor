@@ -864,3 +864,20 @@
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
 }
+
+/* A quiet explanatory line under a settings row. Used by the Audio pane, where
+   several settings need a sentence to be usable at all (why device names can be
+   blank, why latency only applies from the next playback). */
+.rowHint {
+  margin: -2px 0 10px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-micro);
+  line-height: 1.5;
+  max-width: 52ch;
+}
+
+/* A read-only value beside a row label — reported by the system, not chosen. */
+.rowValue {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}

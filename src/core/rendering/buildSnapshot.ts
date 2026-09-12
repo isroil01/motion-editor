@@ -63,7 +63,7 @@ import { readGhostSpec } from '@core/effects/temporalGhosts';
 import { readForceMotionBlur } from '@core/effects/forceMotionBlur';
 import { readPosterizeTimeFps } from '@core/effects/posterizeTime';
 import { readNodeQuality } from '@core/effects/layerQuality';
-import { resolveAudioSpectrum } from '@core/audio/audioSpectrum';
+import { resolveAudioSpectrum, resolveAudioWaveformSamples } from '@core/audio/audioSpectrum';
 import { readNodeMaterial } from '@core/scene/material';
 import { extrusionGeometry, EXTRUSION_WALL_FALLBACK_FILL, GRADIENT_WALL_SEGMENTS, EXTRUSION_SLICE_STEP_PX, MAX_EXTRUSION_SLICES } from '@core/scene/extrusion';
 import { extrusionOutlineFor, extrusionMeshFor } from '@core/scene/extrusionMesh';
@@ -94,7 +94,7 @@ import { slotFitOf, coverUvRect } from '@core/template/mediaSlots';
 import { readSceneCamera, readSceneDof, dofBlurPx, dofIrisParams, viewCameraNode, cameraFromNode } from '@core/scene/camera3d';
 import { orthoViewOf, type CameraViewMode } from '@core/scene/cameraViewMode';
 import { planDofCocCorners, layerCornerDepths } from './dofStrips';
-import { expandCompInstances, instanceSourceOf, isCompInstanceRoot, readCompRef, readCompCollapse } from '@core/scene/compInstance';
+import { expandCompInstances, instanceSourceOf, isCompInstanceRoot, readCompRef, readCompCollapse, COMP_COLLAPSE_PROP } from '@core/scene/compInstance';
 import { applyOverridesToComponents, overriddenPropsFor, readCompOverrides, type OverrideValue } from '@core/scene/compInstanceOverrides';
 import { expandCloners, cloneOffsetOf } from '@core/scene/clonerExpand';
 import { readNodePhysics, physicsPosesAt } from '@core/simulation/physicsBodies';
@@ -251,6 +251,17 @@ export interface SnapshotComp {
    * rather than clones. Set by the renderer itself; callers never pass it.
    */
   compOverrides?: ReadonlyMap<string, OverrideValue>;
+  /**
+   * AE's LAYER PANEL: draw ONE layer — `rootId` must be it — alone, before its
+   * transform. It lands centred in the `width × height` frame (pass the layer's
+   * own size) at scale 1 with no rotation, full opacity and normal blending;
+   * its parents, its parented layers, mattes and the 3D camera do not reach
+   * it. It is drawn even outside its In/Out and with its eye off, because AE's
+   * Layer panel shows the whole source. `render: false` also drops its masks
+   * and effects (AE's "Render" checkbox). `sourceTime` pins the media frame —
+   * in LAYER time — for a panel scrubbed past the comp's own range.
+   */
+  layerView?: { id: string; render: boolean; sourceTime?: number };
 }
 
 /** Nesting cap for recursive composition rendering. */
@@ -697,7 +708,7 @@ export function buildSnapshot(
     };
   };
 
-  const nodes = expandCloners(expandCompInstances(
+  const walkNodes = expandCloners(expandCompInstances(
     graph, flattenComposition(graph, comp.rootId), comp.rootId, readCompCollapse,
     // Centre-anchors collapsed expansions so toggling Collapse never moves
     // content (see expandCompInstances' `sizeOf`).
@@ -707,6 +718,22 @@ export function buildSnapshot(
   // `applyOwnOverrides` drops them — `readBase` then died on an undefined
   // transform. A materialized node is a plain object, so the spread is safe.
   ).map(materializeForFrame).map(applyOwnOverrides), fieldOf, pathOf);
+  // LAYER PANEL (`comp.layerView`): the one layer and nothing else — not the
+  // layers parented to it — drawn with its eye on, un-soloed, and SEALED if it
+  // is a collapsed comp (a collapsed comp draws nothing of its own; its layers
+  // are spliced into the host, and the Layer panel shows the comp as a card).
+  const layerView = comp.layerView;
+  const nodes = layerView
+    ? walkNodes
+        .filter((n) => n.id === layerView.id)
+        .map((n) => ({
+          ...(n as unknown as Record<string, unknown>),
+          visible: true,
+          solo: false,
+          components: n.components.map((c) =>
+            c.type === 'fx' ? { ...c, props: { ...c.props, [COMP_COLLAPSE_PROP]: undefined } } : c),
+        }) as unknown as SceneNode)
+    : walkNodes;
   const anySolo = nodes.some((n) => n.solo === true);
 
   const rawController = getTimelineController();
@@ -828,10 +855,29 @@ export function buildSnapshot(
   // Per-layer time (E6): each layer maps comp time → its own source time
   // (stretch / reverse / freeze), so its animation is sampled at that time.
   // Default (100% / no reverse / no freeze) is identity → no behaviour change.
-  const remapOf = (id: string): (tt: number) => number => {
-    const hit = remapCache.get(id);
+  const remapOf = (id: string): (tt: number) => number => makeRemap(id, false, remapCache);
+  /**
+   * The same map, WITHOUT the frame quantisation — for motion blur.
+   *
+   * A layer's clip map answers "which source frame is this timeline frame",
+   * and it rounds, because a frame is what footage has. Shutter samples ask a
+   * different question: where was this layer 1/120 s ago. Rounded, every sample
+   * inside the frame came back as the same instant, so a moving layer with a
+   * bar (which is every layer) accumulated N copies of ONE pose and motion blur
+   * did nothing at all in the app — while the unit tests, whose scenes have no
+   * bars, blurred perfectly. The clip map is linear (`sourceFrameAt` is
+   * sourceIn + frame − start), so asking it for a fractional frame is exact;
+   * only the "is the bar live here" test still rounds.
+   */
+  const subRemapOf = (id: string): (tt: number) => number => makeRemap(id, true, subRemapCache);
+  const makeRemap = (
+    id: string,
+    subFrame: boolean,
+    cache: Map<string, (tt: number) => number>,
+  ): (tt: number) => number => {
+    const hit = cache.get(id);
     if (hit) return hit;
-    let fn = buildRemap(id);
+    let fn = buildRemap(id, subFrame);
     // Cloner cascade: a clone with a time offset plays its animation that many
     // seconds behind the source. Applied at COMP time — outside every clip map,
     // loop and precomp remap — because "this copy runs 0.3s behind" is a
@@ -843,7 +889,7 @@ export function buildSnapshot(
       const inner = fn;
       fn = (tt: number) => inner(tt - cascade);
     }
-    remapCache.set(id, fn);
+    cache.set(id, fn);
     return fn;
   };
   /** Nearest ancestor clone root's time offset, or 0. Bounded walk. */
@@ -863,7 +909,9 @@ export function buildSnapshot(
    * and allocated 2-3 fresh closures. `valuesOf` was memoized; this was missed.
    */
   const remapCache = new Map<string, (tt: number) => number>();
-  const buildRemap = (id: string): (tt: number) => number => {
+  /** The same memo for the sub-frame twin — see `subRemapOf`. */
+  const subRemapCache = new Map<string, (tt: number) => number>();
+  const buildRemap = (id: string, subFrame = false): (tt: number) => number => {
     const n = nodeById.get(id);
 
     let baseMap = (tt: number) => tt;
@@ -891,10 +939,13 @@ export function buildSnapshot(
     const clips = governingClipsOf(id);
     if (clips.length > 0) {
       baseMap = (tt: number) => {
-        const frame = Math.round(tt * fps);
+        const exact = tt * fps;
+        const frame = Math.round(exact);
         const active = clips.find((l) => l.isActiveAt(frame));
         if (active) {
-          return active.clip.sourceFrameAt(frame) / fps;
+          // WHICH bar is live is a question about frames and rounds; WHERE in
+          // the source we are does not have to (see `subRemapOf`).
+          return active.clip.sourceFrameAt(subFrame ? exact : frame) / fps;
         }
         return tt;
       };
@@ -1097,10 +1148,37 @@ export function buildSnapshot(
               bands: typeof p.bands === 'number' ? p.bands : 32,
               startFreq: typeof p.startFreq === 'number' ? p.startFreq : 40,
               endFreq: typeof p.endFreq === 'number' ? p.endFreq : 16000,
+              // Undefined rather than a default, so a project that predates
+              // these keys analyses through the original fixed-window path.
+              ...(typeof p.audioDuration === 'number' ? { durationMs: p.audioDuration } : {}),
+              ...(typeof p.audioOffset === 'number' ? { offsetMs: p.audioOffset } : {}),
             },
             layerTimeSec,
           );
           return { ...e, params: { ...p, magnitudes } };
+        })
+        /*
+          Audio Waveform's samples, resolved the same way and in the same place.
+
+          This hand-off was DOCUMENTED on the kernel and never implemented, so
+          the effect drew nothing at all: `applyAudioWaveform` read a `samples`
+          param that buildSnapshot never wrote, and the kernel's own "fewer than
+          two points" guard returned early every frame.
+        */
+        .map((e) => {
+          if (e.type !== 'audio-waveform') return e;
+          const p = paramsOf(e);
+          const samples = resolveAudioWaveformSamples(
+            {
+              sourceLayerId: typeof p.audioLayerId === 'string' ? p.audioLayerId : '',
+              count: typeof p.displayedSamples === 'number' ? p.displayedSamples : 128,
+              channel: typeof p.channel === 'number' ? p.channel : 0,
+              ...(typeof p.audioDuration === 'number' ? { durationMs: p.audioDuration } : {}),
+              ...(typeof p.audioOffset === 'number' ? { offsetMs: p.audioOffset } : {}),
+            },
+            layerTimeSec,
+          );
+          return { ...e, params: { ...p, samples } };
         });
 
     // Path-following effects (Write-on / Vegas with a mask path assigned):
@@ -1230,6 +1308,8 @@ export function buildSnapshot(
    * exactly the time its container claims to be showing.
    */
   const precompSourceTime = (groupNode: SceneNode): number => {
+    // A comp layer in the Layer panel, scrubbed past the host's range.
+    if (layerView?.sourceTime !== undefined && groupNode.id === layerView.id) return layerView.sourceTime;
     const remapped = anim.sample(groupNode.id, 'timeRemap', t) ?? anim.sample(groupNode.id, 'precompTime', t);
     return remapOf(groupNode.id)(remapped !== undefined ? remapped : t);
   };
@@ -1301,9 +1381,209 @@ export function buildSnapshot(
           ],
         }
       : authoredMask;
+    // A comp LAYER turns around its own anchor point, like every layer (AE) —
+    // the same read as an ordinary layer's (see "Anchor point (E4)" below).
+    // The renderer already places a container's children and its frame mask
+    // through `anchorX/Y`; only this emit was missing, so an anchored comp
+    // layer used to rotate around its centre while its selection outline
+    // (which applies the anchor) turned around the anchor. A plain precomp
+    // GROUP has no frame of its own to have an anchor in.
+    const instAnchor = isInstance ? readNodeAnchor(groupNode) : null;
+    const iax = instAnchor ? ((gv?.get('anchorX') as number | undefined) ?? instAnchor.x) : 0;
+    const iay = instAnchor ? ((gv?.get('anchorY') as number | undefined) ?? instAnchor.y) : 0;
+    // Motion blur on a comp LAYER (AE): the whole card smears along its own
+    // motion. Same gate as an ordinary layer (see "Force Motion Blur overrides
+    // the two OPT-INS" below): the comp switch AND the layer switch, or Force
+    // Motion Blur — and only when it actually moves. Samples are WORLD poses,
+    // because the container is drawn at top level with its world transform:
+    // the world pose now plus the layer's own animated change across the
+    // shutter, the parent chain held still (the approximation the 3D path
+    // makes too). The layers INSIDE blur on their own already — the nested
+    // pass gets `motionBlur`.
+    // A 3D comp LAYER (AE): the composition renders FLAT, as a card, and the
+    // card sits in the host's 3D space. Its placement is built exactly as an
+    // ordinary 3D layer's (`affineAt` in the layer walk: local TRS, orientation
+    // and anchor Z, under the 3D parent chain) and the card's four corners —
+    // around its anchor — are projected through the host camera. The renderer
+    // draws the flat card onto that quad through a homography (`quad3d`); the
+    // projected affine and depth sort it among the other 3D layers. A comp with
+    // its OWN 3D camera inside (`scene3d`) is a card too: its inner 3D frame
+    // renders flat into the card offscreen through its own camera, and the card
+    // carries that image into the host space (CompositionPass lifts the inner
+    // projection onto the card — see `precompScope`).
+    type Card3d = {
+      quad: [number, number, number, number, number, number, number, number];
+      matrix: readonly [number, number, number, number, number, number];
+      x: number;
+      y: number;
+      depth: number;
+    };
+    let card3d: Card3d | null = null;
+    let card3dClipped = false;
+    /** The same card at a SUB-FRAME time — one perspective quad per shutter
+     *  sample, through the camera's pose at that sample. */
+    let cardAt: ((ti: number, tc: number) => Card3d | null) | null = null;
+    /** Accepts Lights on the card: the per-quad Lambert gain, which the adapter
+     *  folds into its tint exactly as on any 3D layer the depth pass cannot
+     *  take (a card is drawn through its own offscreen, so it never can). */
+    let cardLighting: RenderLayer['lighting'] | undefined;
+    if (isInstance && refSize && gWorld && is3DEnabled(groupNode)) {
+      const d3 = readNode3D(groupNode);
+      const num = (k: string): number | undefined => gv?.get(k) as number | undefined;
+      const parent3d = parent3dOf(groupNode.id);
+      const scaleZProp = groupNode.components.find((c) => c.type === 'Transform')?.props.scaleZ;
+      // Sub-frame values. A property the container's WORLD pose already carries
+      // (x, y, rotation, scale): under a 3D parent the matrix applies the chain,
+      // so the sampled local value is the whole answer; without one the world
+      // value moves by this layer's own change across the shutter, the parent
+      // chain held still — the approximation every 3D path here makes.
+      const worldProp = (k: string, now: number, ti: number): number => {
+        if (ti === t) return now;
+        const s = anim.sample(groupNode.id, k, ti);
+        if (s === undefined) return now;
+        if (parent3d) return s;
+        const s0 = anim.sample(groupNode.id, k, t);
+        return s0 === undefined ? now : now + (s - s0);
+      };
+      /** The same, for a SCALE: a ratio, not a difference. */
+      const worldScale = (k: string, now: number, ti: number): number => {
+        if (ti === t) return now;
+        const s = anim.sample(groupNode.id, 'scale', ti) ?? anim.sample(groupNode.id, k, ti);
+        if (s === undefined) return now;
+        if (parent3d) return s;
+        const s0 = anim.sample(groupNode.id, 'scale', t) ?? anim.sample(groupNode.id, k, t);
+        return s0 === undefined || s0 === 0 ? now : now * (s / s0);
+      };
+      /** A purely 3D property (z, the X/Y rotations, orientation, depth). */
+      const ownProp = (k: string, now: number, ti: number): number =>
+        (ti === t ? now : anim.sample(groupNode.id, k, ti) ?? now);
+      const poseAt = (ti: number): Matrix4 => {
+        const L = Matrix4Math.compose({
+          position: {
+            x: worldProp('x', parent3d ? (num('x') ?? gBase.x) : gWorld.x, ti),
+            y: worldProp('y', parent3d ? (num('y') ?? gBase.y) : gWorld.y, ti),
+            z: ownProp('z', num('z') ?? d3.z, ti),
+          },
+          rotation: {
+            x: (ownProp('rotationX', num('rotationX') ?? d3.rotationX, ti)
+              + ownProp('orientationX', num('orientationX') ?? d3.orientationX, ti)) * DEG,
+            y: (ownProp('rotationY', num('rotationY') ?? d3.rotationY, ti)
+              + ownProp('orientationY', num('orientationY') ?? d3.orientationY, ti)) * DEG,
+            z: (worldProp('rotation', parent3d ? (num('rotation') ?? gBase.rotation) : gWorld.rotation, ti)
+              + ownProp('orientationZ', num('orientationZ') ?? d3.orientationZ, ti)) * DEG,
+          },
+          scale: {
+            x: worldScale('scaleX', parent3d ? (num('scaleX') ?? num('scale') ?? gBase.scaleX) : gWorld.scaleX, ti),
+            y: worldScale('scaleY', parent3d ? (num('scaleY') ?? num('scale') ?? gBase.scaleY) : gWorld.scaleY, ti),
+            z: ownProp('scaleZ', num('scaleZ') ?? (typeof scaleZProp === 'number' ? scaleZProp : 1), ti),
+          },
+          anchor: { x: 0, y: 0, z: ownProp('anchorZ', num('anchorZ') ?? d3.anchorZ, ti) },
+        });
+        return parent3d ? Matrix4Math.multiply(parent3d, L) : L;
+      };
+      /** One pose's four anchor-relative corners, projected. Null = behind the
+       *  camera, where an ordinary 3D layer draws nothing either. */
+      const cardFrom = (
+        M: Matrix4,
+        projectFn: (p: { x: number; y: number; z: number }) => Project3D.Projected,
+      ): Card3d | null => {
+        const at = (x: number, y: number): Project3D.Projected => projectFn(Matrix4Math.transformPoint(M, { x, y, z: 0 }));
+        const left = -refSize.width / 2 - iax;
+        const right = refSize.width / 2 - iax;
+        const top = -refSize.height / 2 - iay;
+        const bottom = refSize.height / 2 - iay;
+        const O = at(0, 0);
+        const pts = [at(left, top), at(right, top), at(right, bottom), at(left, bottom)];
+        if (O.clipped || pts.some((p) => p.clipped)) return null;
+        const X = at(1, 0);
+        const Y = at(0, 1);
+        return {
+          quad: [pts[0]!.x, pts[0]!.y, pts[1]!.x, pts[1]!.y, pts[2]!.x, pts[2]!.y, pts[3]!.x, pts[3]!.y],
+          matrix: [X.x - O.x, X.y - O.y, Y.x - O.x, Y.y - O.y, O.x, O.y],
+          x: O.x,
+          y: O.y,
+          depth: O.depth,
+        };
+      };
+      const M = poseAt(t);
+      card3d = cardFrom(M, project);
+      card3dClipped = card3d === null;
+      cardAt = (ti: number, tc: number): Card3d | null =>
+        cardFrom(poseAt(ti), projectAtTime ? projectAtTime(tc) : project);
+      // Accepts Lights (Material Options), as for any 3D layer: the plane
+      // normal comes from the card's world matrix, and the light gain rides the
+      // container as an RGB multiplier. Shadows do NOT: a card is composited
+      // through its own offscreen, outside both the depth pass and the
+      // projected-caster path (see EDITOR_REFERENCE).
+      if (card3d && sceneLights.length > 0) {
+        const mat = readNodeMaterial(groupNode, gv);
+        if (mat.acceptsLights) {
+          const wp = Matrix4Math.transformPoint(M, { x: 0, y: 0, z: 0 });
+          const lit = shadeLayer(planeNormalOf(M), wp, sceneLights, { ambient: mat.ambient, diffuse: mat.diffuse });
+          if (lit) cardLighting = lit;
+        }
+      }
+    }
+    let instMotion: MotionSample[] | undefined;
+    if (isInstance && gWorld && !card3dClipped) {
+      const forced = readForceMotionBlur(gFx);
+      const cfg = forced && motionBlur
+        ? { ...motionBlur, enabled: true, shutterAngle: forced.shutterAngle, samples: forced.samples, shutterPhase: forced.shutterPhase }
+        : motionBlur;
+      const optIn = forced ? true : (motionBlur?.enabled === true && readNodeMotionBlur(groupNode));
+      // A 3D card moves on SCREEN when the camera moves, exactly as an ordinary
+      // 3D layer does; a 2D one keeps the own-motion gate.
+      if (cfg && optIn && (moves(anim, groupNode.id) || (card3d !== null && cameraAnimated))) {
+        const num = (k: string): number | undefined => gv?.get(k) as number | undefined;
+        if (card3d && cardAt) {
+          // A 3D card blurs through its own PERSPECTIVE: one quad per sample,
+          // re-projected through the sub-frame camera. Affine samples would
+          // smear a rectangle along a trapezoid's path.
+          const cardFn = cardAt;
+          const seen = new Map<string, Card3d | null>();
+          const cardOf = (ti: number, tc: number): Card3d | null => {
+            const key = `${ti}|${tc}`;
+            const hit = seen.get(key);
+            if (hit !== undefined) return hit;
+            const c = cardFn(ti, tc);
+            seen.set(key, c);
+            return c;
+          };
+          const still = card3d;
+          const samples = sampleMotion(
+            anim, groupNode.id, gBase, focus?.isGhost(groupNode.id) ?? false, t, cfg, subRemapOf(groupNode.id),
+            (ti, tc) => cardOf(ti, tc)?.matrix ?? still.matrix,
+            (ti, tc) => cardOf(ti, tc)?.quad,
+          );
+          // One sample behind the camera would draw a half-built smear; the
+          // frame keeps the still card instead.
+          if (samples.length > 1 && samples.every((s) => s.quad)) instMotion = samples;
+        } else if (!card3d) {
+          const lx = num('x') ?? gBase.x;
+          const ly = num('y') ?? gBase.y;
+          const lr = num('rotation') ?? gBase.rotation;
+          const lsx = num('scale') ?? num('scaleX') ?? gBase.scaleX;
+          const lsy = num('scale') ?? num('scaleY') ?? gBase.scaleY;
+          const ratio = (v: number, of: number): number => (of !== 0 ? v / of : 1);
+          const samples = sampleMotion(
+            anim, groupNode.id, gBase, focus?.isGhost(groupNode.id) ?? false, t, cfg, subRemapOf(groupNode.id),
+          ).map((s) => ({
+            ...s,
+            x: gWorld.x + (s.x - lx),
+            y: gWorld.y + (s.y - ly),
+            rotation: gWorld.rotation + (s.rotation - lr),
+            scaleX: gWorld.scaleX * ratio(s.scaleX, lsx),
+            scaleY: gWorld.scaleY * ratio(s.scaleY, lsy),
+          }));
+          if (samples.length > 1) instMotion = samples;
+        }
+      }
+    }
     return {
       id: groupNode.id,
       kind: 'shape',
+      ...(iax !== 0 || iay !== 0 ? { anchorX: iax, anchorY: iay } : {}),
+      ...(instMotion ? { motionSamples: instMotion } : {}),
       blend: readNodeBlend(groupNode),
       ...(readNodePreserveTransparency(groupNode) ? { preserveTransparency: true } : {}),
       mask: frameMask,
@@ -1324,6 +1604,22 @@ export function buildSnapshot(
       precompLayers: inner,
       ...(scene3d ? { precompScene3d: scene3d } : {}),
       sourceTime: precompSourceTime(groupNode),
+      ...(cardLighting ? { lighting: cardLighting } : {}),
+      // A 3D card: its projected placement (see `card3d` above) replaces the
+      // 2D one — decomposed like an ordinary 3D layer's for the fallbacks.
+      ...(card3d
+        ? {
+            x: card3d.x,
+            y: card3d.y,
+            rotation: Math.atan2(card3d.matrix[1], card3d.matrix[0]) / DEG,
+            scaleX: Math.hypot(card3d.matrix[0], card3d.matrix[1]),
+            scaleY: Math.hypot(card3d.matrix[2], card3d.matrix[3]),
+            depth: card3d.depth,
+            matrix: card3d.matrix,
+            quad3d: card3d.quad,
+          }
+        : {}),
+      ...(card3dClipped ? { visible: false, opacity: 0 } : {}),
     };
   };
   const emitLayer = (l: RenderLayer, node: SceneNode): void => {
@@ -1447,6 +1743,8 @@ export function buildSnapshot(
    * another is the class of bug this file keeps re-learning.
    */
   const isLiveAt = (nodeId: string): boolean => {
+    // The Layer panel shows the whole source, In/Out or not (`layerView`).
+    if (layerView && nodeId === layerView.id) return true;
     // The GOVERNING clips, not merely this node's own.
     //
     // Groups are skipped in the layer walk below — the renderer draws their
@@ -2907,6 +3205,8 @@ export function buildSnapshot(
       paint: readNodePaint(node) ?? undefined,
       contentAwareFillSrc: contentAwareFillAt(node, remapOf(node.id)(t)) ?? undefined,
       sourceTime: (() => {
+        // A Layer panel scrubbed past the comp's range pins the frame itself.
+        if (layerView?.sourceTime !== undefined && node.id === layerView.id) return layerView.sourceTime;
         const remapped = anim.sample(node.id, 'timeRemap', t) ?? anim.sample(node.id, 'precompTime', t);
         if (remapped !== undefined) return remapOf(node.id)(remapped);
         return remapOf(node.id)(t);
@@ -3462,7 +3762,7 @@ export function buildSnapshot(
       // `blurCfg`, not `motionBlur` — otherwise the forced shutter and sample
       // count are computed above and then thrown away, and Force Motion Blur
       // becomes a switch with two controls that do nothing.
-      const samples = sampleMotion(anim, node.id, base, ghost, t, blurCfg, remapOf(node.id), matrixAt);
+      const samples = sampleMotion(anim, node.id, base, ghost, t, blurCfg, subRemapOf(node.id), matrixAt);
       if (samples.length > 1) layer.motionSamples = samples;
     }
 
@@ -4794,6 +5094,36 @@ export function buildSnapshot(
     layers.splice(0, layers.length, ...sorted);
   }
 
+  // LAYER PANEL (`comp.layerView`): keep only the layer itself — the
+  // `::shadow` / `::ext-*` / `::ch<n>` helpers a node can emit belong to the
+  // comp render — and take back off it everything the comp does TO it:
+  // placement, 3D, opacity, blending, mattes. With Render off, also the masks
+  // and effects, leaving the untouched source.
+  if (layerView) {
+    const kept = layers.filter((l) => l.id === layerView.id);
+    for (const l of kept) {
+      const m = l as unknown as Record<string, unknown>;
+      l.x = comp.width / 2;
+      l.y = comp.height / 2;
+      l.rotation = 0;
+      l.scaleX = 1;
+      l.scaleY = 1;
+      l.depth = 0;
+      l.opacity = 1;
+      l.blend = 'normal';
+      l.visible = true;
+      for (const k of [
+        'matrix', 'world3d', 'quad3d', 'anchorX', 'anchorY', 'skew', 'skewAxis', 'motionSamples',
+        'lighting', 'shade3d', 'matte', 'matteSourceId', 'isMatteSource', 'preserveTransparency',
+      ]) delete m[k];
+      if (!layerView.render) {
+        for (const k of ['effects', 'mask', 'paint', 'cornerPin', 'glass', 'backdropBlur', 'filter']) delete m[k];
+      }
+      l.contentHash = contentHashOf(l);
+    }
+    layers.splice(0, layers.length, ...kept);
+  }
+
   resolveMatteSources(layers);
 
   // 3D camera in matrix form for the GPU depth-tested path — derived from the
@@ -4901,6 +5231,10 @@ function sampleMotion(
    *  and blur nothing. The comp time is what the sub-frame CAMERA samples at —
    *  time remap retimes the layer, never the camera. */
   matrixAt?: (ti: number, tc: number) => readonly [number, number, number, number, number, number],
+  /** 3D COMPOSITION CARD only: the card's projected corners at the same two
+   *  times. The card renders through a homography, so each sample carries its
+   *  own quad; `matrixAt` stays the affine twin the travel probe measures. */
+  quadAt?: (ti: number, tc: number) => readonly [number, number, number, number, number, number, number, number] | undefined,
 ): MotionSample[] {
   const limit = cfg.adaptiveSampleLimit ?? 128;
   // Probe the shutter endpoints to size the sample count to on-screen travel.
@@ -4953,6 +5287,7 @@ function sampleMotion(
       scaleY: sc ?? anim.sample(nodeId, 'scaleY', ti) ?? base.scaleY,
       opacity: (op !== undefined ? op / 100 : base.opacity) * g,
       ...(matrixAt ? { matrix: matrixAt(ti, tc) } : {}),
+      ...(quadAt ? { quad: quadAt(ti, tc) } : {}),
     };
   });
 }
