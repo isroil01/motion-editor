@@ -77,7 +77,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * classical-only app (see the header). Retrying a 429 does not weaken that \u2014
  * it just stops a transient rate-limit from being reported as a broken one.
  */
-async function fetchModel(url, minBytes) {
+async function fetchModel(url) {
   let lastErr;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     let res;
@@ -115,7 +115,7 @@ function backoff(attempt) {
 }
 
 async function download(url, dest, minBytes) {
-  const bytes = await fetchModel(url, minBytes);
+  const bytes = await fetchModel(url);
   if (bytes.length < minBytes) throw new Error(`${url} returned ${bytes.length} bytes — too small to be the model`);
   // Write-then-rename so an interrupted download never passes haveValid().
   const tmp = `${dest}.download`;
