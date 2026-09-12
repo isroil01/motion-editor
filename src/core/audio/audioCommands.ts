@@ -1,5 +1,5 @@
 /**
- * Audio editing commands: remove silence, duck music.
+ * Audio editing commands: fade in / out, remove silence, duck music.
  *
  * Both are dialog-first — they have four parameters each and a readout that
  * only means something once the audio has been analysed, so "run it and see"
@@ -23,12 +23,19 @@ import { useSelectionStore } from '@stores/selectionStore';
 import { useUIStore } from '@stores/uiStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
 import { audioVoices } from './silenceRemoval';
+import { applyFade, DEFAULT_FADE_SEC, type FadeSide } from './audioFades';
+import { defaultAnimation } from '@motion/animation';
+import { runAnimEdit } from '@core/animation/animationCommands';
+import { bumpScene } from '@stores/sceneStore';
 
 export const REMOVE_SILENCE_COMMAND = asCommandId('audio.removeSilence');
 export const DUCK_MUSIC_COMMAND = asCommandId('audio.duckMusic');
+export const GATE_COMMAND = asCommandId('audio.gate');
+export const FADE_IN_COMMAND = asCommandId('audio.fadeIn');
+export const FADE_OUT_COMMAND = asCommandId('audio.fadeOut');
 
 /** Which dialog an opener stands for. */
-export type AudioTool = 'silence' | 'ducking';
+export type AudioTool = 'silence' | 'ducking' | 'gate';
 
 const openers = new Map<AudioTool, (nodeId: string) => void>();
 
@@ -71,7 +78,41 @@ function run(tool: AudioTool, what: string): void {
   open(nodeId);
 }
 
-/** Both commands, for `buildStaticCommands` or a direct registration. */
+/**
+ * Every SELECTED layer that has sound.
+ *
+ * The fades act on the whole selection, unlike the two dialog commands above,
+ * which need one layer to talk about. "Fade these three out" is one act and
+ * should be one undo entry.
+ */
+function selectedAudioNodeIds(): string[] {
+  const ids = useSelectionStore.getState().ids;
+  if (ids.length === 0) return [];
+  const voices = audioVoices();
+  return ids.filter(
+    (id) => defaultSceneGraph.getNode(id) !== undefined && voices.some((v) => v.nodeId === id),
+  );
+}
+
+function runFade(side: FadeSide): void {
+  const ids = selectedAudioNodeIds();
+  if (ids.length === 0) {
+    notify('Select a layer with sound first — a fade needs something to fade.');
+    return;
+  }
+  let faded = 0;
+  runAnimEdit(side === 'in' ? 'Fade Audio In' : 'Fade Audio Out', () => {
+    defaultAnimation.batch(() => {
+      for (const id of ids) if (applyFade(id, side)) faded += 1;
+    });
+    bumpScene();
+  });
+  if (faded === 0) {
+    notify('Those layers have no audible span to fade — check their bars are not zero-length.');
+  }
+}
+
+/** Every audio command, for `buildStaticCommands` or a direct registration. */
 export function buildAudioCommands(): ReadonlyArray<Command> {
   return [
     {
@@ -92,6 +133,36 @@ export function buildAudioCommands(): ReadonlyArray<Command> {
       icon: 'audio',
       enabled: () => selectedAudioNodeId() !== undefined,
       execute: () => run('ducking', 'ducking'),
+    },
+    {
+      id: GATE_COMMAND,
+      label: 'Noise Gate…',
+      description:
+        'Pull this layer down wherever it is below a threshold — room tone between phrases, '
+        + 'hiss under a take — as level keyframes you can reshape.',
+      icon: 'audio',
+      enabled: () => selectedAudioNodeId() !== undefined,
+      execute: () => run('gate', 'the noise gate'),
+    },
+    {
+      id: FADE_IN_COMMAND,
+      label: 'Fade In',
+      description:
+        `Ramp this layer up from silence over ${DEFAULT_FADE_SEC}s from where its bar starts, `
+        + 'as ordinary level keyframes you can reshape in the graph editor.',
+      icon: 'audio',
+      enabled: () => selectedAudioNodeIds().length > 0,
+      execute: () => runFade('in'),
+    },
+    {
+      id: FADE_OUT_COMMAND,
+      label: 'Fade Out',
+      description:
+        `Ramp this layer down to silence over the last ${DEFAULT_FADE_SEC}s of its bar, `
+        + 'as ordinary level keyframes you can reshape in the graph editor.',
+      icon: 'audio',
+      enabled: () => selectedAudioNodeIds().length > 0,
+      execute: () => runFade('out'),
     },
   ];
 }

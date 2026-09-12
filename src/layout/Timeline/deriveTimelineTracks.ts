@@ -8,7 +8,7 @@
 
 import type { TimelineTrack, TimelinePropertyTrack, TimelineClip, TimelineKeyframeRef } from './TimelineModel';
 import type { TrackId, KeyId, NodeId } from '@app-types/common';
-import { VIDEO_AUDIO_MUTED_PROP } from '@core/audio/audioScene';
+import { VIDEO_AUDIO_MUTED_PROP, videoHasAudioTrack } from '@core/audio/audioScene';
 import { getNodeBlend } from '@core/effects/blendMode';
 import { getNodeMatte } from '@core/effects/matte';
 import { readNodeFxEnabled } from '@core/effects/effects';
@@ -125,6 +125,9 @@ export function deriveTimelineTracks(args: DeriveTimelineTracksArgs): TimelineTr
         color: (node as { color?: string }).color ?? KIND_COLOR[kind],
         muted: node.visible === false,
         audioMuted: isLayerAudioMuted(node),
+        // `videoHasAudioTrack` returns null while the probe is still running;
+        // treat unknown as "might" so the switch does not pop in late.
+        hasAudio: kind === 'audio' || (kind === 'video' && videoHasAudioTrack(node) !== false),
         locked: node.locked === true,
         solo: node.solo === true,
         blendMode: getNodeBlend(node.id),

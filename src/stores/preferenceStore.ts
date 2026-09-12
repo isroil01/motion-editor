@@ -215,6 +215,19 @@ export interface Preferences {
   timelineSnap: boolean;
   /** Row height, px — the three presets (28 / 36 / 46) or a dragged value. */
   timelineRowHeight: number;
+  /**
+   * AE ▸ Preferences ▸ General ▸ "Opening Layers with Double-click". What a
+   * double-click on a FOOTAGE layer (video, image, vector, solid) opens: the
+   * Layer panel — the layer alone, before its transform — or its source
+   * footage in the Footage viewer. AE's default is the Layer panel.
+   */
+  footageLayerOpens: 'layer' | 'source';
+  /**
+   * The same preference for a COMPOSITION layer: open the nested composition
+   * (AE's default) or show the layer in the Layer panel. Alt+double-click
+   * always does the other one.
+   */
+  compLayerOpens: 'nested' | 'layer';
   /** Which of the optional In / Out / Duration / Stretch columns are shown. */
   timelineExtraColumns: string[];
   /**
@@ -282,6 +295,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   timelineFollowMode: 'page',
   timelineSnap: true,
   timelineRowHeight: 28,
+  footageLayerOpens: 'layer',
+  compLayerOpens: 'nested',
   timelineExtraColumns: [],
   timelineSwitchesOnHover: true,
 };

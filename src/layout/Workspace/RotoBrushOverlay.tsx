@@ -42,8 +42,15 @@ import { useSceneRevisionFrame } from '@hooks/useSceneRevisionFrame';
 import { useRotoBrushStore, type RotoStroke } from '@stores/rotoBrushStore';
 import { getWorkspaceController } from '@core/workspace/WorkspaceController';
 import { segmentStrokesToMask } from '@core/workspace/rotoBrushTool';
+import { isDescendantOf } from '@core/composition/compNavigation';
+import { openLayerOnDoubleClick } from '@layout/LayerViewer/openLayer';
 import { layerScreenMapping } from './layerScreen';
 import styles from './RotoBrushOverlay.module.css';
+
+/** How long a click waits for its second press (Windows' default is 500 ms). */
+const DOUBLE_CLICK_MS = 350;
+/** How far the second press may land from the first and still pair with it. */
+const DOUBLE_CLICK_SLOP_PX = 6;
 
 export function RotoBrushOverlay(): JSX.Element | null {
   const activeTool = useUIStore((s) => s.activeTool);
@@ -88,12 +95,9 @@ export function RotoBrushOverlay(): JSX.Element | null {
     [mapping],
   );
 
-  const finishStroke = useCallback(() => {
-    if (!paintingRef.current) return;
-    paintingRef.current = false;
+  const segmentNow = useCallback(() => {
+    if (!nodeId) return;
     const store = useRotoBrushStore.getState();
-    const done = store.end();
-    if (!done || !nodeId) return;
     // Re-segment from the WHOLE set, not the one stroke just painted — a
     // background stroke only means anything relative to the foreground ones.
     store.setBusy(true);
@@ -113,6 +117,71 @@ export function RotoBrushOverlay(): JSX.Element | null {
       })
       .finally(() => useRotoBrushStore.getState().setBusy(false));
   }, [nodeId, time]);
+
+  /**
+   * A CLICK (a press that never dragged) waits out the double-click interval
+   * before it segments: a second press on the layer inside it makes the pair a
+   * double-click, which — as in After Effects, where the Roto Brush works in
+   * the Layer panel — opens the layer there instead, taking the click back.
+   */
+  const pendingClickRef = useRef<{ timer: number; strokeId: string; x: number; y: number } | null>(null);
+  const flushPendingClick = useCallback((): void => {
+    const pending = pendingClickRef.current;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingClickRef.current = null;
+    segmentNow();
+  }, [segmentNow]);
+  useEffect(() => () => {
+    if (pendingClickRef.current) window.clearTimeout(pendingClickRef.current.timer);
+    pendingClickRef.current = null;
+  }, [active, nodeId]);
+
+  const finishStroke = useCallback((e?: { clientX: number; clientY: number }) => {
+    if (!paintingRef.current) return;
+    paintingRef.current = false;
+    const store = useRotoBrushStore.getState();
+    const done = store.end();
+    if (!done || !nodeId) return;
+    if (done.points.length < 2 && e) {
+      pendingClickRef.current = {
+        strokeId: done.id,
+        x: e.clientX,
+        y: e.clientY,
+        timer: window.setTimeout(() => {
+          pendingClickRef.current = null;
+          segmentNow();
+        }, DOUBLE_CLICK_MS),
+      };
+      return;
+    }
+    segmentNow();
+  }, [nodeId, segmentNow]);
+
+  /** A second press close to a pending click: open the layer, if it is under it. */
+  const takeDoubleClick = (e: React.PointerEvent<HTMLDivElement>): boolean => {
+    const pending = pendingClickRef.current;
+    if (!pending || !nodeId) return false;
+    if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) > DOUBLE_CLICK_SLOP_PX) {
+      flushPendingClick();
+      return false;
+    }
+    const r = rootRef.current?.getBoundingClientRect();
+    const hit = r ? getWorkspaceController().ws.hitTestScreen({ x: e.clientX - r.left, y: e.clientY - r.top }) : null;
+    if (!hit || !(hit.id === nodeId || isDescendantOf(hit.id, nodeId))) {
+      flushPendingClick();
+      return false;
+    }
+    window.clearTimeout(pending.timer);
+    pendingClickRef.current = null;
+    if (!openLayerOnDoubleClick(nodeId, { alt: e.altKey })) {
+      // Nothing opened: the click was a click after all.
+      segmentNow();
+      return false;
+    }
+    useRotoBrushStore.getState().removeStroke(pending.strokeId);
+    return true;
+  };
 
   // A pointer-up outside the stage still ends the stroke; without this a drag
   // released over the timeline left the brush "down" forever.
@@ -148,6 +217,12 @@ export function RotoBrushOverlay(): JSX.Element | null {
       data-roto-overlay=""
       onPointerDown={(e) => {
         if (e.button !== 0 || !nodeId || busy) return;
+        if (takeDoubleClick(e)) {
+          e.preventDefault();
+          return;
+        }
+        // A flushed click is segmenting now; this press waits, as any does.
+        if (useRotoBrushStore.getState().busy) return;
         const p = toLocal(e.clientX, e.clientY);
         if (!p) return;
         e.preventDefault();
@@ -162,7 +237,7 @@ export function RotoBrushOverlay(): JSX.Element | null {
         const p = toLocal(e.clientX, e.clientY);
         if (p) useRotoBrushStore.getState().extend(p);
       }}
-      onPointerUp={finishStroke}
+      onPointerUp={(e) => finishStroke(e)}
     >
       <svg className={styles.svg} aria-hidden="true">
         {all.map((s) => {

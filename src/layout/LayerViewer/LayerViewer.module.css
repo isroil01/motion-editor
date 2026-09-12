@@ -1,0 +1,330 @@
+.root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-panel);
+}
+
+.header,
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.footer {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 0;
+}
+
+.title {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.renderToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.renderToggle input {
+  accent-color: var(--color-selection);
+}
+
+/* The transparency grid the layer sits on — a Layer panel shows the layer's
+   own pixels, never a comp background. */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    repeating-conic-gradient(var(--color-surface-2) 0 25%, var(--color-panel) 0 50%) 0 0 / 16px 16px;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.frame {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.mask {
+  fill: none;
+  stroke: var(--color-warning);
+  stroke-width: 1.5;
+}
+
+.anchor {
+  fill: none;
+  stroke: var(--color-selection);
+  stroke-width: 1.5;
+}
+
+/* ── Mask tools + editor ─────────────────────────────────────────── */
+
+.header {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
+.maskControls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.modeSelect {
+  height: var(--control-height-sm, 24px);
+  padding: 0 var(--space-1);
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.hintText {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.maskEditor {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  touch-action: none;
+}
+
+.maskEditorDraw {
+  cursor: crosshair;
+}
+
+.mask {
+  pointer-events: none;
+}
+
+.maskHit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 10;
+  pointer-events: stroke;
+  cursor: move;
+}
+
+.maskPicked {
+  stroke: var(--color-selection);
+  stroke-width: 2;
+}
+
+.maskDraft {
+  fill: none;
+  stroke: var(--color-selection);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.vertex {
+  fill: var(--color-panel);
+  stroke: var(--color-warning);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.vertexOn {
+  fill: var(--color-selection);
+  stroke: var(--color-selection);
+}
+
+.handle {
+  fill: var(--color-panel);
+  stroke: var(--color-selection);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.handleLine {
+  stroke: var(--color-selection);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* ── Paint + Roto Brush ──────────────────────────────────────────── */
+
+.paintSurface {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.paintLive {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.paintLiveErase {
+  stroke: var(--color-text-primary);
+  stroke-opacity: 0.45;
+  stroke-dasharray: 6 4;
+}
+
+.rotoHalo {
+  fill: none;
+  stroke: var(--color-panel);
+  stroke-opacity: 0.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.rotoFg,
+.rotoBg {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-opacity: 0.75;
+  pointer-events: none;
+}
+
+.rotoFg {
+  stroke: var(--color-selection);
+}
+
+.rotoBg {
+  stroke: var(--color-danger);
+}
+
+.cloneMark {
+  fill: none;
+  stroke: var(--color-warning);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.paintStatus {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.timecode {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.readout {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.ruler {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-2);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.range {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: var(--radius-xs, 2px);
+  background: color-mix(in srgb, var(--color-selection) 35%, transparent);
+  pointer-events: none;
+}
+
+.bracket {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  margin-left: -4px;
+  cursor: ew-resize;
+}
+
+.bracket::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: var(--color-selection);
+}
+
+.playhead {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--color-danger);
+  pointer-events: none;
+}

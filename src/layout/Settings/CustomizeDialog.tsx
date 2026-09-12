@@ -41,10 +41,11 @@ import { AiSettingsSection } from './AiSettingsSection';
 import { UpdatesControl } from './UpdatesControl';
 import { ObjectMatteControl } from './ObjectMatteControl';
 import { FilesTab } from './FilesTab';
+import { AudioHardwareSection } from './AudioHardwareSection';
 import { aiEnabled } from '@core/config/edition';
 import styles from './CustomizeDialog.module.css';
 
-type Tab = 'shortcuts' | 'tabs' | 'appearance' | 'files' | 'ai';
+type Tab = 'shortcuts' | 'tabs' | 'appearance' | 'audio' | 'files' | 'ai';
 
 /** Modifier-only keydowns aren't a chord — keep listening until a real key. */
 function isModifierKey(key: string): boolean {
@@ -453,6 +454,8 @@ function AppearanceTab(): JSX.Element {
   const buttonSize = usePreferenceStore((s) => s.buttonSize ?? 'md');
   const iconSize = usePreferenceStore((s) => s.iconSize ?? 'md');
   const density = usePreferenceStore((s) => s.density ?? 'default');
+  const footageLayerOpens = usePreferenceStore((s) => s.footageLayerOpens ?? 'layer');
+  const compLayerOpens = usePreferenceStore((s) => s.compLayerOpens ?? 'nested');
   const highContrast = usePreferenceStore((s) => s.highContrast);
   const reduceMotion = usePreferenceStore((s) => s.editorReduceMotion);
   const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
@@ -790,6 +793,69 @@ function AppearanceTab(): JSX.Element {
 
       <div className={styles.sectionGroup}>
         <div className={styles.sectionHeading}>
+          <span className={styles.sectionTitle}>Opening Layers with Double-Click</span>
+          <span className={styles.hint}>What a double-click on a layer opens, as in After Effects. Alt+double-click opens the other one.</span>
+        </div>
+
+        <div className={styles.settingCard}>
+          <div className={styles.settingRow}>
+            <div className={styles.settingInfo}>
+              <span className={styles.settingTitle}>Footage Layer Opens</span>
+              <span className={styles.settingDesc}>Video, image, vector and solid layers. With a paint or Roto tool it is always the Layer panel.</span>
+            </div>
+            <div className={styles.segmented} role="radiogroup" aria-label="Footage layer opens">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={footageLayerOpens === 'layer'}
+                className={cn(styles.segItem, footageLayerOpens === 'layer' && styles.segItemActive)}
+                onClick={() => setPref('footageLayerOpens', 'layer')}
+              >
+                Layer Panel
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={footageLayerOpens === 'source'}
+                className={cn(styles.segItem, footageLayerOpens === 'source' && styles.segItemActive)}
+                onClick={() => setPref('footageLayerOpens', 'source')}
+              >
+                Source Footage
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.settingRow}>
+            <div className={styles.settingInfo}>
+              <span className={styles.settingTitle}>Composition Layer Opens</span>
+              <span className={styles.settingDesc}>A composition placed as a layer (a pre-comp).</span>
+            </div>
+            <div className={styles.segmented} role="radiogroup" aria-label="Composition layer opens">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={compLayerOpens === 'nested'}
+                className={cn(styles.segItem, compLayerOpens === 'nested' && styles.segItemActive)}
+                onClick={() => setPref('compLayerOpens', 'nested')}
+              >
+                Nested Composition
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={compLayerOpens === 'layer'}
+                className={cn(styles.segItem, compLayerOpens === 'layer' && styles.segItemActive)}
+                onClick={() => setPref('compLayerOpens', 'layer')}
+              >
+                Layer Panel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.sectionGroup}>
+        <div className={styles.sectionHeading}>
           <span className={styles.sectionTitle}>Editor Behaviors & Safeguards</span>
           <span className={styles.hint}>Animation automation, motion comfort, and safety prompts.</span>
         </div>
@@ -899,6 +965,10 @@ function tabsForEdition(): ReadonlyArray<{ id: Tab; label: string; icon: IconNam
     { id: 'shortcuts', label: 'Shortcuts', icon: 'keyboard' as IconName },
     { id: 'tabs', label: 'Workspaces', icon: 'layout' as IconName },
     { id: 'appearance', label: 'Appearance', icon: 'palette' as IconName },
+    // AE's Preferences ▸ Audio Hardware. Its own pane rather than a section of
+    // Appearance: nothing in it is about how the app looks, and a monitoring
+    // device buried under "Appearance" is a device nobody finds.
+    { id: 'audio', label: 'Audio', icon: 'audio' as IconName },
     { id: 'files', label: 'Files', icon: 'folder' as IconName },
     ...(aiEnabled() ? [{ id: 'ai' as const, label: 'AI Engine', icon: 'ai' as IconName }] : []),
   ];
@@ -1008,6 +1078,8 @@ function Customize({ initialTab = 'shortcuts' }: { initialTab?: Tab }): JSX.Elem
           <ShortcutsTab />
         ) : tab === 'tabs' ? (
           <WorkspacesTab />
+        ) : tab === 'audio' ? (
+          <AudioHardwareSection />
         ) : tab === 'files' ? (
           <FilesTab />
         ) : tab === 'ai' ? (

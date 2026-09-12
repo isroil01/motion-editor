@@ -111,6 +111,19 @@ export interface AudioSpectrumRequest {
   bands: number;
   startFreq: number;
   endFreq: number;
+  /**
+   * How much audio each frame looks at, ms. Longer is steadier and less
+   * responsive — the trade every meter makes. Rounded UP to a power of two
+   * because that is what the FFT needs; omitted means the previous fixed
+   * window, so existing projects analyse exactly as they did.
+   */
+  durationMs?: number;
+  /**
+   * Shift WHICH audio, ms. Negative looks ahead, which is how a visualiser is
+   * made to land ON the beat rather than a frame behind it — the picture is
+   * always one frame of latency later than the sound that caused it.
+   */
+  offsetMs?: number;
 }
 
 /** Test seam, mirroring `__setWaveProviderForTest` in audioWaveformGen. */
@@ -146,12 +159,21 @@ export function resolveAudioSpectrum(
   // and the reason a trimmed or moved audio layer analyses the right moment.
   const timings = readAudioClipTimings(cfg.sourceLayerId);
   const at = timings.find((t) => timeSec >= t.startSec && timeSec < t.startSec + (t.outSec - t.inSec)) ?? timings[0];
-  const localT = at ? at.inSec + (timeSec - at.startSec) : timeSec;
+  // The offset shifts which moment is analysed, before the range check — so
+  // looking ahead past the end of the clip reads as silence rather than as the
+  // last window held.
+  const offsetSec = (cfg.offsetMs ?? 0) / 1000;
+  const localT = (at ? at.inSec + (timeSec - at.startSec) : timeSec) + offsetSec;
   if (localT < 0 || localT > buffer.duration) return silent();
 
   const channel = buffer.getChannelData(0);
   const start = Math.max(0, Math.min(channel.length - 1, Math.floor(localT * buffer.sampleRate)));
-  const window = channel.subarray(start, Math.min(channel.length, start + SPECTRUM_FFT_SIZE));
+  // A power of two at or above the requested duration: the FFT needs one, and
+  // rounding UP means the window is never shorter than asked for.
+  const wanted = cfg.durationMs !== undefined
+    ? Math.max(64, Math.min(16384, 2 ** Math.ceil(Math.log2(Math.max(1, (cfg.durationMs / 1000) * buffer.sampleRate)))))
+    : SPECTRUM_FFT_SIZE;
+  const window = channel.subarray(start, Math.min(channel.length, start + wanted));
   if (window.length === 0) return silent();
 
   return spectrumBands(
@@ -161,4 +183,90 @@ export function resolveAudioSpectrum(
     cfg.startFreq,
     cfg.endFreq,
   );
+}
+
+// ── Audio Waveform (the EFFECT) ──────────────────────────────────────
+
+/** Config for {@link resolveAudioWaveformSamples}. Mirrors the effect's params. */
+export interface AudioWaveformSamplesRequest {
+  sourceLayerId: string;
+  /** How many points to draw. AE calls it Displayed Samples. */
+  count: number;
+  /** 0 = Mono (the channels summed), 1 = Left, 2 = Right. */
+  channel?: number;
+  /** How much audio one frame spans, ms. */
+  durationMs?: number;
+  /** Shift which audio is read, ms. Negative looks ahead. */
+  offsetMs?: number;
+}
+
+/**
+ * The TIME-DOMAIN samples the Audio Waveform effect draws, as −1..1.
+ *
+ * This resolver did not exist. `applyAudioWaveform` read a `samples` param
+ * documented as "written by buildSnapshot", buildSnapshot never wrote it, and
+ * the kernel's own `n < 2` guard then returned early — so the effect could be
+ * added, configured and keyframed, and drew nothing, ever. Exactly the
+ * "composed but unexecuted" shape the effects module's own comments warn about.
+ *
+ * Signed, unlike the spectrum's magnitudes: a waveform swings either side of
+ * its baseline, and rectifying it here would throw away the half of the shape
+ * that makes it look like audio.
+ */
+export function resolveAudioWaveformSamples(
+  cfg: AudioWaveformSamplesRequest,
+  timeSec: number,
+): number[] {
+  const count = Math.max(2, Math.min(4096, Math.round(cfg.count)));
+  const silent = (): number[] => [];
+
+  const src = cfg.sourceLayerId ? defaultSceneGraph.getNode(cfg.sourceLayerId) : undefined;
+  if (!src) return silent();
+  const comp = audioComponent(src);
+  const assetId = comp && typeof comp.props.__assetId === 'string' ? comp.props.__assetId : '';
+  if (!assetId) return silent();
+  const buffer = getBuffer(assetId);
+  if (!buffer) return silent();
+
+  // Clip-local time, honouring where the source layer's BAR sits and which part
+  // of the source it plays — the same reasoning `resolveAudioSpectrum` uses,
+  // and the reason a trimmed or moved audio layer reads the right moment.
+  const timings = readAudioClipTimings(cfg.sourceLayerId);
+  const at = timings.find((t) => timeSec >= t.startSec && timeSec < t.startSec + (t.outSec - t.inSec)) ?? timings[0];
+  const localT = (at ? at.inSec + (timeSec - at.startSec) : timeSec) + (cfg.offsetMs ?? 0) / 1000;
+  if (localT < 0 || localT > buffer.duration) return silent();
+
+  const durationSec = Math.max(0.001, (cfg.durationMs ?? 43) / 1000);
+  const rate = buffer.sampleRate;
+  const start = Math.max(0, Math.floor(localT * rate));
+  const span = Math.max(1, Math.round(durationSec * rate));
+
+  const which = Math.round(cfg.channel ?? 0);
+  const chans = buffer.numberOfChannels;
+  // Left / Right fall back to channel 0 on a mono file rather than returning
+  // silence: the file simply has one channel, and that is what it sounds like.
+  const a = buffer.getChannelData(which === 2 && chans > 1 ? 1 : 0);
+  const b = which === 0 && chans > 1 ? buffer.getChannelData(1) : null;
+
+  const out: number[] = [];
+  for (let i = 0; i < count; i++) {
+    /*
+      Each output point is the PEAK over its slice, not a single sample.
+
+      Sampling one value per point aliases badly: at 48 kHz a 43 ms window is
+      ~2000 samples, so 128 points would each land on an arbitrary instant of a
+      waveform crossing zero hundreds of times, and the trace would flicker
+      randomly rather than showing the envelope. Taking the extreme of each
+      slice is what every audio editor draws.
+    */
+    const lo = start + Math.floor((i / count) * span);
+    const hi = Math.min(a.length, start + Math.floor(((i + 1) / count) * span));
+    let peak = 0;
+    for (let j = lo; j < hi; j++) {
+      const v = b ? ((a[j] ?? 0) + (b[j] ?? 0)) / 2 : (a[j] ?? 0);
+      if (Math.abs(v) > Math.abs(peak)) peak = v;
+    }
+    out.push(Math.max(-1, Math.min(1, peak)));
+  }
+  return out;
 }

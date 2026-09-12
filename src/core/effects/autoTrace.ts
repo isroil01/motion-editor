@@ -38,6 +38,7 @@ import { traceBitmap, simplifyRing, type TracedContour } from '@core/geometry/tr
 import { addMaskPath, keyframeMask, type MaskPath, type MaskPoint } from './mask';
 import { bumpScene } from '@stores/sceneStore';
 import { flattenComposition } from '@core/scene/sceneDerive';
+import { compToKeyframeTime } from '@core/timeline/TimelineController';
 
 export interface AutoTraceOptions {
   nodeId: string;
@@ -177,7 +178,9 @@ export async function autoTraceLayer(opts: AutoTraceOptions): Promise<AutoTraceR
       if (f !== first) {
         replaceMaskRings(opts.nodeId, rings, f);
       }
-      keyframeMask(opts.nodeId, t);
+      // `t` is the comp frame that was rendered; the keyframe goes on the
+      // layer's keyframe axis, where the renderer will read it back.
+      keyframeMask(opts.nodeId, compToKeyframeTime(opts.nodeId, t));
       keyframes++;
     }
     if (opts.onProgress?.((f - first + 1) / (last - first + 1)) === false) {

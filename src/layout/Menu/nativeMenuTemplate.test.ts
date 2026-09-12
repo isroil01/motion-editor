@@ -127,9 +127,11 @@ describe('buildNativeMenuTemplate over APP_MENU', () => {
     // modifier portably; Electron picks Ctrl on Windows/Linux.
     expect(accels.get('project.save')).toBe('CmdOrCtrl+S');
     expect(accels.get('anim.easyEase')).toBe('F9');
-    // Tab is the focus-mode chord — it must stay renderer-side.
+    // Bare-key chords must stay renderer-side, where `enabled()` can yield them
+    // to a text field: ` / Shift+` (focus modes) and Tab (Mini-Flowchart).
     expect(accels.has('view.focusMode.viewportTimeline')).toBe(false);
     expect(accels.has('view.focusMode.viewport')).toBe(false);
+    expect(accels.has('comp.miniFlowchart')).toBe(false);
     // A modifier, or a function key (Shift+F9 is Easy Ease In — Shift alone
     // is fine on an F-key, never on a letter).
     for (const a of accels.values()) expect(a).toMatch(/^(Ctrl|Cmd|Alt|(Shift\+)?F\d)/);

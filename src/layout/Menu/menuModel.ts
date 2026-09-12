@@ -212,6 +212,8 @@ export const APP_MENU: MenuGroupModel[] = [
       { separator: true },
       { commandId: 'comp.settings', label: 'Composition Settings…' },
       { commandId: 'comp.delete', label: 'Delete Composition' },
+      { commandId: 'comp.openPrevious', label: 'Open Previous Composition' },
+      { commandId: 'comp.miniFlowchart', label: 'Composition Mini-Flowchart' },
       { separator: true },
       {
         // One entry per target shape rather than a dialog: the only input is
@@ -261,6 +263,14 @@ export const APP_MENU: MenuGroupModel[] = [
           { commandId: 'transport.goToIn', label: 'Go to In Point' },
           { commandId: 'transport.goToOut', label: 'Go to Out Point' },
           { commandId: 'transport.clearInOut', label: 'Clear In and Out' },
+          { separator: true },
+          // What a preview includes, then the two audio-only previews those
+          // flags exist to serve (AE's Numpad . and Alt+Numpad .).
+          { commandId: 'transport.includeVideo', label: 'Include Video in Preview' },
+          { commandId: 'transport.includeAudio', label: 'Include Audio in Preview' },
+          { separator: true },
+          { commandId: 'transport.previewAudioOnly', label: 'Preview Only Audio' },
+          { commandId: 'transport.previewAudioOnlyWorkArea', label: 'Preview Only Audio in Work Area' },
           { separator: true },
           { commandId: 'transport.audioScrub', label: 'Audio Scrubbing' },
         ],
@@ -455,10 +465,14 @@ export const APP_MENU: MenuGroupModel[] = [
         // two edits that read the waveform, and the bake to keyframes.
         label: 'Audio',
         children: [
+          { commandId: 'audio.fadeIn', label: 'Fade In' },
+          { commandId: 'audio.fadeOut', label: 'Fade Out' },
+          { separator: true },
           { commandId: 'animation.animateInOnBeats', label: 'Animate In on Beats' },
           { commandId: 'audio.markBeats', label: 'Markers on Beats' },
           { separator: true },
           { commandId: 'audio.removeSilence', label: 'Remove Silence…' },
+          { commandId: 'audio.gate', label: 'Noise Gate…' },
           { commandId: 'audio.duckMusic', label: 'Duck Under Voice…' },
           { separator: true },
           { commandId: 'animation.convertAudioToKeyframes', label: 'Convert Audio to Keyframes' },
@@ -508,9 +522,10 @@ export const APP_MENU: MenuGroupModel[] = [
       { commandId: BuiltinCommands.ToggleRightInspector, label: 'Toggle Inspector' },
       { commandId: BuiltinCommands.ToggleTimeline, label: 'Toggle Timeline' },
       {
-        // The one-key modes (Tab / Shift+Tab). Beside the three toggles they
+        // The one-key modes (` / Shift+`, AE's maximize-panel key — Tab is
+        // the Composition Mini-Flowchart). Beside the three toggles they
         // compose, so the menu shows the chord a user would otherwise only
-        // discover by pressing Tab and wondering where the panels went.
+        // discover by pressing it and wondering where the panels went.
         label: 'Focus Mode',
         children: [
           { commandId: 'view.focusMode.viewportTimeline', label: 'Viewport + Timeline' },
@@ -673,6 +688,7 @@ export const APP_MENU: MenuGroupModel[] = [
       { commandId: 'view.commandPalette', label: 'Command Palette' },
       { commandId: 'view.presentation', label: 'Present (Preview)' },
       { separator: true },
+      { commandId: 'view.audio', label: 'Audio' },
       { commandId: 'view.history', label: 'History' },
       { commandId: 'view.transcript', label: 'Transcript' },
       { commandId: 'view.effectControls', label: 'Effect Controls' },

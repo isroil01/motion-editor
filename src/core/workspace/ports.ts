@@ -59,13 +59,13 @@ import { defaultAnimation } from '@motion/animation';
 import { drawToolOptions } from '@motion/workspace';
 import { gestureAnimEdit, gestureSceneBump } from '@core/workspace/viewportGesture';
 import { useProjectStore } from '@stores/projectStore';
-import { getRemappedTime, getTimelineController, governingClipsFor } from '@core/timeline/TimelineController';
+import { compToKeyframeTime, getRemappedTime, getTimelineController, governingClipsFor } from '@core/timeline/TimelineController';
 import { is3DEnabled, readNode3D } from '@core/scene/threeD';
 import { Matrix4Math, Project3D } from '@motion/scene';
 import { currentViewProjector, currentViewCamera } from '@core/workspace/viewProjection';
 import { orthoViewOf } from '@core/scene/cameraViewMode';
 import { composeNodeWorld3d, parentWorld3d, resolveNode3DTransform } from '@core/scene/nodeMatrix';
-import { addMaskPath, rectangleMask, ellipseMask, readNodeMask, setMaskPoints, MaskPath, MaskPoint } from '@core/effects/mask';
+import { addMaskPath, rectangleMask, ellipseMask, readNodeMask, readNodeMaskAt, setMaskPoints, MaskPath, MaskPoint } from '@core/effects/mask';
 
 /** Convex hull (monotone chain) of 2D points, counter-clockwise. */
 function convexHull2D(pts: ReadonlyArray<{ x: number; y: number }>): Array<{ x: number; y: number }> {
@@ -330,8 +330,11 @@ function toWorkspaceNode(
     hitTestLocal: hitTestLocalVal,
     pathPoints: node.components.find((c) => c.type === 'Geometry')?.props.points as import('@motion/workspace').BezierPoint[] | undefined,
     // Masks are editable outlines too — without these the Direct Selection tool
-    // can't see them, which is why a mask's shape was frozen once drawn.
-    maskPaths: readNodeMask(node)?.paths.map((p) => ({ id: p.id, points: p.points })),
+    // can't see them, which is why a mask's shape was frozen once drawn. Read at
+    // the layer's keyframe time, as the renderer does: an ANIMATED mask shows
+    // its interpolated shape here, not the static one nothing draws — which a
+    // drag would otherwise pick up and write back as the new keyframe.
+    maskPaths: (readNodeMaskAt(node, localTime) ?? readNodeMask(node))?.paths.map((p) => ({ id: p.id, points: p.points })),
     anchor: { x: anchorX, y: anchorY },
   };
 }
@@ -1548,9 +1551,12 @@ function updateNodePath(payload: UpdateNodePathPayload): void {
 function updateMaskPathCmd(payload: UpdateMaskPathPayload): void {
   const node = defaultSceneGraph.getNode(payload.id as ID);
   if (!node || node.locked) return;
-  // Comp time — the same base `keyframeMask` uses from the Effects panel, so
-  // canvas edits and the panel's keyframe button land on the same keyframes.
-  setMaskPoints(payload.id as string, payload.maskId, payload.points as MaskPoint[], getTimelineController().currentSeconds);
+  // The playhead on the layer's KEYFRAME axis — where `buildSnapshot` reads the
+  // mask (`remapOf`), and where the Effects panel, the timeline and the Layer
+  // panel write. Raw comp time is the same number only for an untrimmed bar at
+  // 0; on a moved or trimmed layer it put the keyframe where the shape is not.
+  const t = compToKeyframeTime(payload.id as string, getTimelineController().currentSeconds);
+  setMaskPoints(payload.id as string, payload.maskId, payload.points as MaskPoint[], t);
   gestureSceneBump();
 }
 

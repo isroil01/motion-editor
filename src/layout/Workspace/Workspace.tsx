@@ -68,6 +68,8 @@ import { SecondaryViewPane } from './SecondaryViewPane';
 import { useGuidesStore } from '@stores/guidesStore';
 import { useViewportDisplayStore } from '@stores/viewportDisplayStore';
 import { FocusBreadcrumb } from '@layout/focus/FocusBreadcrumb';
+import { CompositionNavigator } from './CompositionNavigator';
+import { MiniFlowchart } from './MiniFlowchart';
 import { TextEditOverlay } from './TextEditOverlay';
 import { PuppetOverlay } from './PuppetOverlay';
 import { EffectHandleOverlay } from './EffectHandleOverlay';
@@ -681,6 +683,8 @@ export function WorkspaceViewport({
         <div className={styles.overlayBR}>{bottomRight}</div>
 
         <FocusBreadcrumb />
+        <CompositionNavigator />
+        <MiniFlowchart />
       </div>
 
       {/*

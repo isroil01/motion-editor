@@ -57,8 +57,8 @@ import {
   toggleSelectedVisible,
   groupSelectedLayers,
   ungroupSelected,
-  precomposeSelected,
 } from '@core/scene/sceneInsert';
+import { openPrecomposeDialog } from '@layout/Composition/PrecomposeDialog';
 import { rigLogoForAnimation } from '@core/scene/rigLogo';
 import { arrangeNodes } from '@core/scene/parenting';
 import { LABEL_COLORS, readNodeLabelColor, setNodeLabelColor } from '@core/scene/labelColor';
@@ -316,7 +316,7 @@ export function nodeContextMenuItems(id: string): ContextMenuItem[] {
     { id: 'sep2', separator: true },
     { id: 'group', label: 'Group Selection', onSelect: () => groupSelectedLayers() },
     ...(isGroup ? [{ id: 'ungroup', label: 'Ungroup', onSelect: () => ungroupSelected() }] : []),
-    { id: 'precompose', label: 'Pre-compose…', onSelect: () => precomposeSelected() },
+    { id: 'precompose', label: 'Pre-compose…', onSelect: () => openPrecomposeDialog() },
     { id: 'rig-logo', label: 'Rig Logo for Animation', onSelect: () => { void rigLogoForAnimation(); } },
     ...svgContextMenuItems(id),
     ...(useSelectionStore.getState().ids.length >= 2

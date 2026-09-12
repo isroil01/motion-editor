@@ -48,16 +48,15 @@ function cramped(run: () => void): void {
   }
 }
 
-it('renders the display controls inside the transport row, between the scene tools and the zoom field', () => {
+it('renders the display controls inside the transport row, balanced across left and right of play', () => {
   const b = bar();
-  const group = within(b).getByRole('group', { name: 'Viewport display' });
   for (const name of [
     /^Viewport layout:/, /^Show channel:/, /^Preview resolution:/, 'Preview', 'Viewer LUT', /^Overlays/,
     /^Take Snapshot/, 'Compare snapshots', /^Display mode:/, /^Camera bookmarks/, /^Pop out/,
   ]) {
-    expect(within(group).getByRole('button', { name })).toBeInTheDocument();
+    expect(within(b).getByRole('button', { name })).toBeInTheDocument();
   }
-  // Order on the right of play: scene tools · display controls · zoom.
+  // Layout, snapshots, and auto-key are on the left of play; display controls and zoom are on the right.
   const buttons = within(b).getAllByRole('button');
   const idx = (pred: (label: string) => boolean): number => buttons.findIndex((el) => pred(el.getAttribute('aria-label') ?? ''));
   const playIdx = idx((l) => l === 'Play');
@@ -66,9 +65,9 @@ it('renders the display controls inside the transport row, between the scene too
   const popIdx = idx((l) => l.startsWith('Pop out'));
   const zoomIdx = idx((l) => l === 'Magnification presets');
   expect(playIdx).toBeGreaterThan(-1);
-  expect(autoKeyIdx).toBeGreaterThan(playIdx);
-  expect(layoutIdx).toBeGreaterThan(autoKeyIdx);
-  expect(popIdx).toBeGreaterThan(layoutIdx);
+  expect(layoutIdx).toBeLessThan(playIdx);
+  expect(autoKeyIdx).toBeLessThan(playIdx);
+  expect(popIdx).toBeGreaterThan(playIdx);
   expect(zoomIdx).toBeGreaterThan(popIdx);
   // And no strip of their own above the stage.
   expect(document.querySelector('[data-viewport-header]')).toBeNull();

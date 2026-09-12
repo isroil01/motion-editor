@@ -199,3 +199,17 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+.recLabel {
+  font-size: var(--font-size-micro);
+  font-weight: 700;
+  margin-left: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.autoKeyBtnActive {
+  width: auto !important;
+  padding: 0 var(--space-2) !important;
+  gap: 2px;
+}

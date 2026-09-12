@@ -51,6 +51,8 @@ interface RotoBrushStore {
   /** Commit the live stroke. Returns it (null when there was none). */
   end: () => RotoStroke | null;
   cancelLive: () => void;
+  /** Take one committed stroke back out (a click that became a double-click). */
+  removeStroke: (id: string) => void;
   clearStrokes: () => void;
   setMaskPathId: (id: string | null) => void;
   setBusy: (busy: boolean, progress?: number) => void;
@@ -92,6 +94,7 @@ export const useRotoBrushStore = create<RotoBrushStore>((set, get) => ({
     return live;
   },
   cancelLive: () => set({ live: null }),
+  removeStroke: (id) => set((s) => ({ strokes: s.strokes.filter((x) => x.id !== id) })),
   clearStrokes: () => set({ strokes: [], live: null, status: null }),
   setMaskPathId: (id) => set({ maskPathId: id }),
   setBusy: (busy, progress = 0) => set({ busy, progress }),

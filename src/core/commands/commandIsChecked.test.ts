@@ -49,7 +49,7 @@ const TOGGLES: ReadonlyArray<readonly [string, string]> = [
   ['view.motionPath', 'motionPathVisible'],
   // A preview toggle: lives in preferenceStore, not guidesStore.
   ['view.useProxies', 'useProxies'],
-  // The one-key focus modes (Tab / Shift+Tab): layoutStore.focusMode.
+  // The one-key focus modes (` / Shift+`): layoutStore.focusMode.
   ['view.focusMode.viewportTimeline', 'focusMode'],
   ['view.focusMode.viewport', 'focusMode'],
 ];

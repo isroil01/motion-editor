@@ -97,6 +97,8 @@ import {
   getPropertyCategory,
   type Row,
 } from './timelineShared';
+import { WaveformLane } from './WaveformLane';
+import { AUDIO_WAVEFORM_ROW } from '@core/timeline/propertyTree';
 import { DragHud, type DragHudState } from './DragHudOverlay';
 import { Minimap, Ruler, generateRulerTicks } from './RulerStack';
 import { TrackHeader, PropertyHeader, TrackCategoryHeader } from './TrackHeaderColumn';
@@ -155,7 +157,8 @@ export interface TimelineProps {
   onClipMuteToggle?: (nodeId: string) => void;
   onTrackToggleVisible?: (trackId: string) => void;
   onTrackToggleLock?: (trackId: string) => void;
-  onTrackToggleSolo?: (trackId: string) => void;
+  /** `exclusive` is Alt+click: AE's "turn off all other solo switches". */
+  onTrackToggleSolo?: (trackId: string, exclusive: boolean) => void;
   onTrackBlendModeChange?: (trackId: string, mode: LayerBlendMode) => void;
   onTrackMatteChange?: (trackId: string, matte: any) => void;
   onTrackParentChange?: (trackId: string, parentId: string | null, options?: { preserveWorld?: boolean }) => void;
@@ -1747,6 +1750,7 @@ function Timeline({
                 control. */}
             <div className={styles.colHeadPreInfo} aria-hidden>
               <span className={styles.colHeadItem}><Icon name="eye" size="sm" title="Video Visibility" /></span>
+              <span className={styles.colHeadItem}><Icon name="audio" size="sm" title="Audio" /></span>
               <span className={styles.colHeadItem}><Icon name="circle" size="sm" title="Solo" /></span>
               <span className={styles.colHeadItem}><Icon name="lock" size="sm" title="Lock" /></span>
             </div>
@@ -1846,7 +1850,8 @@ function Timeline({
                     onClick={(additive) => onTrackSelect?.(row.track.id, additive)}
                     onToggleVisible={() => onTrackToggleVisible?.(row.track.id)}
                     onToggleLock={() => onTrackToggleLock?.(row.track.id)}
-                    onToggleSolo={() => onTrackToggleSolo?.(row.track.id)}
+                    onToggleSolo={(exclusive) => onTrackToggleSolo?.(row.track.id, exclusive)}
+                    onToggleAudio={onClipMuteToggle ? () => onClipMuteToggle(row.track.id) : undefined}
                     onBlendModeChange={(mode) => onTrackBlendModeChange?.(row.track.id, mode)}
                     onMatteChange={(matte) => onTrackMatteChange?.(row.track.id, matte)}
                     onParentChange={(parentId, options) => onTrackParentChange?.(row.track.id, parentId, options)}
@@ -2322,6 +2327,15 @@ function Timeline({
                 return (
                   <LaneRow key={`c_${row.track.id}_cat_${row.categoryKey}`} top={top} trackHeight={trackHeight}>
                     <div />
+                  </LaneRow>
+                );
+              }
+              // AE's LL row: peaks, not diamonds. It carries no keyframes, so
+              // rendering the usual lane would draw an empty strip.
+              if (row.prop.prop === AUDIO_WAVEFORM_ROW) {
+                return (
+                  <LaneRow key={`c_${row.track.id}_wave`} top={top} trackHeight={trackHeight}>
+                    <WaveformLane clips={row.track.clips ?? []} pps={pps} trackHeight={trackHeight} />
                   </LaneRow>
                 );
               }

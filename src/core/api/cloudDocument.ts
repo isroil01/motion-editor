@@ -147,6 +147,7 @@ export function captureDocument(): EditorDocument {
           id: t.id,
           compositionId: t.compositionId,
           breadcrumbPath: [...t.breadcrumbPath],
+          ...(t.breadcrumbVia && t.breadcrumbVia.length > 0 ? { breadcrumbVia: [...t.breadcrumbVia] } : {}),
           title: t.title,
           time: t.time,
           frame: t.frame,

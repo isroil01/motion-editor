@@ -37,6 +37,7 @@ import { publishFrame } from '@core/rendering/frameTap';
 import { clipGeometrySignature } from '@core/timeline/TimelineController';
 import { roiHandleAt, resizeRoi, clampRoi, roiHandleCursor, type RoiHandle } from '@core/rendering/roiGeometry';
 import { useMotionBlurStore } from '@stores/motionBlurStore';
+import { previewIncludesVideo } from '@stores/previewBehaviorStore';
 import { useRenderQualityStore } from '@stores/renderQualityStore';
 import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
 import { useRenderQueueStore } from '@stores/renderQueueStore';
@@ -97,6 +98,8 @@ import { useFaceSelectionStore } from '@stores/faceSelectionStore';
 import { facesOfNode, pickFace, faceHighlightGroups } from '@core/scene/facePicking';
 import { isSceneCameraView } from '@core/scene/cameraViewMode';
 import { compSizeOf } from '@core/composition/compSizes';
+import { isDescendantOf } from '@core/composition/compNavigation';
+import { openLayerOnDoubleClick } from '@layout/LayerViewer/openLayer';
 import { RULER_CSS_PX, inStrip, rulerStrips } from './rulerGeometry';
 
 
@@ -778,6 +781,13 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
       const ws = useWorkspaceStore.getState();
       const tab = ws.activeTabId ? ws.tabs[ws.activeTabId] : null;
       const playing = tab?.playing === true;
+      // AE's audio-only preview: the transport runs, the sound plays, the
+      // viewer holds the frame it was on. Returning before any render work is
+      // the point — with no picture to draw there is nothing to fall behind,
+      // which is why AE offers this for auditioning a long comp at real speed.
+      // Only while PLAYING: a paused viewport must still repaint, or toggling
+      // the switch would blank the editor.
+      if (playing && !previewIncludesVideo()) return;
       b.setPlaybackMode?.(playing);
       if (!playing && useRenderQualityStore.getState().slowPlayback) {
         // Stopped: back to the chosen quality for the frame the user is looking at.
@@ -1996,6 +2006,23 @@ export function useWorkspace(args: UseWorkspaceArgs): { ready: boolean; renderEr
             // desktop app's double-click did nothing at all.
             useTextEditStore.getState().begin(node.id);
             return;
+          }
+          // AE: double-clicking a layer in the Composition panel opens it — a
+          // precomp's composition, footage and solids in the Layer panel — per
+          // the two "Opening Layers with Double-click" preferences, Alt
+          // swapping them (see openLayer.ts). Only with the Selection tool or
+          // a paint/roto tool (AE opens the Layer panel for those), and only
+          // ON the layer — a double-click on empty canvas while it happens to
+          // be selected, or a pen tool closing a path, is not a request to
+          // open anything.
+          const tool = useUIStore.getState().activeTool as string;
+          if (tool === 'select' || tool === 'brush' || tool === 'paint' || tool === 'eraser' || tool === 'roto') {
+            const hit = controller.ws.hitTestScreen(local(e as unknown as PointerEvent));
+            if (hit && (hit.id === node.id || isDescendantOf(hit.id, node.id)) && openLayerOnDoubleClick(node.id, { alt: e.altKey })) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
           }
         }
       }

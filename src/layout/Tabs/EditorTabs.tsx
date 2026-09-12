@@ -26,7 +26,9 @@ import { useProjectStore } from '@stores/projectStore';
 import { useSelectionStore } from '@stores/selectionStore';
 import { useAssetStore } from '@stores/assetStore';
 import { useSceneRevision } from '@stores/sceneStore';
-import { useFocusStore } from '@stores/focusStore';
+import { useLayerViewerStore } from '@stores/layerViewerStore';
+import { canOpenInLayerPanel, openLayerPanel } from '@layout/LayerViewer/openLayer';
+import { LayerViewer } from '@layout/LayerViewer/LayerViewer';
 import { useWorkspaceViewStore } from '@stores/workspaceViewStore';
 import { openContextMenu } from '@stores/contextMenuStore';
 import defaultSceneGraph from '@core/scene/DefaultSceneGraph';
@@ -116,9 +118,13 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
       clearLastFootagePreview();
     }
   }, [assets, lastPreviewed]);
-  const isolatedId = useFocusStore((s) => s.isolatedId);
-  const layerTabName = isolatedId
-    ? defaultSceneGraph.getNode(isolatedId)?.name ?? null
+  // AE's Layer panel (LayerViewer): open while its layer still exists.
+  const layerViewerId = useLayerViewerStore((s) => s.nodeId);
+  const layerViewerOpen = layerViewerId !== null && !!defaultSceneGraph.getNode(layerViewerId);
+  const selectedViewable = singleSelectedLayer !== null
+    && canOpenInLayerPanel(defaultSceneGraph.getNode(singleSelectedLayer));
+  const layerTabName = layerViewerOpen
+    ? defaultSceneGraph.getNode(layerViewerId!)?.name ?? null
     : singleSelectedLayer
       ? defaultSceneGraph.getNode(singleSelectedLayer)?.name ?? null
       : null;
@@ -167,10 +173,41 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
         <button
           type="button"
           role="tab"
-          aria-selected={sceneActive}
-          className={cn(styles.tab, sceneActive && styles.tabActive)}
+          aria-selected={sceneActive && !layerViewerOpen}
+          className={cn(styles.tab, sceneActive && !layerViewerOpen && styles.tabActive)}
           title={`Composition: ${compName || 'none'}${activeDirty ? ' — unsaved changes' : ''}`}
-          onClick={() => activate(SCENE_TAB_ID)}
+          onClick={() => {
+            // Back to the composition — from a plugin tab or the Layer panel.
+            useLayerViewerStore.getState().close();
+            activate(SCENE_TAB_ID);
+          }}
+          onContextMenu={(e) => {
+            // AE's viewer menu: ONE Composition viewer, switched between the
+            // open comps from here (each also has a Timeline tab).
+            e.preventDefault();
+            const st = useProjectStore.getState();
+            const open = st.tabOrder.map((id) => st.tabs[id]).filter((t): t is NonNullable<typeof t> => !!t);
+            if (open.length === 0) return;
+            const active = st.activeTabId ? st.tabs[st.activeTabId] : undefined;
+            openContextMenu(e.clientX, e.clientY, [
+              ...open.map((t) => ({
+                id: `open-${t.id}`,
+                label: st.comps[t.compositionId]?.name ?? defaultSceneGraph.getNode(t.compositionId)?.name ?? t.title,
+                icon: t.id === st.activeTabId ? ('check' as const) : undefined,
+                onSelect: () => {
+                  activate(SCENE_TAB_ID);
+                  useProjectStore.getState().actions.setActiveTab(t.id);
+                },
+              })),
+              { id: 'sep-open', separator: true },
+              {
+                id: 'close-comp',
+                label: active ? `Close ${st.comps[active.compositionId]?.name ?? active.title}` : 'Close Composition',
+                disabled: !active || open.length < 2,
+                onSelect: () => { if (active) useProjectStore.getState().actions.closeTab(active.id); },
+              },
+            ]);
+          }}
         >
           <Icon name="shape" size="sm" />
           <span className={styles.tabLabel}>Composition {compName ? `(${compName})` : '(none)'}</span>
@@ -224,24 +261,30 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
           <span className={styles.tabLabel}>Footage {footageAsset ? `(${footageAsset.name})` : '(none)'}</span>
         </button>
 
+        {/*
+          LAYER is AE's Layer panel (LayerViewer): the layer alone, before its
+          transform, with its own In/Out. Opens for the selected footage,
+          solid or composition layer; clicking it again goes back to the
+          composition.
+        */}
         <button
           type="button"
           role="tab"
-          aria-selected={!!isolatedId}
-          className={cn(styles.tab, isolatedId && styles.tabActive)}
-          disabled={!isolatedId && !singleSelectedLayer}
+          aria-selected={layerViewerOpen}
+          className={cn(styles.tab, layerViewerOpen && styles.tabActive)}
+          disabled={!layerViewerOpen && !selectedViewable}
           title={
-            isolatedId
-              ? `Layer: ${layerTabName ?? ''} — click to exit isolation`
-              : singleSelectedLayer
-                ? `Isolate “${layerTabName ?? ''}” (everything else ghosts)`
-                : 'Layer (none) — select one layer to isolate it'
+            layerViewerOpen
+              ? `Layer: ${layerTabName ?? ''} — click to go back to the composition`
+              : selectedViewable
+                ? `Open “${layerTabName ?? ''}” in the Layer panel`
+                : 'Layer (none) — select a footage, solid or composition layer'
           }
           onClick={() => {
-            if (isolatedId) { useFocusStore.getState().exitOne(); return; }
+            if (layerViewerOpen) { useLayerViewerStore.getState().close(); return; }
             if (singleSelectedLayer) {
               activate(SCENE_TAB_ID);
-              useFocusStore.getState().isolate(singleSelectedLayer);
+              openLayerPanel(singleSelectedLayer);
             }
           }}
         >
@@ -401,12 +444,20 @@ export function EditorTabs({ scene, renderTab }: EditorTabsProps): JSX.Element {
           and all three are lost the moment it leaves the tree.
         */}
         <div
-          className={cn(styles.scenePane, !sceneActive && styles.sceneHidden)}
-          aria-hidden={!sceneActive}
+          className={cn(styles.scenePane, (!sceneActive || layerViewerOpen) && styles.sceneHidden)}
+          aria-hidden={!sceneActive || layerViewerOpen}
           data-testid="scene-pane"
         >
           {scene}
         </div>
+
+        {/* AE's Layer panel, over the composition viewer — which stays mounted
+            and is only hidden, exactly as it is for a plugin tab. */}
+        {layerViewerOpen && sceneActive && (
+          <div className={styles.tabPane} role="tabpanel" aria-label="Layer panel" data-testid="layer-pane">
+            <LayerViewer />
+          </div>
+        )}
 
         {activeTab && (
           <div className={styles.tabPane} role="tabpanel" data-testid="tab-pane">

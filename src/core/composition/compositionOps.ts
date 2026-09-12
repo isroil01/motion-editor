@@ -42,16 +42,26 @@ function compRootNode(id: string, name: string): SceneNode {
 }
 
 /**
+ * The two halves of a composition that must exist together — its settings
+ * record and its scene ROOT — without opening a tab or building a timeline.
+ * Pre-compose makes a comp the user may never look at ("Open New Composition"
+ * off), so it cannot go through `createComposition`, which opens one.
+ */
+export function addCompositionRecord(init: Partial<CompositionSettings> = {}): string {
+  const id = useProjectStore.getState().actions.createComp(init);
+  defaultSceneGraph.addNode(compRootNode(id, init.name ?? 'Composition'));
+  return id;
+}
+
+/**
  * Add a composition to the project and open it. Returns the new comp's id.
  *
  * Additive: existing comps, layers and keyframes are untouched.
  */
 export function createComposition(init: Partial<CompositionSettings> = {}): string {
   const actions = useProjectStore.getState().actions;
-  const id = actions.createComp(init);
+  const id = addCompositionRecord(init);
   const name = init.name ?? 'Composition';
-
-  defaultSceneGraph.addNode(compRootNode(id, name));
   actions.openTab(id, [id], name);
 
   // The new tab is active, so the controller resolves to this comp's timeline;
@@ -197,6 +207,11 @@ export function duplicateComposition(id: string): string | null {
 export function deleteComposition(id: string): boolean {
   const state = useProjectStore.getState();
   if (!state.comps[id]) return false;
+  // A group opened in its own tab carries a settings record too (see
+  // `openTab`), but it is a LAYER, not a composition: "Delete Composition" on
+  // its tab would take the group and everything in it out of the parent comp.
+  // Real compositions are scene ROOTS.
+  if (defaultSceneGraph.getNode(id)?.parent) return false;
   const wasLast = Object.keys(state.comps).length <= 1;
 
   for (const tab of Object.values(state.tabs)) {

@@ -388,11 +388,15 @@ const STATIC: Record<string, MetaSpec> = {
     min: 0, max: 2, step: 1, precision: 0, defaultValue: 1, resettable: true, order: ORDER.material,
   },
 
-  // Audio Levels, in decibels — the one audio property that keyframes today
-  // (`audioParams.ts` samples it per frame and schedules the gain ramp).
+  // Audio Levels, in decibels. `audioParams.ts` samples it per frame and
+  // schedules the gain ramp; Pan rides the same seam into a StereoPannerNode.
   audioLevelDb: {
     label: 'Audio Levels', group: 'audio', type: 'number', unit: 'dB',
     min: -60, max: 12, step: 0.5, precision: 1, defaultValue: 0, resettable: true, order: ORDER.audio,
+  },
+  audioPan: {
+    label: 'Pan', group: 'audio', type: 'number', unit: '%',
+    min: -100, max: 100, step: 1, precision: 0, defaultValue: 0, resettable: true, order: ORDER.audio,
   },
 
   // ── Camera Options ──

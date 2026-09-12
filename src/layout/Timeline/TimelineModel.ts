@@ -126,6 +126,10 @@ export interface TimelineTrack {
   /** This layer's AUDIO is muted. Separate from `muted` (the visibility eye),
    *  which hides the picture. Drives the clip bar's speaker glyph. */
   audioMuted?: boolean;
+  /** This layer can make a sound — an audio layer, or a video layer carrying
+   *  its own track. AE's A/V Features column shows the speaker switch only for
+   *  these, and a speaker on a shape layer would toggle nothing. */
+  hasAudio?: boolean;
   /** Locked tracks don't allow edits. */
   locked?: boolean;
   /** Muted / solo state. */

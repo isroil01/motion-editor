@@ -522,6 +522,19 @@ export class SceneGraph {
     return true;
   }
 
+  /**
+   * Remove a node's app component of `type`. The twin of `addComponent`, for
+   * the same reason it exists: splicing a live view's `components` array is a
+   * write nothing sees. Returns false when the node has no such component.
+   */
+  removeComponent(nodeId: ID, type: string): boolean {
+    const e = this.engine(nodeId);
+    if (!e || !e.getComponent(type)) return false;
+    e.removeComponent(type);
+    e.touch(`component:${type}`);
+    return true;
+  }
+
   /** Store the effect stack (fx) on the node's `fx` component (created on demand). */
   setEffects(nodeId: ID, effects: unknown[]): void {
     this.setFx(nodeId, 'effects', effects);

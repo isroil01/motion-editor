@@ -565,7 +565,16 @@ export function applyMaskPropertyTracks(
   return changed ? { ...mask, paths } : mask;
 }
 
-/** Keyframe the layer's current mask shape at time `t` (replaces same-t kf). */
+/**
+ * Keyframe the layer's current mask shape at time `t` (replaces same-t kf).
+ *
+ * Every `t` in this file — here, `updateMaskPath`, `setMaskPoints`,
+ * `setMaskPointFeather`, `moveMaskKeyframe` — is on the layer's KEYFRAME axis,
+ * the time `buildSnapshot` reads the mask at (`remapOf`). A caller holding the
+ * playhead converts with `compToKeyframeTime(nodeId, compTime)` first: comp
+ * time lands the keyframe at the wrong moment on any layer whose bar was moved
+ * or trimmed — the two axes agree only for an untrimmed bar at 0.
+ */
 export function keyframeMask(nodeId: string, t: number): void {
   const node = defaultSceneGraph.getNode(nodeId);
   if (!node) return;
@@ -681,8 +690,9 @@ export function addMaskPath(nodeId: string, path: MaskPath): void {
 }
 
 /**
- * Patch one mask path. Pass `t` (the playhead) so edits to an ANIMATED mask
- * land on a keyframe rather than on the static shape nothing renders.
+ * Patch one mask path. Pass `t` (the playhead on the layer's keyframe axis —
+ * see `keyframeMask`) so edits to an ANIMATED mask land on a keyframe rather
+ * than on the static shape nothing renders.
  */
 export function updateMaskPath(nodeId: string, pathId: string, patch: Partial<MaskPath>, t?: number): void {
   editMaskAt(nodeId, t, (mask) => ({

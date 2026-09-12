@@ -15,7 +15,8 @@
 
 import { computePeaks, mixToMono, amplitudeAt, type WaveformPeaks } from './waveform';
 import { rmsPeak, type Levels } from './audioLevels';
-import { buildParamRamp, applyRamp } from './audioParams';
+import { buildParamRamp, buildPanRamp, applyRamp, voicePanner } from './audioParams';
+import { getAudioHardware, applyOutputDevice } from './audioHardware';
 import {
   connectAudioEffects, hasBackwards, reverseBuffer, backwardsOffset, type AudioEffect,
 } from './audioEffects';
@@ -38,6 +39,14 @@ export interface AudioLayerState {
   /** True when the node carries level keyframes, so a constant gain is not
    *  enough and the voice needs a scheduled ramp. */
   levelAnimated?: boolean;
+  /**
+   * Stereo position, −100 (hard left) … +100 (hard right). Absent or 0 means
+   * centred, and a centred voice builds NO panner node at all — so a project
+   * that never touched pan has exactly the graph it always had.
+   */
+  pan?: number;
+  /** True when the node carries pan keyframes. */
+  panAnimated?: boolean;
   /** `'audio'` for a real audio layer, `'video'` for a clip's own track.
    *  Read by `currentLevel` so audio-reactive expressions can keep their
    *  pre-existing meaning — see there. */
@@ -165,8 +174,19 @@ class AudioEngine {
         ? (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
         : undefined;
     if (!Ctor) return null;
-    this.ctx = new Ctor();
+    /*
+      The latency hint and the output device are PREFERENCES, read at build
+      time (see `audioHardware`). A context cannot change its latency once
+      created, so this is the only moment the setting can be honoured — which
+      is also why the preferences panel warns that a change takes effect on the
+      next playback.
+    */
+    const { latencySec } = getAudioHardware();
+    this.ctx = latencySec > 0 ? new Ctor({ latencyHint: latencySec }) : new Ctor();
     this.buildMasterChain(this.ctx);
+    // Routing is async and must not hold up the first sound: the context
+    // already plays to the default device, and `setSinkId` moves it mid-stream.
+    void applyOutputDevice(this.ctx);
     return this.ctx;
   }
 
@@ -203,6 +223,15 @@ class AudioEngine {
     this.analyserL.getFloatTimeDomainData(this.meterBufL);
     this.analyserR.getFloatTimeDomainData(this.meterBufR);
     return { l: rmsPeak(this.meterBufL), r: rmsPeak(this.meterBufR) };
+  }
+
+  /**
+   * The rate the OUTPUT DEVICE is running at, or null before the engine has
+   * started. Reported, never chosen: a context's rate comes from the device,
+   * and the export mixdown renders at its own fixed rate regardless.
+   */
+  sampleRate(): number | null {
+    return this.ctx?.sampleRate ?? null;
   }
 
   /** Subscribe to load/level changes (so the waveform UI can re-render). */
@@ -326,7 +355,11 @@ class AudioEngine {
     // changes how the voice must be scheduled, not just its value.
     const rate = l.playbackRate ?? 1;
     const rev = l.retimeReverse ? 'r' : 'f';
-    return `${l.assetId}|${l.levelDb}|${l.levelAnimated ? 'a' : 's'}|${l.startSec}|${l.inSec}|${l.outSec}|${l.muted}|${rate}|${rev}`;
+    // Pan joins the identity for the same reason `levelAnimated` did: a voice
+    // built without a panner cannot grow one, so the pan changing has to be a
+    // rebuild rather than a parameter tweak.
+    const pan = l.panAnimated ? 'a' : (l.pan ?? 0);
+    return `${l.assetId}|${l.levelDb}|${l.levelAnimated ? 'a' : 's'}|${l.startSec}|${l.inSec}|${l.outSec}|${l.muted}|${rate}|${rev}|${pan}`;
   }
 
   /** Stable per-voice identity — the clip id when the caller supplies one. */
@@ -460,7 +493,23 @@ class AudioEngine {
       durationSec: remainingWall,
       whenCtx: ctx.currentTime,
     });
-    chain.node.connect(gain).connect(this.master ?? ctx.destination);
+    /*
+      The panner is OPTIONAL and sits AFTER the gain.
+
+      After, because a `StereoPannerNode` uses equal-power law: panning hard
+      left leaves the left channel at unity, not +3 dB, so the level still has
+      the last word on loudness exactly as it does over the effect chain.
+
+      Optional, because building one unconditionally would change the graph —
+      and therefore, subtly, the mix — of every project that never touched pan.
+      A centred, unanimated voice connects gain straight to master as before.
+    */
+    const panner = voicePanner(ctx, l);
+    if (panner) {
+      chain.node.connect(gain).connect(panner).connect(this.master ?? ctx.destination);
+    } else {
+      chain.node.connect(gain).connect(this.master ?? ctx.destination);
+    }
 
     // Gain is SCHEDULED on the param, never assigned per frame — see
     // audioParams for why (assignment steps once per render quantum and
@@ -477,6 +526,15 @@ class AudioEngine {
       animated: l.levelAnimated === true,
     });
     applyRamp(gain.gain, ramp, ctx.currentTime);
+    if (panner) {
+      applyRamp(
+        panner.pan,
+        buildPanRamp(l.nodeId, l.pan ?? 0, resumeCompSec, remainingWall, {
+          animated: l.panAnimated === true,
+        }),
+        ctx.currentTime,
+      );
+    }
 
     try {
       // duration is BUFFER seconds; playbackRate stretches wall time.

@@ -35,6 +35,7 @@ import { CharacterPanel } from '@layout/Inspector/CharacterPanel';
 import { ParagraphPanel } from '@layout/Inspector/ParagraphPanel';
 import { AlignPanel } from '@layout/Inspector/AlignPanel';
 import { InfoAudioPanel } from '@layout/Inspector/InfoAudioPanel';
+import { AudioPanel } from '@layout/Inspector/AudioPanel';
 import { PreviewPanel } from '@layout/Inspector/PreviewPanel';
 import { TrackerPanel } from '@layout/Inspector/TrackerPanel';
 import { ScenePanel } from '@layout/Scene/ScenePanel';
@@ -68,6 +69,7 @@ export const PANEL_COMPONENTS: Readonly<Record<string, ComponentType>> = {
   align: AlignPanel,
   swatches: SwatchesPanel,
   info: InfoAudioPanel,
+  audio: AudioPanel,
   scopes: ScopesPanel,
   preview: PreviewPanel,
   sourceMonitor: SourceMonitorPanel,

@@ -1,0 +1,101 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+  width: min(520px, 100%);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard),
+    background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.option:hover:not(.optionDisabled) {
+  background: var(--color-hover);
+}
+
+.option:has(.radio:checked) {
+  border-color: var(--color-selection);
+}
+
+.option:has(.radio:focus-visible) {
+  outline: 2px solid var(--color-focus-ring, var(--color-selection));
+  outline-offset: 1px;
+}
+
+.optionDisabled {
+  cursor: not-allowed;
+}
+
+.optionDisabled .optionTitle {
+  color: var(--color-text-muted);
+}
+
+.radio {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--color-selection);
+}
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.optionTitle {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+
+.optionHint {
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

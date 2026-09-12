@@ -2,7 +2,7 @@
  * "Is the user typing?" — for commands bound to keys that mean something
  * inside a text field.
  *
- * `Tab` is the case this exists for: it is the focus-mode toggle, and it is
+ * `Tab` is the case this exists for: it opens AE's Composition Mini-Flowchart, and it is
  * also how a form moves between fields and how a menu or dialog cycles its
  * controls. `ShortcutManager` already stays out of INPUT / TEXTAREA /
  * contentEditable, but the repo rule is that a global chord beats every panel

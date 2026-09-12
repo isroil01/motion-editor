@@ -519,89 +519,124 @@ export interface ViewportDisplayControlsViewProps {
    * group renders nothing for what it has shed.
    */
   overflow?: 'own' | 'host';
+  /**
+   * Section filter to allow distributing controls across left and right sides of Play:
+   * - 'layout': just the viewport layout dropdown
+   * - 'compare': take snapshot + compare dropdown
+   * - 'right': overlays, display mode, channel, resolution, preview, lut, bookmarks, popout
+   * - 'all': all controls (default, standalone form)
+   */
+  section?: 'layout' | 'compare' | 'right' | 'all';
 }
 
 /**
  * The controls, from a model the host already holds. Menus open UPWARD
- * (`top-end`): the row sits at the bottom of the viewport, over the timeline.
+ * (`top-end` / `top-start`): the row sits at the bottom of the viewport, over the timeline.
  */
-export function ViewportDisplayControlsView({ model: m, level = 0, overflow = 'own' }: ViewportDisplayControlsViewProps): JSX.Element {
+export function ViewportDisplayControlsView({
+  model: m,
+  level = 0,
+  overflow = 'own',
+  section = 'all',
+}: ViewportDisplayControlsViewProps): JSX.Element {
   const shed = (g: DisplayGroup): boolean => isDisplayShed(g, level);
   const ownOverflow = overflow === 'own' ? displayOverflowItems(m, level) : [];
 
+  const showLayout = (section === 'all' || section === 'layout') && !shed('layout');
+  const showCompare = (section === 'all' || section === 'compare') && !shed('compare');
+  const showRight = section === 'all' || section === 'right';
+
+  const groupLabel =
+    section === 'layout'
+      ? 'Viewport layout'
+      : section === 'compare'
+      ? 'Viewport snapshots'
+      : 'Viewport display';
+
   return (
-    <div className={styles.root} role="group" aria-label="Viewport display" data-viewport-display="">
-      {!shed('layout') && (
+    <div
+      className={styles.root}
+      role="group"
+      aria-label={groupLabel}
+      data-viewport-display={section !== 'all' ? section : ''}
+    >
+      {showLayout && (
         <Dropdown
-          placement="top-end"
+          placement="top-start"
           trigger={<Trigger icon={LAYOUT_ICON[m.viewLayout]} label={`Viewport layout: ${LAYOUT_LABEL[m.viewLayout]}${m.camera3dMode !== 'active' ? ` · ${cameraViewLabel(m.camera3dMode)}` : ''}`} active={m.viewLayout !== '1' || m.camera3dMode !== 'active'} chevron />}
           items={m.layoutItems}
         />
       )}
-      {!shed('channel') && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger icon={CHANNEL_ICON[m.channel]} text={CHANNEL_LABEL[m.channel]} label={`Show channel: ${CHANNEL_LABEL[m.channel]}`} active={m.channel !== 'rgb'} />}
-          items={m.channelItems}
-        />
-      )}
-      {!shed('resolution') && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger text={RESOLUTION_LABELS[m.resolution]} label={`Preview resolution: ${RESOLUTION_LABELS[m.resolution]}`} active={m.resolution !== 1} chevron />}
-          items={m.resolutionItems}
-        />
-      )}
-      {!shed('preview') && (
-        <PreviewMenu className={styles.control} activeClassName={cn(styles.control, styles.controlActive)} placement="top-end" />
-      )}
-      {!shed('lut') && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger icon="sliders-h" label={m.lut ? `Viewer LUT: ${m.lutName ?? 'loaded'}` : 'Viewer LUT'} active={m.lut} />}
-          items={m.lutItems}
-        />
-      )}
-      {!shed('overlays') && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger icon="grid" label="Overlays — grid, rulers, guides, HUD, overlay opacity" active={m.overlaysActive} chevron />}
-          items={m.overlayItems}
-        />
-      )}
-      {!shed('compare') && (
+
+      {showCompare && (
         <>
           <Trigger icon="camera" label="Take Snapshot (F5) — freeze this frame for comparison" onClick={() => run(VIEWPORT_COMMAND_IDS.snapshot)} />
           <Dropdown
-            placement="top-end"
+            placement="top-start"
             trigger={<Trigger icon="wipe" label={m.compareVisible ? `Compare: ${COMPARE_MODE_LABEL[m.compareMode]} (on)` : 'Compare snapshots'} active={m.compareVisible} chevron />}
             items={m.compareItems}
           />
         </>
       )}
-      {!shed('displayMode') && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger icon={DISPLAY_ICON[m.displayMode]} label={`Display mode: ${DISPLAY_MODE_LABEL[m.displayMode]}`} active={m.displayMode !== 'shaded'} />}
-          items={m.displayItems}
-        />
-      )}
-      {!shed('bookmarks') && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger icon="push-pin" label={`Camera bookmarks (${m.bookmarkCount} saved)`} active={m.bookmarkCount > 0} />}
-          items={m.bookmarkItems}
-        />
-      )}
-      {!shed('popout') && (
-        <Trigger icon="pop-out" label="Pop out the viewport preview into its own window" onClick={popOutViewport} />
-      )}
-      {ownOverflow.length > 0 && (
-        <Dropdown
-          placement="top-end"
-          trigger={<Trigger icon="more-horizontal" label={`More display controls (${ownOverflow.length})`} />}
-          items={ownOverflow}
-        />
+
+      {showRight && (
+        <>
+          {!shed('overlays') && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger icon="grid" label="Overlays — grid, rulers, guides, HUD, overlay opacity" active={m.overlaysActive} chevron />}
+              items={m.overlayItems}
+            />
+          )}
+          {!shed('displayMode') && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger icon={DISPLAY_ICON[m.displayMode]} label={`Display mode: ${DISPLAY_MODE_LABEL[m.displayMode]}`} active={m.displayMode !== 'shaded'} />}
+              items={m.displayItems}
+            />
+          )}
+          {!shed('channel') && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger icon={CHANNEL_ICON[m.channel]} text={CHANNEL_LABEL[m.channel]} label={`Show channel: ${CHANNEL_LABEL[m.channel]}`} active={m.channel !== 'rgb'} />}
+              items={m.channelItems}
+            />
+          )}
+          {!shed('resolution') && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger text={RESOLUTION_LABELS[m.resolution]} label={`Preview resolution: ${RESOLUTION_LABELS[m.resolution]}`} active={m.resolution !== 1} chevron />}
+              items={m.resolutionItems}
+            />
+          )}
+          {!shed('preview') && (
+            <PreviewMenu className={styles.control} activeClassName={cn(styles.control, styles.controlActive)} placement="top-end" />
+          )}
+          {!shed('lut') && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger icon="sliders-h" label={m.lut ? `Viewer LUT: ${m.lutName ?? 'loaded'}` : 'Viewer LUT'} active={m.lut} />}
+              items={m.lutItems}
+            />
+          )}
+          {!shed('bookmarks') && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger icon="push-pin" label={`Camera bookmarks (${m.bookmarkCount} saved)`} active={m.bookmarkCount > 0} />}
+              items={m.bookmarkItems}
+            />
+          )}
+          {!shed('popout') && (
+            <Trigger icon="pop-out" label="Pop out the viewport preview into its own window" onClick={popOutViewport} />
+          )}
+          {ownOverflow.length > 0 && (
+            <Dropdown
+              placement="top-end"
+              trigger={<Trigger icon="more-horizontal" label={`More display controls (${ownOverflow.length})`} />}
+              items={ownOverflow}
+            />
+          )}
+        </>
       )}
     </div>
   );

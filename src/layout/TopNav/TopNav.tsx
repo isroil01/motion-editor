@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { getCommandSystem } from '@core/commands/CommandSystem';
 import { performUndo, performRedo } from '@stores/historyStore';
 import { getEventBus } from '@core/events/EventBus';
+import { Button } from '@components/Button';
 import { IconButton } from '@components/IconButton';
 import { Icon, type IconName } from '@components/Icon';
 import { ToolOptionsBar } from './ToolOptionsBar';
@@ -288,8 +289,11 @@ export function TopNav(): JSX.Element {
 
   const projComps = useProjectStore((s) => s.comps);
   const activeCompId = useProjectStore((s) => s.tabs[s.activeTabId ?? '']?.compositionId);
+  // Scene ROOTS only: a group opened in its own tab has a settings record but
+  // is a layer, and placing it as a comp instance would reference a subtree
+  // of some other comp.
   const insertableComps = Object.values(projComps).filter(
-    (c) => c.id !== activeCompId && defaultSceneGraph.getNode(c.id),
+    (c) => c.id !== activeCompId && defaultSceneGraph.getNode(c.id) && !defaultSceneGraph.getNode(c.id)?.parent,
   );
   const selectedNode = selectedId ? defaultSceneGraph.getNode(selectedId) : undefined;
   const isTextLayer = !!selectedNode && hasTextComponent(selectedNode);
@@ -846,25 +850,25 @@ export function TopNav(): JSX.Element {
               <>
                 <span className={styles.toolDivider} aria-hidden />
                 <div className={styles.toolGroup}>
-                  <button
-                    type="button"
-                    className={styles.previewBtn}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leftIcon={<Icon name="play" size="sm" weight="fill" />}
                     title="Preview presentation (Fullscreen)"
                     onClick={() => enterPresentation()}
                   >
-                    <Icon name="play" size="md" weight="fill" />
-                    <span>Preview</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.exportBtn}
+                    Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    leftIcon={<Icon name="export" size="sm" weight="bold" />}
                     title="Export composition…"
                     data-tour="export"
                     onClick={() => openExportDialog(compDuration, compFps)}
                   >
-                    <Icon name="export" size="md" weight="bold" />
-                    <span>Export</span>
-                  </button>
+                    Export
+                  </Button>
                 </div>
               </>
             )}

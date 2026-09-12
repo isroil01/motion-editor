@@ -821,6 +821,14 @@ export interface Renderable {
     camera3d?: FrameScene['camera3d'];
     lights3d?: FrameScene['lights3d'];
     envMap?: FrameScene['envMap'];
+    /**
+     * A 3D composition CARD: `renderables` are in the comp's own pixels
+     * ([0,width]×[0,height]), not in screen space. CompositionPass renders them
+     * FLAT onto the whole offscreen and then draws that target through this
+     * renderable's (perspective) `modelMatrix`, instead of compositing a
+     * screen-space target over the visible rect.
+     */
+    flat?: { width: number; height: number };
   };
   /** Dynamic CPU-skinned mesh geometry for puppet deformation. */
   deformedMesh?: {

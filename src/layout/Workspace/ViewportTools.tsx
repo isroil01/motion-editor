@@ -36,7 +36,6 @@ import { isMediaDecodeRepaint } from '@core/rendering/mediaRepaint';
 import { hasPositionAnimation, smoothMotionPath, straightenMotionPath, hasPathTangents } from '@core/motion/motionPath';
 import { runAnimEdit } from '@core/animation/animationCommands';
 import { defaultAnimation } from '@motion/animation';
-import { usePreferenceStore } from '@stores/preferenceStore';
 import { useRenderBackendStore } from '@stores/renderBackendStore';
 import styles from './ViewportTools.module.css';
 
@@ -114,14 +113,9 @@ function ViewportStatus(): JSX.Element | null {
  * are in the same row already, either side. Two copies of the same control
  * drift apart and double the surface to keep in sync.
  */
-export function ViewportTools(): JSX.Element {
+export function ViewportTools(): JSX.Element | null {
   const motionPathVisible = useGuidesStore((s) => s.motionPathVisible);
   const toggleMotionPath = useGuidesStore((s) => s.toggleMotionPath);
-
-  const autoKeyframe = usePreferenceStore((s) => s.timelineAutoKeyframe);
-  const toggleAutoKeyframe = (): void => {
-    usePreferenceStore.getState().set('timelineAutoKeyframe', !autoKeyframe);
-  };
 
   // Scene mutations (3D switches, camera/light inserts) must refresh the
   // availability checks below.
@@ -158,6 +152,13 @@ export function ViewportTools(): JSX.Element {
       );
     }
   };
+
+  const isSoftware = useRenderBackendStore((s) => s.isSoftwareFallback);
+  const storeMode = useGuidesStore((s) => s.camera3dMode);
+  const camera3dMode = effectiveViewMode(storeMode);
+  const hasStatus = camera3dMode !== 'active' || isSoftware;
+  const hasTools = hasPositionAnim || (hasAnyAnim && !hasPositionAnim) || eligible3D.length > 0;
+  if (!hasStatus && !hasTools) return null;
 
   return (
     <div className={styles.tools}>
@@ -200,8 +201,6 @@ export function ViewportTools(): JSX.Element {
       {hasAnyAnim && !hasPositionAnim && (
         <div className={styles.group}>
           <span className={styles.animatedChip} title="This layer has keyframes (twirl it open in the timeline)">
-            {/* `keyframe`, not `stopwatch` — Auto-Keyframe beside this already
-                owns the stopwatch glyph in the same tool row. */}
             <Icon name="keyframe" size="sm" />
             Animated
           </span>
@@ -228,20 +227,6 @@ export function ViewportTools(): JSX.Element {
           <span className={styles.sep} />
         </div>
       )}
-
-      {/* Auto-keyframe: the stopwatch, lit and labelled REC while armed. */}
-      <div className={styles.group}>
-        <button
-          className={`${styles.headerBtn} ${autoKeyframe ? styles.headerBtnActive : ''}`}
-          onClick={toggleAutoKeyframe}
-          aria-label="Auto-Keyframe mode"
-          aria-pressed={autoKeyframe}
-          title={autoKeyframe ? 'Auto-Keyframe Mode is ON (Click to turn OFF)' : 'Auto-Keyframe Mode is OFF (Click to turn ON)'}
-        >
-          <Icon name="stopwatch" size="md" />
-          {autoKeyframe && <span className={styles.recLabel}>REC</span>}
-        </button>
-      </div>
     </div>
   );
 }

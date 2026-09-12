@@ -63,6 +63,71 @@ export function percentToDb(percent: number): number {
   return Math.max(MIN_LEVEL_DB, 20 * Math.log10(percent / 100));
 }
 
+/**
+ * Animatable stereo position, −100 (hard left) … +100 (hard right).
+ *
+ * The second property through this seam, and the reason the seam was written
+ * generically: it schedules exactly as level does, so a swept pan is a curve on
+ * the audio thread rather than 60 stepped assignments a second.
+ *
+ * Percent rather than the −1…1 a `StereoPannerNode` takes, because that is the
+ * unit the Stereo Mixer effect already uses for its Left/Right Pan params and
+ * the unit the inspector shows. The conversion is one place: {@link panToNorm}.
+ */
+export const AUDIO_PAN_PROP = 'audioPan';
+
+/** Hard left / hard right, in the percent the UI and the document use. */
+export const MIN_PAN = -100;
+export const MAX_PAN = 100;
+
+/** Pan percent → the −1…1 a `StereoPannerNode` wants, clamped. */
+export function panToNorm(pan: number): number {
+  if (!Number.isFinite(pan)) return 0;
+  return Math.max(-1, Math.min(1, pan / 100));
+}
+
+/**
+ * The panner a voice needs, or null when it is centred and unanimated.
+ *
+ * Lives HERE, beside the ramp builders, rather than on the engine — for the
+ * same reason `buildParamRamp` does. The live engine and the offline mixdown
+ * must ask one question about whether a panner exists, or a voice could pan in
+ * the preview and render centred: a divergence that survives every visual check
+ * and only surfaces on headphones. Keeping it in `AudioEngine` also made it
+ * invisible to every mixdown test that mocks the engine, which is exactly the
+ * coverage this seam most needs.
+ *
+ * Typed structurally rather than against `AudioLayerState`, so this module
+ * still knows nothing about the engine.
+ */
+export function voicePanner(
+  ctx: BaseAudioContext,
+  l: { pan?: number; panAnimated?: boolean },
+): StereoPannerNode | null {
+  // An ANIMATED pan needs the node even while it reads centre — the ramp has
+  // to have something to be scheduled on.
+  if (!l.panAnimated && (l.pan ?? 0) === 0) return null;
+  // Not every engine implements it (older Safari). A missing panner is better
+  // than a thrown constructor taking the whole voice, and its layer, down.
+  if (typeof ctx.createStereoPanner !== 'function') return null;
+  const panner = ctx.createStereoPanner();
+  panner.pan.value = panToNorm(l.pan ?? 0);
+  return panner;
+}
+
+/** True when this node has pan keyframes. */
+export function isPanAnimated(nodeId: string): boolean {
+  return defaultAnimation
+    .tracksFor(nodeId)
+    .some((t) => t.prop === AUDIO_PAN_PROP && t.keyframes.length > 0);
+}
+
+/** Pan at a composition time, falling back to the static value. */
+export function samplePan(nodeId: string, compSec: number, staticPan: number): number {
+  const v = defaultAnimation.sample(nodeId, AUDIO_PAN_PROP, compSec);
+  return typeof v === 'number' ? v : staticPan;
+}
+
 /** True when this node has level keyframes (so a constant is not enough). */
 export function isLevelAnimated(nodeId: string): boolean {
   return defaultAnimation
@@ -79,7 +144,14 @@ export function sampleLevelDb(nodeId: string, compSec: number, staticDb: number)
   return typeof v === 'number' ? v : staticDb;
 }
 
-/** One scheduled point: `offsetSec` after the voice starts, this linear gain. */
+/**
+ * One scheduled point: `offsetSec` after the voice starts, this param value.
+ *
+ * `gain` is named for the first property through this seam and kept for every
+ * one since — a pan ramp's points carry a −1…1 position in the same field. The
+ * field is "whatever this AudioParam takes", already converted out of the
+ * document's units by the builder.
+ */
 export interface RampPoint {
   offsetSec: number;
   gain: number;
@@ -103,6 +175,29 @@ const RAMP_HZ = 50;
  * A voice whose level is not animated returns exactly one point — a constant —
  * so the common case costs nothing and schedules no ramp at all.
  */
+/**
+ * The pan curve for one voice, in `StereoPannerNode` units.
+ *
+ * Deliberately a sibling of {@link buildParamRamp} rather than a parameter on
+ * it: the two map through different functions (dB→gain is exponential, percent
+ * →norm is linear), and a shared builder taking a mapper reads worse than two
+ * three-line functions that each say what they are.
+ */
+export function buildPanRamp(
+  nodeId: string,
+  staticPan: number,
+  startCompSec: number,
+  durationSec: number,
+  opts?: { animated?: boolean; hz?: number },
+): RampPoint[] {
+  return buildRamp(
+    (compSec) => panToNorm(samplePan(nodeId, compSec, staticPan)),
+    startCompSec,
+    durationSec,
+    { animated: opts?.animated ?? isPanAnimated(nodeId), hz: opts?.hz },
+  );
+}
+
 export function buildParamRamp(
   nodeId: string,
   staticDb: number,

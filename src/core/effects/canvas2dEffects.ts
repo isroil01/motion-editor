@@ -35,6 +35,7 @@ import { effectNumber, paramsOf } from './effects';
 import { deepGlowData, deepGlowSettings } from './deepGlow';
 import { beamPathData, beamPathSettings } from './beamPath';
 import { drawPlexus } from './plexus';
+import type { VizLayoutOptions } from './audioVizLayout';
 import { applyKeyData, chokeAlpha, softenAlpha } from './keylight';
 import { waveWarpData, turbulentDisplaceData, curlNoiseData } from './warp';
 import { blurRgba, radialBlurData, blurDimensions, channelBlurData, unsharpMaskData } from './blurs';
@@ -819,7 +820,38 @@ function applyAudioSpectrum(oc: CanvasRenderingContext2D, w: number, h: number, 
     mode: modeN === 1 ? 'line' : modeN === 2 ? 'mirrored' : 'bars',
     insideColor: str(e, 'insideColor', '#00e5ff'),
     outsideColor: str(e, 'outsideColor', '#0066ff'),
+    ...audioVizLayoutOf(e),
   });
+}
+
+/**
+ * The layout half of an audio visualiser's parameters.
+ *
+ * Shared by both effects because they declare the same KEYS — see the
+ * definitions in `effects.ts`, where that sameness is deliberate.
+ */
+function audioVizLayoutOf(e: Effect): VizLayoutOptions & {
+  side: number;
+  softness: number;
+  hueInterpolation: number;
+} {
+  const pts = paramsOf(e).pathPoints;
+  return {
+    // `pathPoints` is RESOLVED by buildSnapshot from `pathMaskId`; an
+    // unassigned path leaves it empty, and the layout falls through to polar
+    // or to the Start/End segment.
+    pathPoints: Array.isArray(pts) ? (pts as number[]) : [],
+    usePolarPath: bool(e, 'usePolarPath', false),
+    polarRadius: effectNumber(e, 'polarRadius'),
+    startAngle: effectNumber(e, 'startAngle'),
+    startX: effectNumber(e, 'startX'),
+    startY: effectNumber(e, 'startY'),
+    endX: effectNumber(e, 'endX'),
+    endY: effectNumber(e, 'endY'),
+    side: Math.round(effectNumber(e, 'side')),
+    softness: effectNumber(e, 'softness'),
+    hueInterpolation: effectNumber(e, 'hueInterpolation'),
+  };
 }
 
 // ── Generate / Text (kernels in generateText.ts) ───────────────────
@@ -2839,6 +2871,7 @@ function applyAudioWaveform(oc: CanvasRenderingContext2D, w: number, h: number, 
     effectNumber(e, 'displayMode'), effectNumber(e, 'maxHeight'), effectNumber(e, 'thickness'),
     str(e, 'insideColor', '#7dd3fc'), str(e, 'outsideColor', '#1d4ed8'),
     effectNumber(e, 'opacity'), effectNumber(e, 'composite'),
+    audioVizLayoutOf(e),
   );
 }
 

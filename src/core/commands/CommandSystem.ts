@@ -153,8 +153,28 @@ function chordKeyFromEvent(e: KeyboardEvent): string {
   if (m && e.key !== m[1]) return m[1]!;
   const bracket = code === 'BracketLeft' ? '[' : code === 'BracketRight' ? ']' : null;
   if (bracket && e.key !== bracket) return bracket;
+  // Same for the backtick key: Shift+` reports `~` on a US layout, and other
+  // layouts put other characters there. Bound as `{ key: '`', shift: true }`.
+  if (code === 'Backquote' && e.key !== '`') return '`';
+  /**
+   * The NUMPAD is a separate keyboard as far as After Effects is concerned, and
+   * its audio shortcuts depend on it: Numpad `.` is "preview only audio", while
+   * `.` on the main keyboard is an ordinary full stop that must keep typing a
+   * full stop. `e.key` reports both as '.', so the pair is separated by `code`
+   * and bound as `Numpad.` / `Numpad*`.
+   *
+   * Only the keys AE actually binds are mapped. Numpad digits and Enter are
+   * deliberately left alone — they are widely used as plain digits and Enter,
+   * and renaming them would silently break every existing binding.
+   */
+  if (NUMPAD_KEYS[code]) return NUMPAD_KEYS[code]!;
   return e.key;
 }
+
+const NUMPAD_KEYS: Readonly<Record<string, string>> = {
+  NumpadDecimal: 'Numpad.',
+  NumpadMultiply: 'Numpad*',
+};
 
 export const chordFromEvent = (e: KeyboardEvent): import('@app-types/common').KeyChord => ({
   key: chordKeyFromEvent(e),

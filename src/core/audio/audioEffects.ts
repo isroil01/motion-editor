@@ -67,7 +67,22 @@ import { buildRamp, applyRamp } from './audioParams';
 export type AudioEffectType =
   | 'parametric-eq' | 'bass-treble' | 'high-low-pass' | 'delay'
   | 'reverb' | 'flange-chorus' | 'tone' | 'modulator' | 'stereo-mixer'
-  | 'backwards';
+  | 'backwards'
+  // Added 2026-09-12 to close the gap against AE 26.3, which shipped four
+  // audio effects this cycle. All three are built from native nodes; see
+  // `audioGate.ts` for why the fourth (Gate) is a baked verb instead.
+  | 'compressor' | 'distortion' | 'de-esser';
+
+/**
+ * The waveforms a generator can make.
+ *
+ * Wider than `OscillatorType` because AE's Tone offers White Noise, which is
+ * not an oscillator at all — it is a looping buffer of hashed samples. Keeping
+ * it in the same field is right anyway: to the user it is one "what shape is
+ * this sound" question, and the graph builder is the only place that cares
+ * which kind of node answers it.
+ */
+export type AudioWaveform = OscillatorType | 'white-noise';
 
 export interface AudioEffect {
   /** Stable identity, so keyframes scope to an EFFECT and survive reordering —
@@ -89,21 +104,87 @@ export interface AudioEffect {
    * store `{ type: 'tone', mode: 'lowpass' }` and typecheck. Discrete for the
    * same reason `mode` is — half a sine and half a square is not a waveform.
    */
-  wave?: OscillatorType;
+  wave?: AudioWaveform;
+  /**
+   * Distortion only — which transfer curve to clip through.
+   *
+   * Discrete for the same reason `mode` and `wave` are: halfway between a tube
+   * and a fuzz is not a curve, it is a different curve, and interpolating the
+   * two would produce a shape neither option describes.
+   */
+  curve?: DistortionCurve;
+  /**
+   * Boolean options, by key — Invert Phase, Stereo Voices, Swap Channels,
+   * Sibilance Only.
+   *
+   * A list rather than a field each, because these are the same KIND of thing
+   * and adding a field per effect would mean widening `AudioEffect` every time
+   * an effect grows a checkbox — the interface would slowly become the union of
+   * every effect's options, and a document could typecheck while holding
+   * `{ type: 'tone', swapChannels: true }`.
+   *
+   * Discrete, like `mode` and `wave`, so deliberately NOT keyframeable: there
+   * is no halfway between a phase inverted and not.
+   *
+   * Absent means "no flags set", so an effect nobody has ticked anything on
+   * stores no key at all and round-trips byte for byte.
+   */
+  flags?: string[];
 }
+
+/** True when `flag` is set on this effect. */
+export function hasFlag(fx: AudioEffect, flag: string): boolean {
+  return fx.flags?.includes(flag) === true;
+}
+
+/**
+ * The boolean options each effect offers, in display order.
+ *
+ * The inspector renders straight from this, the same way it renders `params`
+ * from {@link AUDIO_EFFECT_DEFS} — so a flag cannot exist as a control without
+ * the graph builder having somewhere to read it, nor be read without appearing.
+ */
+export const AUDIO_EFFECT_FLAGS: Partial<Record<AudioEffectType, ReadonlyArray<{ key: string; label: string; hint?: string }>>> = {
+  backwards: [
+    { key: 'swapChannels', label: 'Swap Channels', hint: 'Play the left channel on the right, and vice versa.' },
+  ],
+  'stereo-mixer': [
+    { key: 'invertPhase', label: 'Invert Phase', hint: 'Flip both channels, so two sounds at one frequency stop cancelling.' },
+  ],
+  'flange-chorus': [
+    { key: 'invertPhase', label: 'Invert Phase', hint: 'Emphasises the high frequencies rather than the low.' },
+    { key: 'stereoVoices', label: 'Stereo Voices', hint: 'Alternate the voices left and right across the image.' },
+  ],
+  'de-esser': [
+    { key: 'sibilanceOnly', label: 'Sibilance Only', hint: 'Monitor just the band being treated, to find the right frequency.' },
+  ],
+};
 
 /** Parameter defaults, and the inert value for each. */
 export const AUDIO_EFFECT_DEFS: Record<AudioEffectType, {
   label: string;
   params: ReadonlyArray<{ key: string; label: string; unit?: string; min: number; max: number; default: number }>;
 }> = {
+  /*
+    THREE bands, as AE has. Band 1 keeps the original `frequency` / `gain` / `q`
+    keys, so a project saved before this shipped opens with its EQ unchanged and
+    two inert bands appended — a band whose gain is 0 is a filter that does
+    nothing, which is why there is no separate "Band Enabled" control to get out
+    of sync with the gain beside it.
+  */
   'parametric-eq': {
     label: 'Parametric EQ',
     params: [
-      { key: 'frequency', label: 'Frequency', unit: 'Hz', min: 20, max: 20000, default: 1000 },
-      { key: 'gain', label: 'Gain', unit: 'dB', min: -40, max: 40, default: 0 },
+      { key: 'frequency', label: 'Band 1 Frequency', unit: 'Hz', min: 20, max: 20000, default: 1000 },
+      { key: 'gain', label: 'Band 1 Gain', unit: 'dB', min: -40, max: 40, default: 0 },
       // Q below 0.0001 is rejected by the spec; the floor keeps a swept Q safe.
-      { key: 'q', label: 'Q', min: 0.1, max: 20, default: 1 },
+      { key: 'q', label: 'Band 1 Q', min: 0.1, max: 20, default: 1 },
+      { key: 'frequency2', label: 'Band 2 Frequency', unit: 'Hz', min: 20, max: 20000, default: 3000 },
+      { key: 'gain2', label: 'Band 2 Gain', unit: 'dB', min: -40, max: 40, default: 0 },
+      { key: 'q2', label: 'Band 2 Q', min: 0.1, max: 20, default: 1 },
+      { key: 'frequency3', label: 'Band 3 Frequency', unit: 'Hz', min: 20, max: 20000, default: 8000 },
+      { key: 'gain3', label: 'Band 3 Gain', unit: 'dB', min: -40, max: 40, default: 0 },
+      { key: 'q3', label: 'Band 3 Q', min: 0.1, max: 20, default: 1 },
     ],
   },
   'bass-treble': {
@@ -136,6 +217,9 @@ export const AUDIO_EFFECT_DEFS: Record<AudioEffectType, {
       // Reverb without a dry path is a wash with no transient, so the default
       // leans dry — AE's Reverb defaults to 20% wet for the same reason.
       { key: 'mix', label: 'Dry/Wet', unit: '%', min: 0, max: 100, default: 20 },
+      // Both shape the IR rather than a live param — see the graph case.
+      { key: 'diffusion', label: 'Diffusion', unit: '%', min: 0, max: 100, default: 70 },
+      { key: 'brightness', label: 'Brightness', unit: '%', min: 0, max: 100, default: 50 },
     ],
   },
   'flange-chorus': {
@@ -151,20 +235,45 @@ export const AUDIO_EFFECT_DEFS: Record<AudioEffectType, {
       // Feedback is what makes a flange ring. Chorus uses none.
       { key: 'feedback', label: 'Feedback', unit: '%', min: -95, max: 95, default: 0 },
       { key: 'mix', label: 'Dry/Wet', unit: '%', min: 0, max: 100, default: 50 },
+      /*
+        VOICES is what separates the two halves of this effect's name. One
+        delayed copy comb-filters (flange); several, at different LFO phases,
+        read as a small choir (chorus). Defaulting to 1 keeps every project
+        saved before this exactly as it sounded.
+      */
+      { key: 'voices', label: 'Voices', min: 1, max: 8, default: 1 },
+      // AE's advice: 360 ÷ voices spreads them evenly around the cycle.
+      { key: 'phase', label: 'Voice Phase Change', unit: '°', min: 0, max: 360, default: 90 },
     ],
   },
+  /*
+    FIVE tones, as AE has, so the effect can make a chord rather than a beep.
+    Tones 2–5 default to 0 Hz, which is AE's own "this tone is off" convention
+    and keeps an existing single-tone project sounding identical.
+  */
   tone: {
     label: 'Tone',
     params: [
-      { key: 'frequency', label: 'Frequency', unit: 'Hz', min: 20, max: 20000, default: 440 },
+      { key: 'frequency', label: 'Frequency 1', unit: 'Hz', min: 0, max: 20000, default: 440 },
+      { key: 'frequency2', label: 'Frequency 2', unit: 'Hz', min: 0, max: 20000, default: 0 },
+      { key: 'frequency3', label: 'Frequency 3', unit: 'Hz', min: 0, max: 20000, default: 0 },
+      { key: 'frequency4', label: 'Frequency 4', unit: 'Hz', min: 0, max: 20000, default: 0 },
+      { key: 'frequency5', label: 'Frequency 5', unit: 'Hz', min: 0, max: 20000, default: 0 },
       { key: 'level', label: 'Level', unit: 'dB', min: -60, max: 0, default: -12 },
     ],
   },
+  /*
+    AE splits FREQUENCY modulation (vibrato) from AMPLITUDE modulation
+    (tremolo), and the two sound nothing alike. We had only the amplitude half,
+    under the name `depth`; it keeps that name and meaning, and `fmDepth` adds
+    the vibrato, defaulting to 0 so nothing already built changes.
+  */
   modulator: {
     label: 'Modulator',
     params: [
       { key: 'rate', label: 'Modulation Rate', unit: 'Hz', min: 0.1, max: 5000, default: 30 },
-      { key: 'depth', label: 'Modulation Depth', unit: '%', min: 0, max: 100, default: 50 },
+      { key: 'depth', label: 'Amplitude Modulation', unit: '%', min: 0, max: 100, default: 50 },
+      { key: 'fmDepth', label: 'Modulation Depth', unit: '%', min: 0, max: 100, default: 0 },
     ],
   },
   'stereo-mixer': {
@@ -176,6 +285,49 @@ export const AUDIO_EFFECT_DEFS: Record<AudioEffectType, {
       // is how you swap the stereo image, which is what this effect is for.
       { key: 'leftPan', label: 'Left Pan', unit: '%', min: -100, max: 100, default: -100 },
       { key: 'rightPan', label: 'Right Pan', unit: '%', min: -100, max: 100, default: 100 },
+    ],
+  },
+  /*
+    ── The AE 26.3 additions ──────────────────────────────────────────
+    Built entirely from native nodes. That is a constraint, not a
+    coincidence: an `AudioWorklet` would have to be reimplemented against
+    the `OfflineAudioContext` the export uses and the two proved to agree,
+    which is the argument `ducking.ts` sets out at length. Where a control
+    could only be honoured by a worklet it is absent rather than faked —
+    see the graph cases for exactly which, and why.
+  */
+  compressor: {
+    label: 'Compressor',
+    params: [
+      { key: 'threshold', label: 'Threshold', unit: 'dB', min: -60, max: 0, default: -16 },
+      { key: 'ratio', label: 'Ratio', unit: ':1', min: 1, max: 20, default: 3 },
+      { key: 'knee', label: 'Knee', unit: 'dB', min: 0, max: 30, default: 15 },
+      { key: 'attack', label: 'Attack', unit: 'ms', min: 0, max: 400, default: 6 },
+      { key: 'release', label: 'Release', unit: 'ms', min: 1, max: 1000, default: 440 },
+      // Compression lowers everything; makeup puts the level back.
+      { key: 'makeupGain', label: 'Makeup Gain', unit: 'dB', min: -30, max: 30, default: 0 },
+      { key: 'outputLimit', label: 'Output Limit', unit: 'dB', min: -30, max: 0, default: 0 },
+    ],
+  },
+  distortion: {
+    label: 'Distortion',
+    params: [
+      { key: 'drive', label: 'Drive', unit: '%', min: 0, max: 100, default: 25 },
+      { key: 'gain', label: 'Gain', min: 0, max: 300, default: 25 },
+      { key: 'mix', label: 'Mix', unit: '%', min: 0, max: 100, default: 100 },
+      { key: 'volume', label: 'Volume', min: 0, max: 100, default: 11 },
+      // The bitcrusher half. 16 bits is transparent; 4 is a ring tone.
+      { key: 'resolution', label: 'Resolution', unit: 'bit', min: 1, max: 16, default: 16 },
+    ],
+  },
+  'de-esser': {
+    label: 'De-esser',
+    params: [
+      { key: 'threshold', label: 'Threshold', unit: 'dB', min: -60, max: 0, default: -20 },
+      { key: 'frequency', label: 'Frequency', unit: 'Hz', min: 2000, max: 16000, default: 7000 },
+      { key: 'bandwidth', label: 'Bandwidth', unit: 'Hz', min: 500, max: 8000, default: 3000 },
+      { key: 'attack', label: 'Attack', unit: 'ms', min: 0, max: 50, default: 1 },
+      { key: 'release', label: 'Release', unit: 'ms', min: 5, max: 500, default: 50 },
     ],
   },
   backwards: {
@@ -196,11 +348,132 @@ export const AUDIO_EFFECT_DEFS: Record<AudioEffectType, {
  */
 export const OSC_WAVES: readonly OscillatorType[] = ['sine', 'triangle', 'sawtooth', 'square'];
 
+/** Every waveform a generator offers, including the one that is not an
+ *  oscillator. See {@link AudioWaveform}. */
+export const AUDIO_WAVEFORMS: ReadonlyArray<{ value: AudioWaveform; label: string }> = [
+  { value: 'sine', label: 'Sine' },
+  { value: 'triangle', label: 'Triangle' },
+  { value: 'sawtooth', label: 'Saw' },
+  { value: 'square', label: 'Square' },
+  { value: 'white-noise', label: 'White Noise' },
+];
+
+/** AE's six distortion characters. */
+export type DistortionCurve =
+  | 'soft-clip' | 'hard-clip' | 'saturation-1' | 'saturation-2' | 'tube' | 'fuzz';
+
+export const DISTORTION_CURVES: ReadonlyArray<{ value: DistortionCurve; label: string }> = [
+  { value: 'soft-clip', label: 'Soft Clip' },
+  { value: 'hard-clip', label: 'Hard Clip' },
+  { value: 'saturation-1', label: 'Saturation 1' },
+  { value: 'saturation-2', label: 'Saturation 2' },
+  { value: 'tube', label: 'Tube' },
+  { value: 'fuzz', label: 'Fuzz' },
+];
+
+/** Samples in a WaveShaper lookup table. 2048 is smooth enough that the
+ *  quantisation of the TABLE is inaudible under the quantisation the
+ *  bitcrusher is deliberately adding. */
+const CURVE_SAMPLES = 2048;
+
+/**
+ * The transfer function for one distortion character, as a WaveShaper curve.
+ *
+ * Pure and exported so the shapes are unit-testable: the properties that matter
+ * (odd symmetry, monotonic, bounded, and inert at zero drive) are easy to
+ * assert and impossible to hear yourself into confidence about.
+ *
+ * `bits` is the bitcrusher, applied AFTER the shaping — quantising the output
+ * of the curve, which is what a low-resolution converter does. At 16 bits the
+ * step is smaller than the table's own resolution, so it changes nothing.
+ */
+export function distortionCurve(kind: DistortionCurve, drivePercent: number, bits = 16): Float32Array<ArrayBuffer> {
+  const curve = new Float32Array(CURVE_SAMPLES);
+  const d = Math.max(0, Math.min(100, drivePercent)) / 100;
+  // `k` spans "barely touched" to "hard", shaped so the first half of the
+  // control does something audible rather than all the action living at the top.
+  const k = 1 + d * d * 60;
+  const levels = bits >= 16 ? 0 : Math.pow(2, Math.max(1, Math.min(16, bits))) - 1;
+
+  for (let i = 0; i < CURVE_SAMPLES; i++) {
+    const x = (i / (CURVE_SAMPLES - 1)) * 2 - 1;
+    let y: number;
+    switch (kind) {
+      case 'hard-clip':
+        y = Math.max(-1, Math.min(1, x * (1 + d * 9)));
+        break;
+      case 'saturation-1':
+        y = Math.tanh(x * k * 0.5);
+        break;
+      case 'saturation-2':
+        // Steeper than tanh near the origin, so it colours quiet passages too.
+        y = Math.sign(x) * (1 - Math.exp(-Math.abs(x) * k * 0.6));
+        break;
+      case 'tube':
+        /*
+          ASYMMETRIC on purpose. A valve clips the two halves of the wave
+          differently, and that asymmetry is what produces the even harmonics
+          people mean by "tube warmth" — a symmetric curve makes only odd ones
+          and sounds like a transistor.
+        */
+        y = x >= 0 ? Math.tanh(x * k * 0.5) : Math.tanh(x * k * 0.3) * 0.85;
+        break;
+      case 'fuzz': {
+        // Near-square: almost everything is pushed to the rails.
+        const t = Math.tanh(x * (1 + d * 200));
+        y = t * 0.9 + Math.sign(x) * 0.1 * d;
+        break;
+      }
+      case 'soft-clip':
+      default:
+        // The classic arctan soft clip: linear through the origin, bending
+        // gently into the rails, so at zero drive it is exactly a wire.
+        y = d === 0 ? x : Math.atan(x * k) / Math.atan(k);
+        break;
+    }
+    // Bitcrush: snap to the nearest of `levels` steps across -1..1.
+    if (levels > 0) y = Math.round(((y + 1) / 2) * levels) / levels * 2 - 1;
+    curve[i] = Math.max(-1, Math.min(1, y));
+  }
+  return curve;
+}
+
 /** The effects that read `wave`. Anything else showing the control would be
  *  offering a setting nothing consumes. */
 export const WAVE_EFFECTS: ReadonlySet<AudioEffectType> = new Set<AudioEffectType>([
   'tone', 'flange-chorus', 'modulator',
 ]);
+
+/**
+ * The oscillator shape for a control LFO.
+ *
+ * White Noise is a legal {@link AudioWaveform} because Tone offers it, but an
+ * OscillatorNode cannot make one — and an LFO is a control signal, where noise
+ * would be a random walk rather than a modulation. The two effects that use an
+ * LFO therefore fall back to a sine rather than failing to build.
+ */
+function lfoType(wave: AudioWaveform | undefined): OscillatorType {
+  return wave && wave !== 'white-noise' ? wave : 'sine';
+}
+
+/**
+ * A looping buffer of hashed white noise, for Tone's White Noise waveform.
+ *
+ * SEEDED, never `Math.random`, for the same reason the reverb IR is: two
+ * renders of one project must produce the same file. One second is long enough
+ * that the loop point is not heard as a pitch.
+ */
+function noiseBuffer(ctx: BaseAudioContext, seed: number): AudioBuffer {
+  const n = Math.max(1, Math.round(ctx.sampleRate));
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) {
+    let h = (i + 1) * 374761393 + seed * 2246822519;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    data[i] = (((h ^ (h >>> 16)) >>> 0) / 4294967296) * 2 - 1;
+  }
+  return buf;
+}
 
 /** Shelf corner frequencies for Bass & Treble, matching AE's fixed bands. */
 const BASS_SHELF_HZ = 320;
@@ -208,6 +481,15 @@ const TREBLE_SHELF_HZ = 3200;
 
 /** Longest delay line we allocate. `DelayNode` needs its max up front. */
 const MAX_DELAY_SEC = 5;
+
+/**
+ * The delay a vibrato sweeps around, in seconds.
+ *
+ * Small enough that the constant offset is not heard as an echo, large enough
+ * that the LFO has room to swing without the line reaching zero — which would
+ * click.
+ */
+const FM_BASE_SEC = 0.004;
 
 /** dB → linear gain. −60 dB is the floor the Tone control bottoms out at. */
 const dbToGain = (db: number): number => 10 ** (db / 20);
@@ -233,6 +515,8 @@ function impulseResponse(
   decaySec: number,
   preDelaySec: number,
   seed: number,
+  diffusion = 0.7,
+  brightness = 0.5,
 ): AudioBuffer {
   const rate = ctx.sampleRate;
   const pre = Math.max(0, Math.round(preDelaySec * rate));
@@ -241,15 +525,55 @@ function impulseResponse(
   // to both would put the whole tail dead centre, which sounds like a mono
   // effect bolted onto a stereo mix rather than like a space.
   const buf = ctx.createBuffer(2, pre + tail, rate);
+
+  /*
+    DIFFUSION: how fast the tail reaches full density.
+
+    A real room starts as a handful of discrete reflections and only becomes a
+    wash once they have bounced enough times. Low diffusion keeps that early
+    sparseness — samples near the front are gated so only some survive — and
+    high diffusion fills it in immediately. The gate opens over the first
+    fraction of the tail, so the CHARACTER changes without the decay time doing.
+  */
+  const d = Math.max(0, Math.min(1, diffusion));
+  const buildupSamples = Math.max(1, Math.round(tail * 0.35 * (1 - d)));
+
+  /*
+    BRIGHTNESS: the tilt of the tail's spectrum.
+
+    Air and soft furnishings absorb treble faster than bass, so a darker room
+    loses its highs first. Modelled as a one-pole low-pass over the noise whose
+    coefficient tightens as the tail decays — cheap, and it captures the one
+    thing that actually reads as "dark room" rather than "quiet room".
+  */
+  const b = Math.max(0, Math.min(1, brightness));
+
   for (let ch = 0; ch < 2; ch++) {
     const data = buf.getChannelData(ch);
+    let lp = 0;
     for (let i = 0; i < tail; i++) {
       let h = (i + 1) * 374761393 + ch * 668265263 + seed * 2246822519;
       h = (h ^ (h >>> 13)) * 1274126177;
       const noise = (((h ^ (h >>> 16)) >>> 0) / 4294967296) * 2 - 1;
+
+      // Progress through the tail, 0..1 — used by both shapers.
+      const t = i / tail;
+      // Coefficient falls as the tail ages, so the top end dies first.
+      const coeff = 0.15 + 0.8 * b * (1 - t * 0.6);
+      lp += (noise - lp) * Math.max(0.02, Math.min(1, coeff));
+
+      // Density ramp: before the build-up completes, drop most samples.
+      let density = 1;
+      if (i < buildupSamples) {
+        const ramp = i / buildupSamples;
+        // A hashed threshold, so which samples survive is stable across renders.
+        const keep = ((h >>> 8) & 0xff) / 255;
+        density = keep < 0.15 + 0.85 * ramp ? 1 : 0;
+      }
+
       // Exponential decay to −60 dB across the requested time, which is the
       // usual definition of a reverb's decay (RT60).
-      data[pre + i] = noise * 10 ** ((-3 * i) / tail);
+      data[pre + i] = lp * density * 10 ** ((-3 * i) / tail);
     }
   }
   return buf;
@@ -265,11 +589,22 @@ function impulseResponse(
  * built at the wrong rate would play back at the wrong length.
  */
 const irCache = new Map<string, AudioBuffer>();
-function cachedImpulse(ctx: BaseAudioContext, decay: number, preDelay: number, seed: number): AudioBuffer {
-  const key = `${ctx.sampleRate}|${decay.toFixed(3)}|${preDelay.toFixed(4)}|${seed}`;
+function cachedImpulse(
+  ctx: BaseAudioContext,
+  decay: number,
+  preDelay: number,
+  seed: number,
+  diffusion = 0.7,
+  brightness = 0.5,
+): AudioBuffer {
+  // Every argument that shapes the buffer is in the key. Leaving the two new
+  // ones out would serve a cached tail built at the previous settings, so the
+  // controls would appear to do nothing after the first render.
+  const key = `${ctx.sampleRate}|${decay.toFixed(3)}|${preDelay.toFixed(4)}|${seed}`
+    + `|${diffusion.toFixed(2)}|${brightness.toFixed(2)}`;
   let ir = irCache.get(key);
   if (!ir) {
-    ir = impulseResponse(ctx, decay, preDelay, seed);
+    ir = impulseResponse(ctx, decay, preDelay, seed, diffusion, brightness);
     irCache.set(key, ir);
   }
   return ir;
@@ -441,16 +776,31 @@ export function connectAudioEffects(
     };
     switch (fx.type) {
       case 'parametric-eq': {
-        const f = ctx.createBiquadFilter();
-        f.type = 'peaking';
-        bind(f.frequency, ['frequency'], (r) => r('frequency'));
-        bind(f.gain, ['gain'], (r) => r('gain'));
-        // The spec rejects Q <= 0, and the clamp is INSIDE the derivation so it
-        // applies at every sampled point of an animated sweep — a curve that
-        // passes through zero would throw mid-render, which is worse than
-        // sounding wrong.
-        bind(f.Q, ['q'], (r) => Math.max(0.0001, r('q')));
-        node = node.connect(f);
+        /*
+          THREE peaking filters in series, as AE has. Band 1 uses the original
+          un-suffixed keys, so a project saved before the other two existed
+          builds the identical single filter it always did — bands 2 and 3
+          default to 0 dB, and a peaking filter at 0 dB is a wire.
+
+          Chained rather than summed: filters in series multiply their
+          responses, which is what "boost here AND cut there" means. Summing
+          them would make three parallel copies of the signal.
+        */
+        for (const band of ['', '2', '3'] as const) {
+          const fKey = `frequency${band}`;
+          const gKey = `gain${band}`;
+          const qKey = `q${band}`;
+          const f = ctx.createBiquadFilter();
+          f.type = 'peaking';
+          bind(f.frequency, [fKey], (r) => clampTo(r(fKey), 20, 20000));
+          bind(f.gain, [gKey], (r) => r(gKey));
+          // The spec rejects Q <= 0, and the clamp is INSIDE the derivation so
+          // it applies at every sampled point of an animated sweep — a curve
+          // that passes through zero would throw mid-render, which is worse
+          // than sounding wrong.
+          bind(f.Q, [qKey], (r) => Math.max(0.0001, r(qKey)));
+          node = node.connect(f);
+        }
         break;
       }
       case 'bass-treble': {
@@ -537,7 +887,20 @@ export function connectAudioEffects(
         // Seeded from the effect's own id, so two reverbs in one project have
         // different tails (as two real spaces would) while each is stable
         // across renders.
-        conv.buffer = cachedImpulse(ctx, decay, preMs / 1000, hashId(fx.id));
+        /*
+          Diffusion and Brightness join Decay and Pre-Delay as IR-SHAPING
+          controls, not AudioParams — they change the buffer, so like the other
+          two they are static by nature rather than by omission.
+
+          Diffusion is how quickly the early part of the tail fills in: low
+          values leave discrete reflections (a small hard room), high values
+          smear them into a wash. Brightness is the tilt of the tail's spectrum
+          — a real room absorbs highs faster than lows, so a dark setting decays
+          the treble sooner.
+        */
+        const diffusion = clampTo(num(fx, 'diffusion', def('reverb', 'diffusion')), 0, 100) / 100;
+        const brightness = clampTo(num(fx, 'brightness', def('reverb', 'brightness')), 0, 100) / 100;
+        conv.buffer = cachedImpulse(ctx, decay, preMs / 1000, hashId(fx.id), diffusion, brightness);
 
         const dry = ctx.createGain();
         bind(dry.gain, ['mix'], (r) => 1 - clampTo(r('mix') / 100, 0, 1));
@@ -563,38 +926,95 @@ export function connectAudioEffects(
         /** Base delay, in seconds, from the Voice Separation control. */
         const baseOf = (r: (k: string) => number): number => clampTo(r('separation'), 0.1, 40) / 1000;
 
-        const delay = ctx.createDelay(MAX_DELAY_SEC);
-        // The LFO is CONNECTED to this same param. A connected input sums with
-        // whatever value is scheduled, so a keyframed separation moves the
-        // centre the LFO sweeps around rather than fighting it.
-        bind(delay.delayTime, ['separation'], baseOf);
-        const lfo = ctx.createOscillator();
-        lfo.type = fx.wave ?? 'sine';
-        bind(lfo.frequency, ['rate'], (r) => clampTo(r('rate'), 0.05, 10));
-        const lfoDepth = ctx.createGain();
-        // HALF the base separation at full depth, so the delay can never reach
-        // zero — and derived from BOTH controls, so automating either one keeps
-        // that guarantee. A delay line crossing zero clicks, and at exactly zero
-        // the feedback loop becomes a direct connection: instant runaway.
-        bind(lfoDepth.gain, ['separation', 'depth'],
-          (r) => baseOf(r) * 0.5 * clampTo(r('depth') / 100, 0, 1));
-        lfo.connect(lfoDepth).connect(delay.delayTime);
-        sources.push(lfo);
+        /*
+          VOICES is the difference between a flanger and a chorus. One delayed
+          copy comb-filters the signal against itself; several, each with its
+          LFO at a different phase, read as a small choir. AE's advice is to set
+          Voice Phase Change to 360 / voices, which spreads them evenly.
 
-        const feedback = ctx.createGain();
-        // Signed: negative feedback inverts the comb and hollows the sound out,
-        // which is half of what a flanger is for.
-        bind(feedback.gain, ['feedback'], (r) => clampTo(r('feedback') / 100, -0.95, 0.95));
+          Only the FIRST voice carries the feedback loop — that loop is what
+          makes a flanger ring, and running one per voice would stack several
+          resonances that beat against each other into a howl.
+        */
+        const voices = Math.max(1, Math.min(8, Math.round(num(fx, 'voices', def('flange-chorus', 'voices')))));
+        const phaseDeg = clampTo(num(fx, 'phase', def('flange-chorus', 'phase')), 0, 360);
+        const stereo = hasFlag(fx, 'stereoVoices');
+        const wetSum = ctx.createGain();
+
+        for (let v = 0; v < voices; v++) {
+          const delay = ctx.createDelay(MAX_DELAY_SEC);
+          /*
+            Each voice sits at its own multiple of the base separation, so they
+            are distinct copies rather than the same copy several times over.
+            The LFO is CONNECTED to this param; a connected input sums with
+            whatever value is scheduled, so a keyframed separation moves the
+            centre each LFO sweeps around rather than fighting it.
+          */
+          const spread = 1 + v * 0.5;
+          bind(delay.delayTime, ['separation'], (r) => clampTo(baseOf(r) * spread, 0, MAX_DELAY_SEC));
+
+          const lfo = ctx.createOscillator();
+          lfo.type = lfoType(fx.wave);
+          bind(lfo.frequency, ['rate'], (r) => clampTo(r('rate'), 0.05, 10));
+          /*
+            Phase, without a phase control: OscillatorNode has none, so each
+            voice's LFO is DETUNED by a fraction of a percent instead. Over the
+            seconds a chorus is heard across, the voices drift apart exactly as
+            a phase offset would put them — and unlike a fixed offset they never
+            re-align into a single thicker voice.
+          */
+          if (v > 0) lfo.detune.value = (phaseDeg / 360) * v * 12;
+
+          const lfoDepth = ctx.createGain();
+          // HALF the base separation at full depth, so the delay can never
+          // reach zero — and derived from BOTH controls, so automating either
+          // keeps that guarantee. A delay line crossing zero clicks, and at
+          // exactly zero the feedback loop becomes a direct connection: instant
+          // runaway.
+          bind(lfoDepth.gain, ['separation', 'depth'],
+            (r) => baseOf(r) * spread * 0.5 * clampTo(r('depth') / 100, 0, 1));
+          lfo.connect(lfoDepth).connect(delay.delayTime);
+          sources.push(lfo);
+
+          node.connect(delay);
+          if (v === 0) {
+            const feedback = ctx.createGain();
+            // Signed: negative feedback inverts the comb and hollows the sound
+            // out, which is half of what a flanger is for.
+            bind(feedback.gain, ['feedback'], (r) => clampTo(r('feedback') / 100, -0.95, 0.95));
+            delay.connect(feedback).connect(delay);
+          }
+
+          // Each voice contributes 1/n, so adding voices thickens the sound
+          // without making it louder.
+          const voiceGain = ctx.createGain();
+          voiceGain.gain.value = 1 / voices;
+
+          if (stereo && voices > 1) {
+            // AE's Stereo Voices: alternate them left and right across the
+            // image, which is what turns a thicker mono voice into a wide one.
+            const pan = ctx.createStereoPanner?.bind(ctx);
+            if (pan) {
+              const p = pan();
+              p.pan.value = v % 2 === 0 ? -0.7 : 0.7;
+              delay.connect(voiceGain).connect(p).connect(wetSum);
+              continue;
+            }
+          }
+          delay.connect(voiceGain).connect(wetSum);
+        }
+
         const dry = ctx.createGain();
         bind(dry.gain, ['mix'], (r) => 1 - clampTo(r('mix') / 100, 0, 1));
         const wet = ctx.createGain();
-        bind(wet.gain, ['mix'], (r) => clampTo(r('mix') / 100, 0, 1));
+        // Invert Phase emphasises the highs rather than the lows, by flipping
+        // the wet path before it is summed against the dry one.
+        const sign = hasFlag(fx, 'invertPhase') ? -1 : 1;
+        bind(wet.gain, ['mix'], (r) => sign * clampTo(r('mix') / 100, 0, 1));
         const sum = ctx.createGain();
 
         node.connect(dry).connect(sum);
-        node.connect(delay);
-        delay.connect(feedback).connect(delay);
-        delay.connect(wet).connect(sum);
+        wetSum.connect(wet).connect(sum);
         node = sum;
         break;
       }
@@ -606,21 +1026,56 @@ export function connectAudioEffects(
           untouched. Placing it in the chain at all (rather than beside it) is
           what lets a later EQ or reverb treat the tone along with the layer.
         */
-        const osc = ctx.createOscillator();
-        osc.type = fx.wave ?? 'sine';
-        // A keyframed frequency is a SWEEP, and the ramp scheduler is what makes
-        // it one: assigning `.value` per frame would step the pitch once per
-        // render quantum, which is the zipper noise `audioParams` exists to
-        // avoid — audible here as a staircase rather than a glide.
-        bind(osc.frequency, ['frequency'], (r) => clampTo(r('frequency'), 20, 20000));
-        const amp = ctx.createGain();
-        // dB → linear INSIDE the derivation, so an animated Level interpolates
-        // in decibels (which is how a fade is heard) rather than in amplitude.
-        bind(amp.gain, ['level'], (r) => dbToGain(clampTo(r('level'), -60, 0)));
         const sum = ctx.createGain();
         node.connect(sum);
-        osc.connect(amp).connect(sum);
-        sources.push(osc);
+
+        const amp = ctx.createGain();
+        // dB -> linear INSIDE the derivation, so an animated Level interpolates
+        // in decibels (which is how a fade is heard) rather than in amplitude.
+        bind(amp.gain, ['level'], (r) => dbToGain(clampTo(r('level'), -60, 0)));
+        amp.connect(sum);
+
+        if (fx.wave === 'white-noise') {
+          /*
+            Noise is a looping BUFFER, not an oscillator — so the frequency
+            controls have nothing to act on and are ignored here rather than
+            pretended at. Seeded from the effect id, so two noise generators in
+            one project differ and each is identical across renders.
+          */
+          const src = ctx.createBufferSource();
+          src.buffer = noiseBuffer(ctx, hashId(fx.id));
+          src.loop = true;
+          src.connect(amp);
+          sources.push(src);
+        } else {
+          /*
+            UP TO FIVE tones, as AE has, so the effect can make a chord. A tone
+            whose frequency is 0 is off — AE's own convention — and builds no
+            oscillator at all, which is what keeps a single-tone project
+            building the single-tone graph it always did.
+
+            Each voice is divided by the number sounding, because five
+            oscillators at full level sum to five times the amplitude and clip.
+            AE asks the user to do this arithmetic ("use a Level no greater
+            than 100 divided by the number of frequencies"); doing it here means
+            adding a tone cannot silently distort the layer.
+          */
+          const keys = ['frequency', 'frequency2', 'frequency3', 'frequency4', 'frequency5'];
+          const live = keys.filter((k) => num(fx, k, def('tone', k)) >= 20);
+          for (const key of live) {
+            const osc = ctx.createOscillator();
+            osc.type = lfoType(fx.wave);
+            // A keyframed frequency is a SWEEP, and the ramp scheduler is what
+            // makes it one: assigning `.value` per frame would step the pitch
+            // once per render quantum, which is the zipper noise `audioParams`
+            // exists to avoid — audible here as a staircase, not a glide.
+            bind(osc.frequency, [key], (r) => clampTo(r(key), 20, 20000));
+            const share = ctx.createGain();
+            share.gain.value = 1 / live.length;
+            osc.connect(share).connect(amp);
+            sources.push(osc);
+          }
+        }
         node = sum;
         break;
       }
@@ -643,7 +1098,7 @@ export function connectAudioEffects(
         // the pair would make Depth a volume control at one end of its travel.
         bind(vca.gain, ['depth'], (r) => 1 - clampTo(r('depth') / 100, 0, 1));
         const lfo = ctx.createOscillator();
-        lfo.type = fx.wave ?? 'sine';
+        lfo.type = lfoType(fx.wave);
         bind(lfo.frequency, ['rate'], (r) => clampTo(r('rate'), 0.1, 5000));
         const lfoDepth = ctx.createGain();
         bind(lfoDepth.gain, ['depth'], (r) => clampTo(r('depth') / 100, 0, 1));
@@ -651,6 +1106,33 @@ export function connectAudioEffects(
         sources.push(lfo);
 
         node = node.connect(vca);
+
+        /*
+          FREQUENCY modulation — AE's "Modulation Depth", as distinct from the
+          amplitude modulation above. Vibrato is a delay line whose length an
+          LFO moves: shortening the delay pulls the samples past faster and the
+          pitch rises, lengthening it drops. Built only when asked, so the
+          default Modulator is exactly the VCA it always was.
+        */
+        const fmDepth = clampTo(num(fx, 'fmDepth', def('modulator', 'fmDepth')), 0, 100) / 100;
+        const fmAnimated = automation
+          ? isEffectParamAnimated(automation.nodeId, fx.id, 'fmDepth')
+          : false;
+        if (fmDepth > 0 || fmAnimated) {
+          const vibrato = ctx.createDelay(FM_BASE_SEC * 2);
+          // Centred on a few milliseconds so the sweep never reaches zero, the
+          // same guarantee the flanger's depth derivation makes.
+          vibrato.delayTime.value = FM_BASE_SEC;
+          const fmLfo = ctx.createOscillator();
+          fmLfo.type = lfoType(fx.wave);
+          bind(fmLfo.frequency, ['rate'], (r) => clampTo(r('rate'), 0.1, 5000));
+          const fmGain = ctx.createGain();
+          bind(fmGain.gain, ['fmDepth'],
+            (r) => FM_BASE_SEC * 0.9 * clampTo(r('fmDepth') / 100, 0, 1));
+          fmLfo.connect(fmGain).connect(vibrato.delayTime);
+          sources.push(fmLfo);
+          node = node.connect(vibrato);
+        }
         break;
       }
       case 'stereo-mixer': {
@@ -696,15 +1178,169 @@ export function connectAudioEffects(
         split.connect(leg('rightLevel', 'rightPan', 'l'), 1).connect(merge, 0, 0);
         split.connect(leg('rightLevel', 'rightPan', 'r'), 1).connect(merge, 0, 1);
         node = merge;
+        if (hasFlag(fx, 'invertPhase')) {
+          // Flip BOTH channels. The point is not to change this signal — an
+          // inverted stereo pair sounds the same alone — but to stop it
+          // cancelling against another sound at the same frequency.
+          const flip = ctx.createGain();
+          flip.gain.value = -1;
+          node = node.connect(flip);
+        }
+        break;
+      }
+      case 'compressor': {
+        /*
+          `DynamicsCompressorNode` is a real feed-forward compressor with the
+          same five controls AE exposes, so this is a wiring job rather than a
+          DSP one. Makeup is a gain after it; Output Limit is a SECOND
+          compressor at a high ratio and a fast attack, which is what a limiter
+          is — a compressor whose ratio is steep enough that nothing gets past.
+
+          AE's **Auto Release** is deliberately absent. It is program-dependent
+          — the release time follows the material — and Web Audio's compressor
+          exposes no hook for that. A control labelled Auto Release that quietly
+          picked a fixed number would be worse than not offering it: the user
+          would believe the release was being handled.
+        */
+        const comp = ctx.createDynamicsCompressor();
+        bind(comp.threshold, ['threshold'], (r) => clampTo(r('threshold'), -100, 0));
+        bind(comp.ratio, ['ratio'], (r) => clampTo(r('ratio'), 1, 20));
+        bind(comp.knee, ['knee'], (r) => clampTo(r('knee'), 0, 40));
+        // The node takes SECONDS; every control here is in milliseconds,
+        // converted inside the derivation so an animated attack stays correct
+        // at every sampled point.
+        bind(comp.attack, ['attack'], (r) => clampTo(r('attack') / 1000, 0, 1));
+        bind(comp.release, ['release'], (r) => clampTo(r('release') / 1000, 0, 1));
+
+        const makeup = ctx.createGain();
+        bind(makeup.gain, ['makeupGain'], (r) => dbToGain(clampTo(r('makeupGain'), -30, 30)));
+
+        node = node.connect(comp).connect(makeup);
+
+        // Only built when it would do something. At 0 dB the limiter is
+        // inaudible, and an always-present second compressor would change the
+        // sound of every Compressor instance for no reason.
+        const limitDb = num(fx, 'outputLimit', def('compressor', 'outputLimit'));
+        const limitAnimated = automation
+          ? isEffectParamAnimated(automation.nodeId, fx.id, 'outputLimit')
+          : false;
+        if (limitDb < 0 || limitAnimated) {
+          const limiter = ctx.createDynamicsCompressor();
+          bind(limiter.threshold, ['outputLimit'], (r) => clampTo(r('outputLimit'), -100, 0));
+          limiter.ratio.value = 20;
+          limiter.knee.value = 0;
+          limiter.attack.value = 0.001;
+          limiter.release.value = 0.05;
+          node = node.connect(limiter);
+        }
+        break;
+      }
+      case 'distortion': {
+        /*
+          A `WaveShaper` is exactly the right node: distortion is a memoryless
+          transfer function, so every curve AE offers is a lookup table, and
+          bit-depth reduction is the same kind of thing — quantising the output
+          of that table.
+
+          AE's **Downsample** is absent, for the same reason Auto Release is:
+          re-sampling needs state between blocks, which means a worklet. A
+          low-pass standing in for it would sound duller rather than crunchier
+          — the opposite character — so it is not offered.
+        */
+        const drive = clampTo(num(fx, 'drive', def('distortion', 'drive')), 0, 100);
+        const bits = Math.round(clampTo(num(fx, 'resolution', def('distortion', 'resolution')), 1, 16));
+        const shaper = ctx.createWaveShaper();
+        /*
+          The curve depends on `drive` and `resolution`, neither of which is an
+          AudioParam — it is a table handed to the node, exactly as the reverb's
+          IR is a buffer. Both are therefore static, and Mix is the control that
+          rides automation here.
+        */
+        shaper.curve = distortionCurve(fx.curve ?? 'soft-clip', drive, bits);
+        shaper.oversample = '4x';
+
+        // Pre-gain into the shaper is what "overdriving" means.
+        const pre = ctx.createGain();
+        bind(pre.gain, ['gain'], (r) => clampTo(r('gain'), 0, 300) / 25);
+        const post = ctx.createGain();
+        bind(post.gain, ['volume'], (r) => clampTo(r('volume'), 0, 100) / 11);
+
+        const dry = ctx.createGain();
+        bind(dry.gain, ['mix'], (r) => 1 - clampTo(r('mix') / 100, 0, 1));
+        const wet = ctx.createGain();
+        bind(wet.gain, ['mix'], (r) => clampTo(r('mix') / 100, 0, 1));
+        const sum = ctx.createGain();
+
+        node.connect(dry).connect(sum);
+        node.connect(pre).connect(shaper).connect(post).connect(wet).connect(sum);
+        node = sum;
+        break;
+      }
+      case 'de-esser': {
+        /*
+          A split-band compressor, which is what a de-esser is: compress ONLY
+          the sibilance and leave the rest of the voice untouched.
+
+          The split is done by SUBTRACTION rather than by a pair of filters:
+
+              out = (input − band) + compress(band)
+
+          `input − band` is the voice with the sibilance taken out, and adding
+          the compressed band puts it back quieter. Two complementary filters
+          would not sum back to the original — their phase responses differ —
+          so a voice with the de-esser doing nothing would still sound filtered.
+          Subtracting the SAME filter's output cannot have that problem.
+        */
+        const band = ctx.createBiquadFilter();
+        band.type = 'bandpass';
+        bind(band.frequency, ['frequency'], (r) => clampTo(r('frequency'), 200, 20000));
+        // Q is centre / width, so it watches BOTH controls: a keyframed
+        // frequency with a fixed Q would silently widen the band as it swept.
+        bind(band.Q, ['frequency', 'bandwidth'],
+          (r) => clampTo(r('frequency') / Math.max(100, r('bandwidth')), 0.1, 40));
+
+        const squash = ctx.createDynamicsCompressor();
+        bind(squash.threshold, ['threshold'], (r) => clampTo(r('threshold'), -100, 0));
+        bind(squash.attack, ['attack'], (r) => clampTo(r('attack') / 1000, 0, 1));
+        bind(squash.release, ['release'], (r) => clampTo(r('release') / 1000, 0, 1));
+        // Fixed, and high: a de-esser is meant to clamp the band hard while the
+        // sibilant lasts. Softening that is what Threshold is for.
+        squash.ratio.value = 8;
+        squash.knee.value = 3;
+
+        const sum = ctx.createGain();
+        node.connect(band);
+        band.connect(squash).connect(sum);
+
+        if (!hasFlag(fx, 'sibilanceOnly')) {
+          // The complement: everything, minus the band being treated.
+          const invert = ctx.createGain();
+          invert.gain.value = -1;
+          node.connect(sum);
+          band.connect(invert).connect(sum);
+        }
+        node = sum;
         break;
       }
       case 'backwards':
         /*
-          Deliberately nothing. Backwards reverses the SOURCE BUFFER, which
-          happens before the graph exists — see `reverseBuffer` and
-          `backwardsOffset`. Listed here rather than left to the default so a
-          reader does not conclude it was forgotten.
+          Almost nothing. Backwards reverses the SOURCE BUFFER, which happens
+          before the graph exists — see `reverseBuffer` and `backwardsOffset`.
+          Listed here rather than left to the default so a reader does not
+          conclude it was forgotten.
+
+          Its one graph-side option is AE's Swap Channels, which IS a routing
+          question and so belongs here.
         */
+        if (hasFlag(fx, 'swapChannels')) {
+          const split = ctx.createChannelSplitter(2);
+          const merge = ctx.createChannelMerger(2);
+          node.connect(split);
+          // Left in -> right out, right in -> left out. The crossing IS the effect.
+          split.connect(merge, 0, 1);
+          split.connect(merge, 1, 0);
+          node = merge;
+        }
         break;
       default:
         // An unknown type passes the signal through untouched. A stored project

@@ -70,7 +70,7 @@ rediscovered in git history and believed a second time.
 | Canvas tools | 22 | `packages/workspace/src/tools/builtin.ts` |
 | AI tools | 65 | `packages/ai-tools/src/tools/{read,write,craft,compose}.ts` |
 | Export formats | 18 | `videoSink.ts` → `VideoFormat` + `exportManager.ts` → `ExportFormat` |
-| Stores | 61 | `src/stores/*.ts` |
+| Stores | 64 | `src/stores/*.ts` |
 | Packages | 13 | `packages/*` |
 
 <!-- /FEATURE-COUNTS -->
@@ -91,7 +91,7 @@ style would have left this table wrong with every test still green.
 ```
 Electron main ── IPC ──▶ renderer (React 19 + Vite)
                           │
-                          ├── src/stores/*        61 Zustand stores
+                          ├── src/stores/*        64 Zustand stores
                           ├── src/core/*          41 subsystems (effects, scene, rig, text…)
                           └── packages/*          13 workspace packages
                                 ├── scene       scene graph + components
@@ -386,8 +386,72 @@ included), effect-scoped masking, and protected time regions. Track mattes
 **continuous rasterization** (`continuousRaster.ts` → `buildSnapshot` →
 `MotionRendererBackend` → `AppTextureProvider`, control in `PrecompControl.tsx`).
 
+**Pre-compose (AE, 2026-09-10)** — Layer ▸ Pre-compose… / Ctrl+Shift+C opens
+AE's dialog (`layout/Composition/PrecomposeDialog.tsx`) and makes a REAL,
+reusable composition plus a comp instance in the layers' stack slot
+(`core/composition/precompose.ts`, one undo step). *Move all attributes*: the
+layers move in with clips and keyframes, same-size comp, nothing moves on
+screen; optional trim to the layers' span. *Leave all attributes*: one
+footage/image/SVG/solid layer keeps its id, bar and attributes and becomes the
+instance, only its content moves into a layer-sized comp — refused (with the
+reason shown) for 3D, parented children, deformers and time-stretched layers,
+which a placed comp cannot yet reproduce. The assistant's `create_precomp`
+makes the same real composition (the older in-place precomp GROUP,
+`precomposeSelected`, is no longer reachable from the UI or the AI).
+**Navigation**: double-click a precomp (canvas or timeline) opens it; the
+Composition Navigator bar walks back (`compNavigation.ts`,
+`CompositionNavigator.tsx`), Shift+Esc = previous comp, playhead mapped through
+the layer. **Nested audio**: a placed comp's audio plays in its host, cut to the
+instance bar (`audioScene.ts` `placeNestedVoices`); a time-remapped or
+stretched comp layer plays it varispeed along the remap (reverse included, held
+frames silent).
+
+**Mini-Flowchart (Tab)** — AE's transient comp-network popup
+(`MiniFlowchart.tsx`, `compNetwork.ts`): comps this one is placed in on the
+left, comps placed in it on the right, "(n)" for a comp used n times; arrows
+move, Enter opens, S sorts, Esc closes. Because Tab is AE's key for it, the
+focus modes moved to `` ` `` (Viewport + Timeline) and `` Shift+` `` (Viewport
+only); Focus Workspace has no default key.
+
+**Layer panel** (`layout/LayerViewer/`) — one layer alone, before its
+transform, at its own size (`buildSnapshot` `layerView`), with a layer-time
+ruler whose In/Out brackets trim the bar, AE's Render checkbox, View ▸ Masks /
+Anchor Point, and mask drawing and reshaping: Select, Rectangle, Ellipse and
+Pen tools, and the picked mask's Mode / Inverted / Delete
+(`LayerMaskEditor.tsx`, `maskEditing.ts`). It is also where AE paints and
+rotos: with Paint, Erase or Roto (the toolbar's, or the panel's own buttons)
+strokes go straight onto the layer in its own space — no transform to undo —
+using the same Tool Options / Paint panel settings and the same segmenter as
+the comp viewer (`LayerPaintSurface.tsx`, `layerPaint.ts`); Roto needs footage
+(video or image). Opened by double-click per the two "Opening Layers with
+Double-Click" preferences (Customize), Alt for the other; with a paint or Roto
+tool active a double-click always opens the Layer panel (the comp viewer's Roto
+overlay holds a click for one double-click interval so the pair can open it).
+
+**Composition layers** honour their anchor point and motion blur like any layer
+(`buildPrecompContainer`; the isolated composite re-bases each shutter sample
+on its offscreen), and a sealed one can be a **3D layer**: its comp renders
+flat, as a card, whose four corners are projected through the host camera
+(`quad3d`) and drawn with a perspective homography, depth-sorted with the
+other 3D layers (`precomp.flat` in CompositionPass). The card takes **light**
+(Accepts Lights, as a per-quad gain on its tint), **blurs** through its own
+perspective — one quad per shutter sample, re-projected through the sub-frame
+camera, so a turning card smears as the trapezoid it is — and can hold a comp
+with **its own 3D camera** inside: that comp renders its 3D frame flat into the
+card offscreen through its own camera, whose projection CompositionPass lifts
+onto the card. Its light gain is folded into the composite tint, which the
+isolated path used to force to white — a lit card looked unlit. Shadows stay
+off a card in both forms (the shadow-map pass and the projected caster copy):
+it composites through its own offscreen rather than the depth pass, and a
+projected copy of a composition draws nothing through that path.
+
 ### Motion blur
 Shutter angle, shutter **phase**, and **adaptive sampling** — all three.
+Shutter samples read the layer's clip map WITHOUT its frame rounding
+(`subRemapOf`): rounded, every sub-frame sample landed on the same instant, so
+a layer with a bar — which is every layer in the app — accumulated N copies of
+one pose and did not blur at all (fixed 2026-09-12; the unit tests missed it
+because their scenes have no bars).
 **Camera moves blur too** (2026-09-01): an animated active camera extends the
 motion gate to every 3D layer and each sub-frame sample projects through the
 camera's pose at that sample's comp time — a static card under a keyframed pan

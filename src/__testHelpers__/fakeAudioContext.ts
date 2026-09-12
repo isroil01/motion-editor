@@ -95,7 +95,23 @@ export function fakeAudioContext(): { ctx: BaseAudioContext; created: FakeNode[]
     // `start`/`stop` are no-ops that still EXIST: the code under test hands
     // these back for the caller to schedule, and a fake without them would
     // throw in the one test that checks the caller does.
-    createOscillator: () => mk('osc', { type: '', frequency: fakeParam(), start() {}, stop() {} }),
+    createOscillator: () => mk('osc', {
+      type: '', frequency: fakeParam(), detune: fakeParam(0), start() {}, stop() {},
+    }),
+    // A looping buffer source — Tone's White Noise waveform plays one, and so
+    // does anything else that needs a generator that is not an oscillator.
+    createBufferSource: () => mk('bufferSource', {
+      buffer: null, loop: false, playbackRate: fakeParam(1), start() {}, stop() {},
+    }),
+    // AE 26.3's Compressor and De-esser are both built on this node.
+    createDynamicsCompressor: () => mk('compressor', {
+      threshold: fakeParam(-24), ratio: fakeParam(12), knee: fakeParam(30),
+      attack: fakeParam(0.003), release: fakeParam(0.25),
+    }),
+    // Distortion is a lookup table handed to this node.
+    createWaveShaper: () => mk('shaper', { curve: null, oversample: 'none' }),
+    // Per-layer Pan, and Flange & Chorus's Stereo Voices.
+    createStereoPanner: () => mk('panner', { pan: fakeParam(0) }),
     createChannelSplitter: (n: number) => mk('splitter', { channels: n }),
     createChannelMerger: (n: number) => mk('merger', { channels: n }),
     createBuffer: (channels: number, length: number, rate: number) => {

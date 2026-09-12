@@ -87,9 +87,20 @@ export function buildTimelineMarkerCommands(): ReadonlyArray<Command> {
       id: TIMELINE_ADD_MARKER_COMMAND,
       label: 'Add Marker at Playhead',
       description:
-        'Drop a composition marker on the current frame. With the timeline focused the chord is M; '
+        'Drop a composition marker on the current frame. With the timeline focused the chord is M, '
+        + 'or Numpad * anywhere — including mid-playback, which is how you tap markers to a beat; '
         + 'drag the chip to move it, double-click to name and colour it.',
       icon: 'marker',
+      /**
+       * AE's Numpad `*`, and the reason it is bound GLOBALLY rather than to the
+       * focused timeline: the gesture it exists for is tapping in time with the
+       * music while a preview plays, and during playback focus is wherever the
+       * user last clicked. A chord that only works with the timeline focused
+       * would drop markers for some users and silently do nothing for others.
+       *
+       * `M` keeps its timeline-scoped binding; this is an addition, not a move.
+       */
+      shortcut: { key: 'Numpad*' },
       execute: () => addCompMarkerAtPlayhead(),
     },
     {
