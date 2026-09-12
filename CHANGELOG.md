@@ -3,6 +3,46 @@
 Newest first. Each entry is what a person opening the app after an update
 would want to know; the engine-level detail is in `ROADMAP.md`.
 
+## 0.8.2 — 2026-09-12
+
+Sound, brought up to the level of the rest of the app. The audio engine was
+already strong; almost none of it had a front door.
+
+- **An Audio panel that actually mixes** (Ctrl+4): a proper VU with clipping
+  indicators and peak hold, and two faders that change the **selected layer's**
+  level and pan — not just another meter. Units in decibels or percent, and a
+  slider minimum, as After Effects has.
+- **Levels you can keyframe from anywhere**: an audio layer's Level now has a
+  stopwatch in the inspector like every other property. Layers made before this
+  keep the exact loudness they had. **Pan** is new, and keyframeable too.
+- **Fade In and Fade Out** — one click each, written as ordinary keyframes you
+  can reshape afterwards, and they leave an existing duck alone.
+- **Noise Gate**: pull a layer down wherever it is quieter than a threshold —
+  room tone between phrases, hiss under a take.
+- **Four new audio effects**, matching After Effects 26.3: **Compressor**,
+  **Distortion** (six characters plus a bitcrusher), **De-esser** for taming
+  harsh "s" sounds, and the Noise Gate above. Parametric EQ now has three
+  bands, Tone plays five notes and white noise, Flange & Chorus has real
+  multiple voices, and Reverb gained Diffusion and Brightness.
+- **Audio Spectrum and Audio Waveform can follow a path** — including a
+  circle, so the spectrum-ring-around-a-logo look is finally possible. Both
+  also gained side options, softness, hue interpolation and an adjustable
+  analysis window. *The Audio Waveform effect had never drawn anything at all;
+  it does now.*
+- **A speaker switch on every layer** in the timeline, beside the eye, and
+  Alt-click a solo switch to solo just that layer.
+- **Audio-only preview**: Numpad `.` plays the sound from the playhead in real
+  time without drawing the picture, so a long composition auditions at true
+  speed. Numpad `*` drops a marker while it plays — tap along to the music.
+- **`L` shows a layer's audio levels, `LL` shows its waveform**, on the same
+  time axis as the keyframes above them. (`L` previously did nothing.)
+- **Preferences ▸ Audio**: choose which device previews play through, and trade
+  latency for stability on a busy machine.
+
+Also in this release: composition navigation and Pre-compose, the Layer
+viewer, the mini-flowchart, and fixes to mask keyframe timing, motion-blur
+frame rounding and projected shadows.
+
 ## 0.8.1 — 2026-09-10
 
 Everything in 0.8.0, plus a refreshed interface:
